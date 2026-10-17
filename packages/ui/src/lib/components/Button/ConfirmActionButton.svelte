@@ -1,0 +1,141 @@
+<script lang="ts">
+  import { computePosition, offset, flip, shift, autoUpdate } from '@floating-ui/dom';
+  import { Button, type ConfirmActionButtonProps } from './';
+  import { onDestroy } from 'svelte';
+
+  let {
+    trigger,
+    actionMessage,
+    actionButtonText = 'Confirm delete',
+    action,
+    isLoading,
+    positioning = { placement: 'bottom' },
+    portal = null,
+    ...restProps
+  }: ConfirmActionButtonProps = $props();
+
+  let triggerElement: HTMLElement | null = null;
+  let popoverElement = $state<HTMLElement | null>(null);
+  let portalContainer: HTMLDivElement | null = null;
+  let isShowingConfirm = $state(false);
+  let floatingStyles = $state('');
+  let cleanupAutoUpdate: (() => void) | null = null;
+
+  // Handle portal mounting
+  $effect(() => {
+    if (isShowingConfirm && portal && popoverElement) {
+      const targetEl = typeof portal === 'string' ? document.querySelector(portal) : null;
+      if (targetEl && popoverElement.parentNode !== targetEl) {
+        // Create a container for the portal if needed
+        if (!portalContainer) {
+          portalContainer = document.createElement('div');
+          portalContainer.style.display = 'contents';
+        }
+        portalContainer.appendChild(popoverElement);
+        targetEl.appendChild(portalContainer);
+      }
+    }
+  });
+
+  // Set up autoUpdate when popover is shown
+  $effect(() => {
+    if (isShowingConfirm && triggerElement && popoverElement) {
+      cleanupAutoUpdate = autoUpdate(triggerElement, popoverElement, updatePosition);
+    }
+
+    return () => {
+      if (cleanupAutoUpdate) {
+        cleanupAutoUpdate();
+        cleanupAutoUpdate = null;
+      }
+    };
+  });
+
+  onDestroy(() => {
+    if (portalContainer?.parentNode) {
+      portalContainer.parentNode.removeChild(portalContainer);
+    }
+    if (cleanupAutoUpdate) {
+      cleanupAutoUpdate();
+    }
+  });
+
+  const toggleShowConfirm = async () => {
+    isShowingConfirm = true;
+  };
+
+  const triggerProps = {
+    onclick: () => {
+      toggleShowConfirm();
+    }
+  };
+
+  function updatePosition() {
+    if (!triggerElement || !popoverElement) {
+      return;
+    }
+
+    computePosition(triggerElement, popoverElement, {
+      placement: positioning?.placement,
+      middleware: [
+        offset(({ rects }) => -rects.reference.height / 2 - rects.floating.height / 2),
+        flip({ boundary: document.body }),
+        shift({ padding: 8, crossAxis: true, boundary: document.body })
+      ]
+    })
+      .then(({ x, y, strategy }) => {
+        floatingStyles = `position: ${strategy}; left: ${x}px; top: ${y}px;`;
+      })
+      .catch((error) => {
+        console.error('Error in computePosition:', error);
+      });
+  }
+
+  const handleGlobalClick = (e: MouseEvent) => {
+    if (isShowingConfirm && popoverElement && triggerElement) {
+      const target = e.target as Node;
+      if (!popoverElement.contains(target) && !triggerElement.contains(target)) {
+        isShowingConfirm = false;
+      }
+    }
+  };
+</script>
+
+<svelte:window onclick={handleGlobalClick} />
+
+<div class="confirmAction" bind:this={triggerElement} {...restProps}>
+  {@render trigger({ triggerProps })}
+</div>
+
+{#if isShowingConfirm}
+  <div bind:this={popoverElement} class="confirmAction__content" style={floatingStyles}>
+    {@render actionMessage()}
+    <div class="confirmAction__buttons">
+      <Button onclick={action} variant="danger" {isLoading} data-testid="confirmActionButton">
+        {actionButtonText}
+      </Button>
+      <Button onclick={() => (isShowingConfirm = false)} variant="ghost">Cancel</Button>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .confirmAction {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .confirmAction__content {
+    background-color: var(--popoverBg);
+    border-radius: var(--radius-2);
+    box-shadow: var(--shadow-1);
+    padding: 1rem;
+    z-index: 1000;
+    border: var(--borderThin);
+  }
+  .confirmAction__buttons {
+    margin-top: 0.5rem;
+    display: flex;
+    gap: 0.5rem;
+  }
+</style>

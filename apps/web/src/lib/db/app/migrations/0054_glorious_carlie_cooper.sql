@@ -1,0 +1,1 @@
+ALTER TABLE `party` ADD `active_handout` text;

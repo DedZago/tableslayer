@@ -1,0 +1,57 @@
+name: tableslayer-dev
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: containers/Dockerfile
+      target: development
+    init: true
+    pids_limit: -1
+    working_dir: /workspace
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const net = require('node:net'); Promise.all([5173, 5174, 1999].map(port => new Promise((resolve, reject) => { const socket = net.connect(port, '127.0.0.1', () => { socket.end(); resolve(); }); socket.setTimeout(2000, () => socket.destroy(new Error('Connection timed out'))); socket.on('error', reject); }))).catch(() => process.exit(1));"
+      interval: 3s
+      timeout: 5s
+      start_period: 120s
+      retries: 10
+    environment:
+      ENV_NAME: dev
+      TURSO_APP_DB_URL: file:/data/database/app.db
+      ASSET_STORAGE: local
+      LOCAL_ASSET_DIR: /data/assets
+      CLOUDFLARE_R2_BUCKET_URL: /assets
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run containers/host.sh setup first}
+      APP_API_URL: http://127.0.0.1:5174
+      PARTYKIT_INTERNAL_URL: http://127.0.0.1:1999
+      PUBLIC_PARTYKIT_HOST: ${LAN_HOST:-localhost}:1999
+      PUBLIC_PARTYKIT_PROTOCOL: ws
+      BASE_URL: http://${LAN_HOST:-localhost}:5174
+      SESSION_COOKIE_SECURE: 'false'
+      CLOUDFLARE_EMAIL_API_KEY: ''
+      STRIPE_API_KEY: ''
+      GOOGLE_CLIENT_ID: ''
+      TURNSTILE_SITE_KEY: ''
+      TURBO_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+    ports:
+      - '${BIND_ADDRESS:-127.0.0.1}:5173:5173'
+      - '${BIND_ADDRESS:-127.0.0.1}:5174:5174'
+      - '${BIND_ADDRESS:-127.0.0.1}:1999:1999'
+    volumes:
+      - .:/workspace:z
+      - dev_modules:/workspace/node_modules
+      - dev_web_modules:/workspace/apps/web/node_modules
+      - dev_docs_modules:/workspace/apps/docs/node_modules
+      - dev_ui_modules:/workspace/packages/ui/node_modules
+      - dev_stage_modules:/workspace/packages/stage/node_modules
+      - ${DATA_ROOT:?Set an absolute DATA_ROOT}/development:/data:z
+volumes:
+  dev_modules:
+  dev_web_modules:
+  dev_docs_modules:
+  dev_ui_modules:
+  dev_stage_modules:

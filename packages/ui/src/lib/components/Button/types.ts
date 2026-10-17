@@ -1,0 +1,64 @@
+import type { OffsetOptions, Placement } from '@floating-ui/dom';
+import type { Snippet } from 'svelte';
+import type { HTMLAnchorAttributes, HTMLButtonAttributes, SvelteHTMLElements } from 'svelte/elements';
+
+export type FloatingPositioning = {
+  placement?: Placement;
+  offset?: OffsetOptions;
+};
+
+export type _ButtonProps = {
+  children: Snippet;
+  /**
+   * Renders inside of a flex before the children.
+   */
+  start?: Snippet;
+  /**
+   * Renders inside of a flex after the children.
+   */
+  end?: Snippet;
+  isLoading?: boolean;
+  isDisabled?: boolean;
+  as?: keyof SvelteHTMLElements;
+  /**
+   * Size of the button.
+   * @default md
+   */
+  size?: 'sm' | 'md' | 'lg';
+  variant?: 'primary' | 'ghost' | 'danger' | 'link' | 'special';
+  href?: string;
+};
+
+export type ButtonProps = (_ButtonProps & HTMLButtonAttributes) | (_ButtonProps & HTMLAnchorAttributes);
+
+export type _IconButtonProps = {
+  children: Snippet;
+  size?: 'sm' | 'md' | 'lg';
+  variant?: 'primary' | 'ghost' | 'danger' | 'link';
+  href?: string;
+  as?: keyof SvelteHTMLElements;
+};
+
+export type IconButtonProps = (_IconButtonProps & HTMLButtonAttributes) | (_IconButtonProps & HTMLAnchorAttributes);
+
+export type ConfirmActionButtonProps = {
+  trigger: Snippet<[{ triggerProps: { onclick: (e: Event) => void } }]>;
+  actionMessage: Snippet;
+  action: (e: Event) => void;
+  actionButtonText?: string;
+  isLoading?: boolean;
+  positioning?: FloatingPositioning;
+  /**
+   * Render the popover in a portal to avoid overflow clipping.
+   * Set to 'body' or a CSS selector to enable.
+   */
+  portal?: string | null;
+};
+
+export type RadioOption = { label: string | Snippet; value: string };
+export type RadioButtonProps = {
+  options: RadioOption[];
+  variant?: 'default';
+  selected: string;
+  onSelectedChange?: (value: string) => void;
+} & SvelteHTMLElements['div'];

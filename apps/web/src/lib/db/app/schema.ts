@@ -1,0 +1,808 @@
+import type { HandoutDescriptor } from '$lib/realtime/types';
+import { sql } from 'drizzle-orm';
+import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { createInsertSchema, createSelectSchema, createUpdateSchema } from 'drizzle-zod';
+import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
+import { protectedSlugs } from '../../constants';
+
+// USERS
+// USERS
+// USERS
+
+export const VALID_USER_ROLES = ['user', 'admin'] as const;
+
+export const usersTable = sqliteTable('users', {
+  id: text('id')
+    .primaryKey()
+    .notNull()
+    .$default(() => uuidv4()),
+  name: text('name').notNull(),
+  email: text('email').unique().notNull(),
+  emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
+  passwordHash: text('password_hash'),
+  googleId: text('google_id').unique(),
+  avatarFileId: integer('avatar_file_id')
+    .references(() => filesTable.id, { onDelete: 'cascade' })
+    .notNull()
+    .default(1),
+  favoriteParty: text('favorite_party').references(() => partyTable.id, { onDelete: 'set null' }),
+  role: text('role', { enum: VALID_USER_ROLES }).notNull().default('user'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  completedChecklist: text('completed_checklist', { mode: 'json' }).$type<string[]>()
+});
+
+export type UserRole = (typeof VALID_USER_ROLES)[number];
+
+export type InsertUser = typeof usersTable.$inferInsert;
+export type SelectUser = typeof usersTable.$inferSelect;
+
+// Create base insert schema from drizzle
+const baseInsertUserSchema = createInsertSchema(usersTable);
+
+// Extend the insert schema with custom email validation
+export const insertUserSchema = baseInsertUserSchema.extend({
+  email: z.email()
+});
+
+export const selectUserSchema = createSelectSchema(usersTable);
+
+// Create base update schema from drizzle
+const baseUpdateUserSchema = createUpdateSchema(usersTable);
+
+// Extend the update schema with custom email validation
+export const updateUserSchema = baseUpdateUserSchema.extend({
+  email: z.email().optional()
+});
+
+export const filesTable = sqliteTable('files', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  location: text('location').unique().notNull()
+});
+
+// USER FILES
+// USER FILES
+// USER FILES
+
+export const userFilesTable = sqliteTable(
+  'user_files',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    fileId: integer('file_id')
+      .notNull()
+      .references(() => filesTable.id, { onDelete: 'cascade' })
+  },
+  (table) => [
+    primaryKey({ name: 'id', columns: [table.userId, table.fileId] }),
+    index('idx_user_files_user_id').on(table.userId),
+    index('idx_user_files_file_id').on(table.fileId)
+  ]
+);
+
+export type InsertUserFile = typeof userFilesTable.$inferInsert;
+export type SelectUserFile = typeof userFilesTable.$inferSelect;
+export const insertUserFileSchema = createInsertSchema(userFilesTable);
+export const selectUserFileSchema = createSelectSchema(userFilesTable);
+export const updateUserFileSchema = createUpdateSchema(userFilesTable);
+
+// SESSIONS
+// SESSIONS
+// SESSIONS
+
+export const sessionTable = sqliteTable(
+  'session',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => [index('idx_session_user_id').on(table.userId)]
+);
+
+export type InsertSession = typeof sessionTable.$inferInsert;
+export type SelectSession = typeof sessionTable.$inferSelect;
+export const insertSessionSchema = createInsertSchema(sessionTable);
+export const selectSessionSchema = createSelectSchema(sessionTable);
+export const updateSessionSchema = createUpdateSchema(sessionTable);
+
+// API KEYS
+// API KEYS
+// API KEYS
+
+export const apiKeysTable = sqliteTable(
+  'api_keys',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    keyHash: text('key_hash').notNull().unique(),
+    name: text('name').notNull(),
+    lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date())
+  },
+  (table) => [index('idx_api_keys_user_id').on(table.userId), index('idx_api_keys_key_hash').on(table.keyHash)]
+);
+
+export type InsertApiKey = typeof apiKeysTable.$inferInsert;
+export type SelectApiKey = typeof apiKeysTable.$inferSelect;
+export const insertApiKeySchema = createInsertSchema(apiKeysTable);
+export const selectApiKeySchema = createSelectSchema(apiKeysTable);
+export const updateApiKeySchema = createUpdateSchema(apiKeysTable);
+
+// EMAIL VERIFICATION CODES
+// EMAIL VERIFICATION CODES
+// EMAIL VERIFICATION CODES
+
+export const emailVerificationCodesTable = sqliteTable('email_verification_codes', {
+  id: text('id')
+    .primaryKey()
+    .notNull()
+    .$default(() => uuidv4()),
+  userId: text('user_id')
+    .notNull()
+    .unique()
+    .references(() => usersTable.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(strftime('%s', 'now') + 60 * 15)`)
+});
+
+export type InsertEmailVerificationCode = typeof emailVerificationCodesTable.$inferInsert;
+export type SelectEmailVerificationCode = typeof emailVerificationCodesTable.$inferSelect;
+export const insertEmailVerificationCodeSchema = createInsertSchema(emailVerificationCodesTable);
+export const selectEmailVerificationCodeSchema = createSelectSchema(emailVerificationCodesTable);
+export const updateEmailVerificationCodeSchema = createUpdateSchema(emailVerificationCodesTable);
+
+// RESET PASSWORD CODES
+// RESET PASSWORD CODES
+// RESET PASSWORD CODES
+
+export const resetPasswordCodesTable = sqliteTable('reset_password_codes', {
+  id: text('id')
+    .primaryKey()
+    .notNull()
+    .$default(() => uuidv4()),
+  userId: text('user_id')
+    .notNull()
+    .unique()
+    .references(() => usersTable.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  code: text('code').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(strftime('%s', 'now') + 60 * 15)`)
+});
+
+export type InsertResetPasswordCode = typeof resetPasswordCodesTable.$inferInsert;
+export type SelectResetPasswordCode = typeof resetPasswordCodesTable.$inferSelect;
+export const insertResetPasswordCodeSchema = createInsertSchema(resetPasswordCodesTable);
+export const selectResetPasswordCodeSchema = createSelectSchema(resetPasswordCodesTable);
+export const updateResetPasswordCodeSchema = createUpdateSchema(resetPasswordCodesTable);
+
+// PARTY
+// PARTY
+// PARTY
+//
+export const VALID_PARTY_PLANS = ['free', 'monthly', 'yearly', 'lifetime'] as const;
+
+export const partyTable = sqliteTable(
+  'party',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    name: text('name').notNull().unique(),
+    slug: text('slug').notNull().unique(),
+    avatarFileId: integer('avatar_file_id')
+      .references(() => filesTable.id, { onDelete: 'cascade' })
+      .notNull()
+      .default(1),
+    pauseScreenFileId: integer('pause_screen_file_id')
+      .references(() => filesTable.id, { onDelete: 'cascade' })
+      .notNull()
+      .default(1),
+    activeSceneId: text('active_scene_id'),
+    activeHandout: text('active_handout', { mode: 'json' }).$type<HandoutDescriptor>(),
+    gameSessionIsPaused: integer('is_paused', { mode: 'boolean' }).notNull().default(false),
+    defaultTvSize: integer('tv_size').notNull().default(40),
+    defaultGridType: integer('default_grid_type').notNull().default(0),
+    defaultDisplaySizeX: real('default_display_size_x').notNull().default(34.86),
+    defaultDisplaySizeY: real('default_display_size_y').notNull().default(19.6),
+    defaultDisplayResolutionX: integer('default_resolution_x').notNull().default(1920),
+    defaultDisplayResolutionY: integer('default_resolution_y').notNull().default(1080),
+    defaultDisplayPaddingX: integer('default_display_padding_x').notNull().default(16),
+    defaultDisplayPaddingY: integer('default_display_padding_y').notNull().default(16),
+    defaultGridSpacing: integer('default_grid_spacing').notNull().default(1),
+    defaultLineThickness: integer('default_line_thickness').notNull().default(1),
+    planNextBillingDate: integer('plan_next_billing_date', { mode: 'timestamp' }),
+    planExpirationDate: integer('plan_expiration_date', { mode: 'timestamp' }),
+    planStatus: text('plan_status'),
+    lemonSqueezyCustomerId: integer('lemon_squeezy_customer_id'),
+    stripeCustomerId: text('stripe_customer_id'),
+    plan: text('plan', { enum: VALID_PARTY_PLANS }).notNull().default('free'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date())
+  },
+  (table) => [
+    check(
+      'protected_slug_check',
+      sql.raw(`${table.slug.name} NOT IN (${protectedSlugs.map((slug) => `'${slug}'`).join(', ')})`)
+    ),
+    index('idx_party_slug').on(table.slug)
+  ]
+);
+
+export type PartyPlan = (typeof VALID_PARTY_PLANS)[number];
+
+export type InsertParty = typeof partyTable.$inferInsert;
+export type SelectParty = typeof partyTable.$inferSelect;
+export const selectPartySchema = createSelectSchema(partyTable);
+export const insertPartySchema = createInsertSchema(partyTable);
+export const updatePartySchema = createUpdateSchema(partyTable);
+
+// PARTY MEMBERS
+// PARTY MEMBERS
+// PARTY MEMBERS
+//
+export const VALID_PARTY_ROLES = ['admin', 'editor', 'viewer'] as const;
+
+export const partyMemberTable = sqliteTable(
+  'party_member',
+  {
+    partyId: text('party_id')
+      .notNull()
+      .references(() => partyTable.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: VALID_PARTY_ROLES }).notNull()
+  },
+  (table) => [
+    primaryKey({ name: 'id', columns: [table.partyId, table.userId] }),
+    index('idx_party_member_party_id').on(table.partyId),
+    index('idx_party_member_user_id').on(table.userId),
+    index('idx_party_member_party_role').on(table.partyId, table.role)
+  ]
+);
+
+export type PartyRole = (typeof VALID_PARTY_ROLES)[number];
+
+export type InsertPartyMember = typeof partyMemberTable.$inferInsert;
+export type SelectPartyMember = typeof partyMemberTable.$inferSelect;
+export const insertPartyMemberSchema = createInsertSchema(partyMemberTable);
+export const selectPartyMemberSchema = createSelectSchema(partyMemberTable);
+export const updatePartyMemberSchema = createUpdateSchema(partyMemberTable);
+
+// PARTY INVITES
+// PARTY INVITES
+// PARTY INVITES
+
+export const partyInviteTable = sqliteTable(
+  'party_invite',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    partyId: text('party_id')
+      .notNull()
+      .references(() => partyTable.id, { onDelete: 'cascade' }),
+    invitedBy: text('invited_by')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    code: text('code').notNull().unique(),
+    email: text('email').notNull(),
+    role: text('role', { enum: VALID_PARTY_ROLES }).notNull()
+  },
+  (table) => [
+    index('idx_party_invite_party_id').on(table.partyId),
+    index('idx_party_invite_email').on(table.email),
+    index('idx_party_invite_code').on(table.code)
+  ]
+);
+
+export type InsertPartyInvite = typeof partyInviteTable.$inferInsert;
+export type SelectPartyInvite = typeof partyInviteTable.$inferSelect;
+export const insertPartyInviteSchema = createInsertSchema(partyInviteTable);
+export const selectPartyInviteSchema = createSelectSchema(partyInviteTable);
+export const updatePartyInviteSchema = createUpdateSchema(partyInviteTable);
+
+// GAME SESSION
+// GAME SESSION
+// GAME SESSION
+
+export const gameSessionTable = sqliteTable(
+  'game_session',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    partyId: text('party_id')
+      .notNull()
+      .references(() => partyTable.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    lastUpdated: integer('last_updated', { mode: 'timestamp' }).$defaultFn(() => new Date())
+  },
+  (table) => [
+    uniqueIndex('unique_party_name').on(table.partyId, table.slug),
+    index('idx_game_session_party_id').on(table.partyId),
+    index('idx_game_session_last_updated').on(table.lastUpdated),
+    index('idx_game_session_slug').on(table.slug)
+  ]
+);
+
+export type SelectGameSession = typeof gameSessionTable.$inferSelect;
+export type InsertGameSession = typeof gameSessionTable.$inferInsert;
+export const insertGameSessionSchema = createInsertSchema(gameSessionTable);
+export const selectGameSessionSchema = createSelectSchema(gameSessionTable);
+export const updateGameSessionSchema = createUpdateSchema(gameSessionTable);
+
+// SCENES
+// SCENES
+// SCENES
+
+export const sceneTable = sqliteTable(
+  'scene',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    gameSessionId: text('session_id')
+      .references(() => gameSessionTable.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: text('name').notNull().default('New Scene'),
+    order: integer('order').notNull(),
+    backgroundColor: text('background_color').notNull().default('#0b0b0c'),
+    displayPaddingX: integer('display_padding_x').notNull().default(16),
+    displayPaddingY: integer('display_padding_y').notNull().default(16),
+    displaySizeX: real('display_size_x').notNull().default(34.86),
+    displaySizeY: real('display_size_y').notNull().default(19.6),
+    displayResolutionX: integer('display_resolution_x').notNull().default(1920),
+    displayResolutionY: integer('display_resolution_y').notNull().default(1080),
+    fogOfWarUrl: text('fog_of_war_url'),
+    fogOfWarMask: text('fog_of_war_mask'), // Base64-encoded RLE mask data
+    fogOfWarRooms: text('fog_of_war_rooms'), // JSON-encoded FogRoom[] (polygon fog rooms)
+    fogOfWarColor: text('fog_of_war_color').notNull().default('#626262'),
+    fogOfWarOpacityDm: real('fog_of_war_opacity_dm').notNull().default(0.75),
+    fogOfWarOpacityPlayer: real('fog_of_war_opacity_player').notNull().default(0.9),
+    mapLocation: text('map_location'),
+    mapThumbLocation: text('map_thumb_location'),
+    mapRotation: real('map_rotation').notNull().default(0),
+    mapOffsetX: real('map_offset_x').notNull().default(0),
+    mapOffsetY: real('map_offset_y').notNull().default(0),
+    mapZoom: real('map_zoom').notNull().default(1.0),
+    gridType: integer('grid_type').notNull().default(0),
+    gridMode: integer('grid_mode').notNull().default(0),
+    gridMapDefinedX: integer('grid_map_defined_x'),
+    gridMapDefinedY: integer('grid_map_defined_y'),
+    // Coordinate space of marker/light positions in MapDefined scenes:
+    // 0 = legacy display-center pixels, 1 = center-relative map pixels
+    mapCoordVersion: integer('map_coord_version').notNull().default(0),
+    gridSpacing: integer('grid_spacing').notNull().default(1),
+    gridOpacity: real('grid_opacity').notNull().default(0.25),
+    gridLineColor: text('grid_line_color').notNull().default('#000000'),
+    gridLineThickness: integer('grid_line_thickness').notNull().default(1),
+    gridShadowColor: text('grid_shadow_color').notNull().default('#000000'),
+    gridShadowSpread: integer('grid_shadow_spread').notNull().default(2),
+    gridShadowBlur: real('grid_shadow_blur').notNull().default(0.5),
+    gridShadowOpacity: real('grid_shadow_opacity').notNull().default(0.4),
+    sceneOffsetX: real('scene_offset_x').notNull().default(0),
+    sceneOffsetY: real('scene_offset_y').notNull().default(0),
+    sceneRotation: real('scene_rotation').notNull().default(0),
+    weatherFov: integer('weather_fov').notNull().default(60),
+    weatherIntensity: real('weather_intensity').notNull().default(1),
+    weatherOpacity: real('weather_opacity').notNull().default(1.0),
+    weatherType: integer('weather_type').notNull().default(0),
+    fogEnabled: integer('fog_enabled', { mode: 'boolean' }).notNull().default(false),
+    fogColor: text('fog_color').notNull().default('#a0a0a0'),
+    fogOpacity: real('fog_opacity').notNull().default(0.8),
+    edgeEnabled: integer('edge_enabled', { mode: 'boolean' }).notNull().default(false),
+    edgeUrl: text('edge_url'),
+    edgeOpacity: real('edge_opacity').notNull().default(0.3),
+    edgeScale: real('edge_scale').notNull().default(2.0),
+    edgeFadeStart: real('edge_fade_start').notNull().default(0.2),
+    edgeFadeEnd: real('edge_fade_end').notNull().default(1.0),
+    effectsEnabled: integer('effects_enabled', { mode: 'boolean' }).notNull().default(true),
+    effectsBloomIntensity: real('effects_bloom_intensity').notNull().default(0),
+    effectsBloomThreshold: real('effects_bloom_threshold').notNull().default(0.5),
+    effectsBloomSmoothing: real('effects_bloom_smoothing').notNull().default(0.3),
+    effectsBloomRadius: real('effects_bloom_radius').notNull().default(0.5),
+    effectsBloomLevels: integer('effects_bloom_levels').notNull().default(10),
+    effectsBloomMipMapBlur: integer('effects_bloom_mip_map_blur', { mode: 'boolean' }).notNull().default(true),
+    effectsChromaticAberrationOffset: real('effects_chromatic_aberration_intensity').notNull().default(0),
+    effectsLutUrl: text('effects_lut_url'),
+    effectsToneMappingMode: integer('effects_tone_mapping_mode').notNull().default(0),
+    lastUpdated: integer('last_updated', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+    markerStrokeColor: text('marker_stroke_color').notNull().default('#000000'),
+    markerStrokeWidth: integer('marker_stroke_width').notNull().default(50),
+    markerTextColor: text('marker_text_color').notNull().default('#ffffff'),
+    markerTextStrokeColor: text('marker_text_stroke_color').notNull().default('#000000'),
+    annotationLayers: text('annotation_layers', { mode: 'json' })
+  },
+  (table) => [
+    // No unique index on (gameSessionId, order): scene order is a fractional sort
+    // key owned by the realtime session doc, and concurrent inserts between the
+    // same neighbors can legitimately produce equal orders (ties break by id).
+    check('protected_fog_of_war_opacity_dm', sql`${table.fogOfWarOpacityDm} >= 0 AND ${table.fogOfWarOpacityDm} <= 1`),
+    check(
+      'protected_fog_of_war_opacity_player',
+      sql`${table.fogOfWarOpacityPlayer} >= 0 AND ${table.fogOfWarOpacityPlayer} <= 1`
+    ),
+    check('protected_grid_opacity', sql`${table.gridOpacity} >= 0 AND ${table.gridOpacity} <= 1`),
+    check('protected_weather_intensity', sql`${table.weatherIntensity} >= 0 AND ${table.weatherIntensity} <= 1`),
+    check('protected_weather_opacity', sql`${table.weatherOpacity} >= 0 AND ${table.weatherOpacity} <= 1`),
+    check('protected_fog_opacity', sql`${table.fogOpacity} >= 0 AND ${table.fogOpacity} <= 1`),
+    check('protected_edge_opacity', sql`${table.edgeOpacity} >= 0 AND ${table.edgeOpacity} <= 1`),
+    check('protected_edge_fade_start', sql`${table.edgeFadeStart} >= 0 AND ${table.edgeFadeStart} <= 1`),
+    check('protected_edge_fade_end', sql`${table.edgeFadeEnd} >= 0 AND ${table.edgeFadeEnd} <= 1`),
+    index('idx_scene_order').on(table.order),
+    index('idx_scene_game_session_id').on(table.gameSessionId)
+  ]
+);
+
+export type InsertScene = typeof sceneTable.$inferInsert;
+export type SelectScene = typeof sceneTable.$inferSelect;
+export const selectSceneSchema = createSelectSchema(sceneTable);
+export const insertSceneSchema = createInsertSchema(sceneTable);
+export const updateSceneSchema = createUpdateSchema(sceneTable);
+
+// MARKERS
+// MARKERS
+// MARKERS
+
+export const markerTable = sqliteTable(
+  'marker',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    sceneId: text('scene_id')
+      .notNull()
+      .references(() => sceneTable.id, { onDelete: 'cascade' }),
+    assetId: text('asset_id').references(() => assetsTable.id, { onDelete: 'set null' }),
+    visibility: integer('visibility').notNull().default(1),
+    title: text('title').notNull().default('New token'),
+    label: text('label'),
+    imageLocation: text('image_location'),
+    imageScale: real('image_scale').notNull().default(1.0),
+    positionX: real('position_x').notNull().default(0),
+    positionY: real('position_y').notNull().default(0),
+    shape: integer('shape').notNull().default(1),
+    shapeColor: text('shape_color').notNull().default('#ffffff'),
+    size: integer('size').notNull().default(1),
+    note: text('note', { mode: 'json' }),
+    pinnedTooltip: integer('pinned_tooltip', { mode: 'boolean' }).notNull().default(false)
+  },
+  (table) => [
+    index('idx_marker_scene_id').on(table.sceneId),
+    check('protected_marker_visibility', sql`${table.visibility} >= 0 AND ${table.visibility} <= 3`),
+    check('protected_marker_shape', sql`${table.shape} >= 0 AND ${table.shape} <= 4`),
+    check('protected_marker_size', sql`${table.size} >= 1 AND ${table.size} <= 3`)
+  ]
+);
+
+export type InsertMarker = typeof markerTable.$inferInsert;
+export type SelectMarker = typeof markerTable.$inferSelect;
+export const insertMarkerSchema = createInsertSchema(markerTable);
+export const selectMarkerSchema = createSelectSchema(markerTable);
+export const updateMarkerSchema = createUpdateSchema(markerTable);
+
+export const assetsTable = sqliteTable(
+  'asset',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    artworkLocation: text('artwork_location'),
+    tokenArtworkLocation: text('token_artwork_location'),
+    shape: integer('shape').notNull().default(1),
+    shapeColor: text('shape_color').notNull().default('#ffffff'),
+    size: integer('size').notNull().default(1),
+    imageScale: real('image_scale').notNull().default(1),
+    provider: text('provider'),
+    originalName: text('original_name'),
+    sourceIdentity: text('source_identity'),
+    sourceUrl: text('source_url'),
+    adapterVersion: text('adapter_version'),
+    importRequestId: text('import_request_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date())
+  },
+  (table) => [
+    index('idx_asset_owner').on(table.ownerId),
+    index('idx_asset_source').on(table.ownerId, table.provider, table.sourceIdentity),
+    uniqueIndex('idx_asset_import_request').on(table.ownerId, table.importRequestId),
+    check('asset_shape', sql`${table.shape} >= 0 AND ${table.shape} <= 4`),
+    check('asset_size', sql`${table.size} >= 1 AND ${table.size} <= 3`)
+  ]
+);
+export const clipboardArtworkTable = sqliteTable('clipboard_artwork', {
+  location: text('location').primaryKey().notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date())
+});
+
+export const assetImportReceiptsTable = sqliteTable(
+  'asset_import_receipt',
+  {
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    requestId: text('request_id').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    result: text('result', { mode: 'json' })
+      .$type<{
+        identity: string;
+        requestId: string;
+        status: 'created' | 'updated' | 'skipped';
+        assetId?: string;
+        message?: string;
+      }>()
+      .notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date())
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.requestId] })]
+);
+
+export type InsertAsset = typeof assetsTable.$inferInsert;
+export type SelectAsset = typeof assetsTable.$inferSelect;
+export const insertAssetSchema = createInsertSchema(assetsTable);
+export const selectAssetSchema = createSelectSchema(assetsTable);
+export const updateAssetSchema = createUpdateSchema(assetsTable);
+
+// LIGHTS
+// LIGHTS
+// LIGHTS
+
+export const VALID_LIGHT_STYLES = [
+  'torch',
+  'candle',
+  'magical',
+  'fire',
+  'lantern',
+  'spotlight',
+  'lightning',
+  'bioluminescent',
+  'fireflies'
+] as const;
+export const VALID_LIGHT_PULSE = [0, 1, 2, 3] as const; // 0=none, 1=slow, 2=medium, 3=fast
+
+export const lightTable = sqliteTable(
+  'light',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    sceneId: text('scene_id')
+      .notNull()
+      .references(() => sceneTable.id, { onDelete: 'cascade' }),
+    positionX: real('position_x').notNull().default(0),
+    positionY: real('position_y').notNull().default(0),
+    radius: real('radius').notNull().default(2), // Diameter in grid units
+    color: text('color').notNull().default('#FFA500'), // Default lantern orange
+    style: text('style', { enum: VALID_LIGHT_STYLES }).notNull().default('lantern'),
+    pulse: integer('pulse').notNull().default(0), // 0=none, 1=slow, 2=medium, 3=fast
+    opacity: real('opacity').notNull().default(1.0) // 0.0 to 1.0
+  },
+  (table) => [
+    index('idx_light_scene_id').on(table.sceneId),
+    check('protected_light_pulse', sql`${table.pulse} >= 0 AND ${table.pulse} <= 3`),
+    check('protected_light_radius', sql`${table.radius} > 0`),
+    check('protected_light_opacity', sql`${table.opacity} >= 0 AND ${table.opacity} <= 1`)
+  ]
+);
+
+export type LightStyle = (typeof VALID_LIGHT_STYLES)[number];
+export type LightPulse = (typeof VALID_LIGHT_PULSE)[number];
+
+export type InsertLight = typeof lightTable.$inferInsert;
+export type SelectLight = typeof lightTable.$inferSelect;
+export const insertLightSchema = createInsertSchema(lightTable);
+export const selectLightSchema = createSelectSchema(lightTable);
+export const updateLightSchema = createUpdateSchema(lightTable);
+
+// ANNOTATIONS
+// ANNOTATIONS
+// ANNOTATIONS
+
+export const annotationsTable = sqliteTable(
+  'annotations',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    sceneId: text('scene_id')
+      .notNull()
+      .references(() => sceneTable.id, { onDelete: 'cascade' }),
+    name: text('name').notNull().default('New Annotation'),
+    opacity: real('opacity').notNull().default(1.0),
+    color: text('color').notNull().default('#FF0000'),
+    url: text('url'), // S3/R2 storage for the drawn texture
+    mask: text('mask'), // Base64-encoded RLE mask data
+    visibility: integer('visibility').notNull().default(1), // StageMode enum (0=DM, 1=Player)
+    order: integer('order').notNull().default(0), // For layer ordering
+    effectType: integer('effect_type') // AnnotationEffect enum (0=None, 1=Fire, etc.)
+  },
+  (table) => [
+    index('idx_annotations_scene_id').on(table.sceneId),
+    index('idx_annotations_order').on(table.sceneId, table.order),
+    check('protected_annotation_opacity', sql`${table.opacity} >= 0 AND ${table.opacity} <= 1`),
+    check('protected_annotation_visibility', sql`${table.visibility} >= 0 AND ${table.visibility} <= 1`)
+  ]
+);
+
+export type InsertAnnotation = typeof annotationsTable.$inferInsert;
+export type SelectAnnotation = typeof annotationsTable.$inferSelect;
+export const insertAnnotationSchema = createInsertSchema(annotationsTable);
+export const selectAnnotationSchema = createSelectSchema(annotationsTable);
+export const updateAnnotationSchema = createUpdateSchema(annotationsTable);
+
+// PROMOS
+// PROMOS
+// PROMOS
+
+export const promosTable = sqliteTable(
+  'promos',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    key: text('key').unique().notNull(),
+    maxUses: integer('max_uses').notNull().default(1),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true)
+  },
+  (table) => [
+    index('idx_promos_key').on(table.key),
+    index('idx_promos_created_by').on(table.createdBy),
+    check('valid_max_uses', sql`${table.maxUses} >= 1`)
+  ]
+);
+
+export type InsertPromo = typeof promosTable.$inferInsert;
+export type SelectPromo = typeof promosTable.$inferSelect;
+export const insertPromoSchema = createInsertSchema(promosTable);
+export const selectPromoSchema = createSelectSchema(promosTable);
+export const updatePromoSchema = createUpdateSchema(promosTable);
+
+// PROMO REDEMPTIONS
+// PROMO REDEMPTIONS
+// PROMO REDEMPTIONS
+
+export const promoRedemptionsTable = sqliteTable(
+  'promo_redemptions',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    promoId: text('promo_id')
+      .notNull()
+      .references(() => promosTable.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    partyId: text('party_id')
+      .notNull()
+      .references(() => partyTable.id, { onDelete: 'cascade' }),
+    redeemedAt: integer('redeemed_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date())
+  },
+  (table) => [
+    uniqueIndex('unique_promo_user').on(table.promoId, table.userId),
+    index('idx_promo_redemptions_promo_id').on(table.promoId),
+    index('idx_promo_redemptions_user_id').on(table.userId),
+    index('idx_promo_redemptions_party_id').on(table.partyId)
+  ]
+);
+
+export type InsertPromoRedemption = typeof promoRedemptionsTable.$inferInsert;
+export type SelectPromoRedemption = typeof promoRedemptionsTable.$inferSelect;
+export const insertPromoRedemptionSchema = createInsertSchema(promoRedemptionsTable);
+export const selectPromoRedemptionSchema = createSelectSchema(promoRedemptionsTable);
+export const updatePromoRedemptionSchema = createUpdateSchema(promoRedemptionsTable);
+
+// REALTIME ACTIVITY
+// REALTIME ACTIVITY
+// REALTIME ACTIVITY
+//
+// Usage log for PartyKit rooms (Durable Objects bill wall-clock time while a room
+// holds any socket). Rooms report connect/close, persist endpoints add edit /
+// party_state, editors add editor_active pings. Rolled up by /admin/usage.
+export const VALID_REALTIME_ACTIVITY_KINDS = ['connect', 'close', 'edit', 'party_state', 'editor_active'] as const;
+
+export const realtimeActivityTable = sqliteTable(
+  'realtime_activity',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    partyId: text('party_id')
+      .notNull()
+      .references(() => partyTable.id, { onDelete: 'cascade' }),
+    gameSessionId: text('game_session_id').references(() => gameSessionTable.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: VALID_REALTIME_ACTIVITY_KINDS }).notNull(),
+    userId: text('user_id').references(() => usersTable.id, { onDelete: 'set null' }),
+    // connect/close only: sockets still open in the room AFTER the event
+    connections: integer('connections'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date())
+  },
+  (table) => [
+    index('idx_realtime_activity_party_created').on(table.partyId, table.createdAt),
+    index('idx_realtime_activity_session_created').on(table.gameSessionId, table.createdAt),
+    index('idx_realtime_activity_created_at').on(table.createdAt)
+  ]
+);
+
+export type RealtimeActivityKind = (typeof VALID_REALTIME_ACTIVITY_KINDS)[number];
+
+export type InsertRealtimeActivity = typeof realtimeActivityTable.$inferInsert;
+export type SelectRealtimeActivity = typeof realtimeActivityTable.$inferSelect;
+export const insertRealtimeActivitySchema = createInsertSchema(realtimeActivityTable);
+export const selectRealtimeActivitySchema = createSelectSchema(realtimeActivityTable);
+export const updateRealtimeActivitySchema = createUpdateSchema(realtimeActivityTable);
+
+// HEALTH
+// HEALTH
+// HEALTH
+
+// Single-row table (fixed id = 1) upserted by the /healthcheck/db write probe so a broken
+// write path is observable. See spec/embedded-replica-stream-recovery.md.
+export const healthTable = sqliteTable('_health', {
+  id: integer('id').primaryKey(),
+  checkedAt: integer('checked_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date())
+});
+
+export type InsertHealth = typeof healthTable.$inferInsert;
+export type SelectHealth = typeof healthTable.$inferSelect;

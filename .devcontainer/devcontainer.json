@@ -1,0 +1,15 @@
+{
+  "name": "Table Slayer",
+  "dockerComposeFile": "../compose.dev.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspace",
+  "overrideCommand": false,
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [5173, 5174, 1999],
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": ["svelte.svelte-vscode", "esbenp.prettier-vscode"]
+    }
+  }
+}

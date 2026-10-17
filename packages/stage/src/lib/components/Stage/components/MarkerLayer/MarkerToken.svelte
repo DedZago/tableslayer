@@ -1,0 +1,312 @@
+<script lang="ts">
+  import * as THREE from 'three';
+  import { T, useLoader } from '@threlte/core';
+  import { onDestroy } from 'svelte';
+  import { MarkerShape, type Marker } from './types';
+  import { SceneLayer, SceneLayerOrder } from '../Scene/types';
+  import { getGridCellSize } from '../../helpers/grid';
+  import type { GridLayerProps } from '../GridLayer/types';
+  import type { DisplayProps } from '../Stage/types';
+
+  interface Props {
+    marker: Marker;
+    grid: GridLayerProps;
+    display: DisplayProps;
+    opacity: number;
+    strokeColor: string;
+    strokeWidth: number;
+    shadowColor: string;
+    shadowBlur: number;
+    shadowOffset: {
+      x: number;
+      y: number;
+    };
+    textColor: string;
+    textStroke: number;
+    textStrokeColor: string;
+    textSize: number;
+    isSelected: boolean;
+    isHovered?: boolean;
+    sceneRotation: number;
+    /** Map rotation in degrees, inherited from the map anchor in MapDefined mode */
+    mapRotation?: number;
+  }
+
+  const {
+    marker,
+    grid,
+    display,
+    opacity,
+    textColor: textColorProp,
+    textStroke: textStrokeProp,
+    textStrokeColor: textStrokeColorProp,
+    textSize: textSizeProp,
+    strokeColor: strokeColorProp,
+    strokeWidth: strokeWidthProp,
+    shadowColor: shadowColorProp,
+    shadowBlur: shadowBlurProp,
+    shadowOffset: shadowOffsetProp,
+    isSelected = false,
+    isHovered = false,
+    sceneRotation,
+    mapRotation = 0
+  }: Props = $props();
+
+  // The style props arrive as template expressions rooted at the consumer's
+  // stageProps, and that root is replaced on every remote doc rebuild (e.g.
+  // another editor panning). Reading them directly in the canvas effect would
+  // re-fire it per rebuild — a full redraw with gaussian shadow blur plus a
+  // texture upload PER MARKER, hundreds of ms per remote update. $derived
+  // memoizes by value, cutting the chain when the style didn't change (same
+  // guard as the marker.* deriveds below).
+  const textColor = $derived(textColorProp);
+  const textStroke = $derived(textStrokeProp);
+  const textStrokeColor = $derived(textStrokeColorProp);
+  const textSize = $derived(textSizeProp);
+  const strokeColor = $derived(strokeColorProp);
+  const strokeWidth = $derived(strokeWidthProp);
+  const shadowColor = $derived(shadowColorProp);
+  const shadowBlur = $derived(shadowBlurProp);
+  const shadowOffsetX = $derived(shadowOffsetProp.x);
+  const shadowOffsetY = $derived(shadowOffsetProp.y);
+
+  const loader = useLoader(THREE.TextureLoader);
+
+  // The marker object is replaced on every drag frame (new identity, same
+  // visuals). Route the draw inputs through deriveds so the canvas/texture
+  // effects below only re-fire when a value actually changes — re-rasterizing
+  // and re-uploading the texture per pointermove stalls the render loop.
+  const shape = $derived(marker.shape);
+  const shapeColor = $derived(marker.shapeColor);
+  const label = $derived(marker.label);
+  const imageScale = $derived(marker.imageScale);
+  const imageUrl = $derived(marker.imageUrl);
+
+  const baseMarkerSize = $derived(getGridCellSize(grid, display) * marker.size);
+  const markerSize = $derived(isHovered ? baseMarkerSize * 1.15 : baseMarkerSize);
+  const sizeMultiplier = 0.9;
+
+  // Counter-rotate markers to keep them upright relative to the viewport.
+  // The two rotations compose with opposite signs: scene rotation turns the
+  // CAMERA (compensation follows it), while map rotation turns the token's
+  // parent anchor (compensation opposes it) — hence the difference.
+  const effectiveRotation = $derived(sceneRotation - mapRotation);
+  const normalizedRotation = $derived(((effectiveRotation % 360) + 360) % 360);
+  const needsFlip = $derived(
+    (normalizedRotation > 85 && normalizedRotation < 95) || (normalizedRotation > 265 && normalizedRotation < 275)
+  );
+  const counterRotation = $derived(
+    needsFlip ? -((effectiveRotation + 180) * Math.PI) / 180 : -(effectiveRotation * Math.PI) / 180
+  );
+
+  const canvasSize = 1024;
+
+  // Extra canvas margin so the shadow's gaussian blur isn't cropped at the quad
+  // edge (one grid cell); the mesh scales up by the same ratio so the shape
+  // itself keeps its size
+  const shadowPadding = $derived(
+    Math.ceil(shadowBlur * 1.5 + Math.max(Math.abs(shadowOffsetX), Math.abs(shadowOffsetY)) + strokeWidth / 2)
+  );
+  const paddedCanvasSize = $derived(canvasSize + shadowPadding * 2);
+  const shadowScale = $derived(paddedCanvasSize / canvasSize);
+
+  let markerCanvas = new OffscreenCanvas(canvasSize, canvasSize);
+  let ctx = markerCanvas.getContext('2d')!;
+  ctx.globalCompositeOperation = 'source-over';
+
+  let markerMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity
+  });
+  let imageTexture: THREE.Texture | null = $state(null);
+
+  // Load image if URL is provided
+  $effect(() => {
+    if (imageUrl) {
+      loader
+        .load(imageUrl)
+        .then((texture) => {
+          imageTexture = texture;
+          imageTexture.needsUpdate = true;
+        })
+        .catch((err) => console.error('Error loading image:', err));
+    } else {
+      imageTexture = null;
+    }
+  });
+
+  // Create complete marker canvas with shape, stroke, and text
+  function createShape(centerX: number, centerY: number, size: number, clipOnly: boolean = false) {
+    ctx.beginPath();
+
+    switch (shape) {
+      case MarkerShape.None:
+        break;
+      case MarkerShape.Circle:
+        const radius = (size * sizeMultiplier) / 2;
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.closePath();
+        break;
+
+      case MarkerShape.Square:
+        const squareSize = size * sizeMultiplier; // Adjust size to match circle's visual weight
+        ctx.rect(centerX - squareSize / 2, centerY - squareSize / 2, squareSize, squareSize);
+        ctx.closePath();
+        break;
+
+      case MarkerShape.Triangle:
+        const height = size * sizeMultiplier;
+        ctx.moveTo(centerX, centerY - height / 2); // Top
+        ctx.lineTo(centerX - height / 2, centerY + height / 2); // Bottom left
+        ctx.lineTo(centerX + height / 2, centerY + height / 2); // Bottom right
+        ctx.closePath();
+        break;
+    }
+
+    if (!clipOnly) {
+      ctx.shadowColor = shadowColor;
+      ctx.shadowBlur = shadowBlur;
+      ctx.shadowOffsetX = shadowOffsetX;
+      ctx.shadowOffsetY = shadowOffsetY;
+      ctx.fill();
+      if (strokeWidth > 0) {
+        ctx.stroke();
+      }
+    }
+
+    return ctx;
+  }
+
+  // Create text for the marker
+  function createText(centerX: number, centerY: number) {
+    if (!label) return;
+
+    // Reset shadow settings for text
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Set text properties
+    ctx.font = `700 ${textSize}px Inter`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Add text stroke if specified
+    if (textStroke && textStrokeColor) {
+      ctx.strokeStyle = textStrokeColor;
+      ctx.lineWidth = textStroke * (textSize / 5);
+      ctx.strokeText(label, centerX, centerY);
+    }
+
+    // Fill text
+    ctx.fillStyle = textColor || '#ffffff';
+    ctx.fillText(label, centerX, centerY);
+  }
+
+  // Create the marker canvas
+  function drawMarker() {
+    const width = markerCanvas.width;
+    const height = markerCanvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    // Clear canvas with transparency
+    ctx.clearRect(0, 0, width, height);
+
+    if (shape !== undefined) {
+      // Set stroke and fill styles for shape
+      // Use --fgPrimary color when hovered or selected, otherwise use the default stroke color
+      ctx.strokeStyle = isHovered || isSelected ? getCSSVariable('--fgPrimary') : (strokeColor ?? '#000000');
+      ctx.lineWidth = strokeWidth;
+      ctx.fillStyle = shapeColor ?? '#ffffff';
+
+      createShape(centerX, centerY, canvasSize);
+
+      // Draw image if available
+      if (imageTexture && imageTexture.image) {
+        // Save the current canvas state
+        ctx.save();
+
+        // Create a smaller shape path for clipping that accounts for stroke width
+        const innerSize = canvasSize - strokeWidth; // Reduce by twice the stroke width
+        createShape(centerX, centerY, innerSize, true);
+
+        // Apply clipping to the shape
+        ctx.clip();
+
+        // Set proper compositing for image drawing
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1.0; // Ensure full opacity for the image itself
+
+        // Draw the image (will only appear inside the clipped shape)
+        ctx.drawImage(
+          imageTexture.image as CanvasImageSource,
+          centerX - (canvasSize / 2) * imageScale * sizeMultiplier,
+          centerY - (canvasSize / 2) * imageScale * sizeMultiplier,
+          sizeMultiplier * canvasSize * imageScale,
+          sizeMultiplier * canvasSize * imageScale
+        );
+
+        // Restore the canvas state (removes clipping)
+        ctx.restore();
+      }
+    }
+
+    // // Draw text if enabled
+    if (label) {
+      createText(centerX, centerY);
+    }
+
+    return markerCanvas;
+  }
+
+  // Create and update marker texture when properties change (including hover state)
+  $effect(() => {
+    if (markerCanvas.width !== paddedCanvasSize) {
+      markerCanvas.width = paddedCanvasSize;
+      markerCanvas.height = paddedCanvasSize;
+    }
+
+    markerCanvas = drawMarker();
+
+    // Dispose old texture before creating new one
+    if (markerMaterial.map) {
+      markerMaterial.map.dispose();
+    }
+
+    markerMaterial.map = new THREE.CanvasTexture(markerCanvas);
+    markerMaterial.map.colorSpace = THREE.SRGBColorSpace;
+    markerMaterial.map.needsUpdate = true;
+  });
+
+  onDestroy(() => {
+    if (markerMaterial.map) {
+      markerMaterial.map.dispose();
+    }
+    markerMaterial.dispose();
+    if (imageTexture) {
+      imageTexture.dispose();
+    }
+  });
+
+  // Get CSS variable value for hover color
+  function getCSSVariable(varName: string): string {
+    if (typeof window !== 'undefined') {
+      return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+    }
+    return '#ffffff';
+  }
+</script>
+
+<T.Group
+  position={[marker.position.x, marker.position.y, 0]}
+  scale={[markerSize, markerSize, 1]}
+  rotation={[0, 0, counterRotation]}
+>
+  <!-- Combined shape, stroke and text -->
+  <T.Mesh renderOrder={SceneLayerOrder.Marker} layers={[SceneLayer.Main]} scale={[shadowScale, shadowScale, 1]}>
+    <T.MeshBasicMaterial is={markerMaterial} />
+    <T.PlaneGeometry args={[1, 1]} />
+  </T.Mesh>
+</T.Group>

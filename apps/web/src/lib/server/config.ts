@@ -1,0 +1,52 @@
+/**
+ * Configuration utilities
+ * Determines if optional services are enabled based on environment variables
+ */
+
+export const isStripeEnabled = (): boolean => {
+  const stripeApiKey = process.env.STRIPE_API_KEY;
+  const stripeWebhookKey = process.env.STRIPE_WEBHOOK_KEY;
+  const stripePriceIdLifetime = process.env.STRIPE_PRICE_ID_LIFETIME;
+  const stripePriceIdMonthly = process.env.STRIPE_PRICE_ID_MONTHLY;
+  const stripePriceIdYearly = process.env.STRIPE_PRICE_ID_YEARLY;
+
+  return !!(stripeApiKey && stripeWebhookKey && stripePriceIdLifetime && stripePriceIdMonthly && stripePriceIdYearly);
+};
+
+export const getDefaultPartyPlan = (): 'free' | 'lifetime' => {
+  return isStripeEnabled() ? 'free' : 'lifetime';
+};
+
+export const isGoogleOAuthEnabled = (): boolean => {
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  return !!(googleClientId && googleClientSecret);
+};
+
+export const isEmailEnabled = (): boolean => {
+  const cloudflareEmailApiKey = process.env.CLOUDFLARE_EMAIL_API_KEY;
+  const cloudflareAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+
+  return !!(cloudflareEmailApiKey && cloudflareAccountId);
+};
+
+export const isTurnstileEnabled = (): boolean => {
+  const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
+  const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY;
+
+  return !!(turnstileSiteKey && turnstileSecretKey);
+};
+
+export const getTurnstileSiteKey = (): string | null => {
+  return isTurnstileEnabled() ? (process.env.TURNSTILE_SITE_KEY ?? null) : null;
+};
+
+export const isCloudflareAnalyticsEnabled = (): boolean => {
+  return !!(process.env.CLOUDFLARE_WORKERS_KEY && process.env.CLOUDFLARE_ACCOUNT_ID);
+};
+
+/** Day of month the Durable Objects billing cycle starts (Cloudflare invoices this account on the 12th). */
+export const getBillingCycleStartDay = (): number => {
+  return Number(process.env.CLOUDFLARE_BILLING_CYCLE_START_DAY) || 12;
+};

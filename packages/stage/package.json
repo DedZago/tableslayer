@@ -1,0 +1,65 @@
+{
+  "name": "@tableslayer/stage",
+  "version": "0.0.20",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Siege-Perilous/tableslayer.git",
+    "directory": "packages/stage"
+  },
+  "author": "Siege Perilous LLC",
+  "scripts": {
+    "dev": "svelte-package --watch",
+    "build": "svelte-kit sync && svelte-package",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
+  "peerDependencies": {
+    "svelte": "^5.19.0"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "^7.0.1",
+    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/package": "^2.5.8",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tableslayer/eslint-config": "workspace:*",
+    "@tableslayer/tsconfig": "workspace:*",
+    "@types/chroma-js": "^3.1.2",
+    "@types/node": "^26",
+    "@types/three": "0.186.0",
+    "svelte": "5.57.1",
+    "svelte-check": "^4.7.6",
+    "typescript": "=6.0.3",
+    "vite": "^8.3.1"
+  },
+  "dependencies": {
+    "@floating-ui/dom": "^1.8.0",
+    "@tabler/icons-svelte": "^3.48.0",
+    "@tableslayer/ui": "workspace:*",
+    "@threlte/core": "8.6.1",
+    "@threlte/extras": "9.22.0",
+    "@tiptap/core": "^3.31.3",
+    "chroma-js": "^3.2.0",
+    "gifuct-js": "^2.1.2",
+    "lazy-brush": "^2.0.2",
+    "postprocessing": "6.39.5",
+    "three": "0.186.1",
+    "uuid": "^14.0.2"
+  },
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module"
+}

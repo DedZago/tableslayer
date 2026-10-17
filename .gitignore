@@ -1,0 +1,53 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# testing
+coverage
+
+# svelte
+.svelte-kit
+
+#vercel
+.vercel
+
+#playwright
+test-results
+
+# Typings for docs
+typedocgen.json
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# turbo
+.turbo
+
+# embedded dbs
+*.db*
+
+# local realtime debugging probes (see spec/realtime-sync-v2-progress.md)
+scratch-*.mjs
+
+# Local self-hosting configuration and runtime state
+.env
+apps/web/.env
+.partykit/
+.local-data/
+backups/
+.pnpm-store/

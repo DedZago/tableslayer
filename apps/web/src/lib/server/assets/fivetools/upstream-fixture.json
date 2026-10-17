@@ -1,0 +1,94 @@
+{
+  "monster": [
+    {
+      "name": "Goblin",
+      "source": "MM",
+      "size": ["S"],
+      "hasToken": true,
+      "hasFluffImages": true
+    },
+    {
+      "name": "Wolf",
+      "source": "MM",
+      "size": ["M"],
+      "hasToken": true,
+      "hasFluffImages": true
+    },
+    {
+      "name": "Vampire",
+      "source": "MM",
+      "size": ["M"],
+      "hasToken": true,
+      "hasFluffImages": true
+    },
+    {
+      "name": "Aarakocra",
+      "source": "MM",
+      "size": ["M"],
+      "hasToken": true,
+      "hasFluffImages": true
+    }
+  ],
+  "monsterFluff": [
+    {
+      "name": "Goblin",
+      "source": "MM",
+      "images": [
+        {
+          "type": "image",
+          "href": {
+            "type": "internal",
+            "path": "bestiary/MM/Goblin.webp"
+          },
+          "width": 722,
+          "height": 1000
+        }
+      ]
+    },
+    {
+      "name": "Wolf",
+      "source": "MM",
+      "images": [
+        {
+          "type": "image",
+          "href": {
+            "type": "internal",
+            "path": "bestiary/MM/Wolf.webp"
+          },
+          "width": 798,
+          "height": 1000
+        }
+      ]
+    },
+    {
+      "name": "Vampire",
+      "source": "MM",
+      "images": [
+        {
+          "type": "image",
+          "href": {
+            "type": "internal",
+            "path": "bestiary/MM/Vampire.webp"
+          },
+          "width": 529,
+          "height": 1000
+        }
+      ]
+    },
+    {
+      "name": "Aarakocra",
+      "source": "MM",
+      "images": [
+        {
+          "type": "image",
+          "href": {
+            "type": "internal",
+            "path": "bestiary/MM/Aarakocra.webp"
+          },
+          "width": 652,
+          "height": 1000
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,130 @@
+/**
+ * Generates R2 transformation URLs client-side
+ * This eliminates race conditions waiting for server-side processing
+ */
+
+export type R2TransformOptions = {
+  width?: number;
+  height?: number;
+  fit?: 'scale-down' | 'cover' | 'contain' | 'crop' | 'pad';
+  gravity?: 'center' | 'north' | 'south' | 'east' | 'west' | 'auto';
+  quality?: number;
+};
+
+const DEFAULT_R2_BASE_URL = 'https://files.tableslayer.com';
+
+/**
+ * The placeholder map new scenes are born with: a MapDefined battle map whose
+ * grid spans the image edge-to-edge. The size is fixed (60 px per cell), which
+ * lets scene creation skip an image-dimension fetch.
+ */
+export const DEFAULT_MAP = 'map/pirateking-30x60.jpg';
+export const DEFAULT_MAP_GRID = { x: 30, y: 60 };
+export const DEFAULT_MAP_SIZE = { width: 1800, height: 3600 };
+
+/**
+ * Check if a file is a video based on its extension
+ */
+export function isVideoFile(location: string): boolean {
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.gif'];
+  const lowerLocation = location.toLowerCase();
+  return videoExtensions.some((ext) => lowerLocation.includes(ext));
+}
+
+/**
+ * Generates an R2 transformation URL from a file location
+ * @param location - The file location (e.g., 'map/uuid.jpg')
+ * @param options - Transformation options
+ * @returns The full R2 URL with transformations
+ */
+export function generateR2Url(
+  location: string | null | undefined,
+  options: R2TransformOptions & { bucketUrl?: string } = {}
+): string {
+  // Return empty string if no location
+  if (!location) return '';
+
+  const baseUrl = options.bucketUrl || DEFAULT_R2_BASE_URL;
+
+  // Don't transform the default map or video files
+  if (location === DEFAULT_MAP || isVideoFile(location)) {
+    return `${baseUrl}/${location}`;
+  }
+
+  // Build transformation string
+  const transforms: string[] = [];
+
+  if (options.width) transforms.push(`w=${options.width}`);
+  if (options.height) transforms.push(`h=${options.height}`);
+  if (options.fit) transforms.push(`fit=${options.fit}`);
+  if (options.gravity) transforms.push(`gravity=${options.gravity}`);
+  if (options.quality) transforms.push(`q=${options.quality}`);
+
+  // Construct URL
+  let url: string;
+  if (transforms.length > 0) {
+    url = `${baseUrl}/cdn-cgi/image/${transforms.join(',')}/${location}`;
+  } else {
+    url = `${baseUrl}/${location}`;
+  }
+
+  return url;
+}
+
+/**
+ * Preset for large images (3000x3000 max) - used for Stage display
+ * For video files, returns the direct URL without transformations
+ */
+export function generateLargeImageUrl(location: string | null | undefined, bucketUrl?: string): string {
+  // For video files, return direct URL without transformations
+  if (location && isVideoFile(location)) {
+    return generateR2Url(location, { bucketUrl });
+  }
+
+  return generateR2Url(location, {
+    width: 3000,
+    height: 3000,
+    fit: 'scale-down',
+    gravity: 'center',
+    bucketUrl
+  });
+}
+
+/**
+ * Preset for small thumbnails (400x225) - used for scene selector, etc.
+ * For video files, returns the direct URL without transformations
+ */
+export function generateSmallThumbnailUrl(location: string | null | undefined, bucketUrl?: string): string {
+  // For video files, return direct URL without transformations
+  if (location && isVideoFile(location)) {
+    return generateR2Url(location, { bucketUrl });
+  }
+
+  return generateR2Url(location, {
+    width: 400,
+    height: 225,
+    fit: 'cover',
+    gravity: 'center',
+    bucketUrl
+  });
+}
+
+/**
+ * Preset for square thumbnails (300x300) - used for markers, avatars, etc.
+ */
+export function generateSquareThumbnailUrl(location: string | null | undefined, bucketUrl?: string): string {
+  return generateR2Url(location, {
+    width: 300,
+    height: 300,
+    fit: 'cover',
+    gravity: 'center',
+    bucketUrl
+  });
+}
+
+/**
+ * Check if a location is the default map
+ */
+export function isDefaultMap(location: string | null | undefined): boolean {
+  return location === DEFAULT_MAP;
+}

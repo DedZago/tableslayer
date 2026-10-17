@@ -1,0 +1,15 @@
+.git
+**/node_modules
+**/.pnpm-store
+**/.svelte-kit
+**/build
+**/dist
+**/.turbo
+**/.partykit
+**/.env
+**/.env.*
+**/*.db*
+.local-data
+backups
+test-results
+coverage

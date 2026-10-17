@@ -1,0 +1,41 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "tsc": "turbo run tsc",
+    "check": "turbo run check",
+    "format-check": "prettier --check .",
+    "format-write": "prettier --write .",
+    "prepare": "husky",
+    "deploy:party": "cd apps/web && pnpm deploy:party",
+    "assets:generate": "cd apps/web && pnpm assets:generate",
+    "assets:upload": "cd apps/web && pnpm assets:upload",
+    "release": "changeset && changeset version"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.9",
+    "prettier-plugin-organize-imports": "^4.3.0",
+    "prettier-plugin-svelte": "^4.1.1",
+    "turbo": "^2.11.4"
+  },
+  "lint-staged": {
+    "*.{js,ts,svelte,css}": [
+      "npx prettier --config=.prettierrc.precommit.js --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "npx prettier --write"
+    ]
+  },
+  "packageManager": "pnpm@9.11.0+sha256.1c0e33f70e5df9eede84a357bdfa0b1f9dba6e58194628d48a1055756f553754",
+  "engines": {
+    "node": ">=22"
+  },
+  "name": "@tableslayer"
+}

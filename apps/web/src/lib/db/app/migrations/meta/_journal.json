@@ -1,0 +1,398 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1739234807372,
+      "tag": "0000_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1739312922706,
+      "tag": "0001_gamesession-last-update",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1739375902412,
+      "tag": "0002_stripe-customer-id",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1739654447317,
+      "tag": "0003_user-favorite-party",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1740100051126,
+      "tag": "0004_weather-fog",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1740161768584,
+      "tag": "0005_weather-fog-default",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1740235635653,
+      "tag": "0006_scene-contraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1740236093934,
+      "tag": "0007_scene-edge-columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1740236196348,
+      "tag": "0008_scene-edge-contraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1740538392011,
+      "tag": "0009_scene-effects",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1740538713559,
+      "tag": "0010_scene-effects-levels",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1740755515567,
+      "tag": "0011_add-initial-indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1741567687450,
+      "tag": "0012_markers",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1741611673005,
+      "tag": "0013_marker-image",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1741872621259,
+      "tag": "0014_marker-defaults",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1741874446538,
+      "tag": "0015_marker-note-column",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1741877607131,
+      "tag": "0016_marker-rename-columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1742503504965,
+      "tag": "0017_scene-thumbnail",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1748361969576,
+      "tag": "0018_scene-rotation-int-to-real",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1749733346797,
+      "tag": "0019_active-game-session",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1749735146606,
+      "tag": "0020_paused-game-session",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1750196882763,
+      "tag": "0021_active-scene-id",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1750199837845,
+      "tag": "0022_active-scene-in-party",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1750199973877,
+      "tag": "0023_active-session-remove-from-party",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1750445077960,
+      "tag": "0024_scene-last-updated",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1750469151269,
+      "tag": "0025_remove-is-paused-from-game-session",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1750483333906,
+      "tag": "0026_version-files",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1750514018270,
+      "tag": "0027_map-rotation-to-real",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1750771014687,
+      "tag": "0028_google-oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1750901653681,
+      "tag": "0029_add-annotations-table",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1757356477988,
+      "tag": "0030_add-promos",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1757506503383,
+      "tag": "0031_max-promos",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1757731407357,
+      "tag": "0032_player-fog",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1757908906480,
+      "tag": "0033_rle-mask",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1757959059295,
+      "tag": "0034_marker-hover",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1758205685290,
+      "tag": "0035_grid-mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1759318924978,
+      "tag": "0036_create-dates",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1759319333483,
+      "tag": "0037_create-dates-party",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1759772298206,
+      "tag": "0038_default-map",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1760097015850,
+      "tag": "0039_pinned-tooltip",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1763995272090,
+      "tag": "0040_pin-marker",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1767986957611,
+      "tag": "0041_annotation-effects-type",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1773497440738,
+      "tag": "0042_api-keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1776861642876,
+      "tag": "0043_lights",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1776867867258,
+      "tag": "0044_lights-opacity",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1778077580302,
+      "tag": "0045_new-user-checklist",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1782915983628,
+      "tag": "0046_health-table",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1783132816172,
+      "tag": "0047_scene-ordering",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1783182293359,
+      "tag": "0048_map-anchor-version",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1783259247508,
+      "tag": "0049_default-map-changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1783526291669,
+      "tag": "0050_polygon-fog",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1789052573153,
+      "tag": "0051_analytics-connect",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1791204902369,
+      "tag": "0052_cheerful_sunspot",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1791231197851,
+      "tag": "0053_famous_mac_gargan",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1791232591583,
+      "tag": "0054_glorious_carlie_cooper",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1791235359549,
+      "tag": "0055_tan_sharon_ventura",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,331 @@
+import { type SelectAnnotation, type SelectLight, type SelectMarker, type SelectScene } from '$lib/db/app/schema';
+import { base64ToUint8 } from '$lib/realtime/binary';
+import type { Thumb } from '$lib/server';
+import { generateGradientColors } from '$lib/utils';
+import {
+  DEFAULT_MAP,
+  generateLargeImageUrl,
+  generateR2Url,
+  generateSquareThumbnailUrl,
+  isDefaultMap
+} from '$lib/utils/generateR2Url';
+import {
+  AnnotationEffect,
+  type AnnotationLayerData,
+  displayToMapSpace,
+  DrawMode,
+  getDefaultEffectProps,
+  GridMode,
+  GridType,
+  type Light,
+  LightPulse,
+  LightStyle,
+  MapLayerType,
+  type Marker,
+  MeasurementType,
+  parseFogRooms,
+  RainPreset,
+  SceneRotation,
+  StageMode,
+  type StageProps,
+  ToolType
+} from '@tableslayer/stage';
+
+// Map activeScene properties to StageProps
+export const buildSceneProps = (
+  activeScene: SelectScene | (SelectScene & Thumb),
+  activeSceneMarkers: (SelectMarker & Partial<Thumb>)[],
+  mode: 'client' | 'editor',
+  activeSceneAnnotations: SelectAnnotation[] = [],
+  activeSceneLights: SelectLight[] = [],
+  bucketUrl?: string
+): StageProps => {
+  const fogColors = generateGradientColors(activeScene.fogOfWarColor || '#000000');
+
+  // MapDefined marker/light positions are center-relative map pixels
+  // (mapCoordVersion 1). Scenes not yet upgraded (v0, including old exports)
+  // still store display-space positions, so convert them on read with the
+  // scene's stored map transform — the stage never sees legacy coordinates.
+  const isMapDefined = ((activeScene.gridMode as GridMode) ?? GridMode.FillSpace) === GridMode.MapDefined;
+  const needsCoordConversion = isMapDefined && (activeScene.mapCoordVersion ?? 0) !== 1;
+  const legacyMapTransform = {
+    offset: { x: activeScene.mapOffsetX ?? 0, y: activeScene.mapOffsetY ?? 0 },
+    rotation: activeScene.mapRotation ?? 0,
+    zoom: activeScene.mapZoom || 1
+  };
+  const toStagePosition = (x: number, y: number) =>
+    needsCoordConversion ? displayToMapSpace({ x, y }, legacyMapTransform) : { x, y };
+
+  const thumbUrl =
+    !isDefaultMap(activeScene.mapLocation) && activeScene.mapLocation
+      ? generateLargeImageUrl(activeScene.mapLocation, bucketUrl)
+      : generateLargeImageUrl(DEFAULT_MAP, bucketUrl);
+
+  let markers: Marker[] = [];
+  if (activeSceneMarkers && Array.isArray(activeSceneMarkers)) {
+    markers = activeSceneMarkers
+      // Filter out DM-only markers for client mode, but keep Hover markers (they can be revealed by DM)
+      .filter((marker) => mode === 'editor' || marker.visibility !== 1) // 1 = MarkerVisibility.DM
+      .map((marker) => ({
+        id: marker.id,
+        title: marker.title,
+        position: toStagePosition(marker.positionX, marker.positionY),
+        size: marker.size,
+        shape: marker.shape,
+        shapeColor: marker.shapeColor,
+        label: marker.label,
+        imageUrl: marker.imageLocation ? generateSquareThumbnailUrl(marker.imageLocation, bucketUrl) : null,
+        imageScale: marker.imageScale ?? 1,
+        visibility: marker.visibility,
+        note: marker.note || null,
+        pinnedTooltip: marker.pinnedTooltip ?? false
+      }));
+  }
+
+  // Map annotations to AnnotationLayerData format
+  let annotationLayers: AnnotationLayerData[] = [];
+  if (activeSceneAnnotations && Array.isArray(activeSceneAnnotations)) {
+    annotationLayers = activeSceneAnnotations
+      // Filter out DM-only annotations for client mode
+      .filter((annotation) => mode === 'editor' || annotation.visibility === 1) // 1 = StageMode.Player (visible to players)
+      .map((annotation) => ({
+        id: annotation.id,
+        name: annotation.name,
+        opacity: annotation.opacity,
+        color: annotation.color,
+        url: annotation.url ? generateR2Url(annotation.url, { bucketUrl }) : null,
+        // DB rows carry base64; doc snapshots carry stable Uint8Array references
+        mask: typeof annotation.mask === 'string' ? base64ToUint8(annotation.mask) : (annotation.mask ?? null),
+        visibility: annotation.visibility as StageMode,
+        effect:
+          annotation.effectType && annotation.effectType !== AnnotationEffect.None
+            ? getDefaultEffectProps(annotation.effectType as AnnotationEffect)
+            : undefined
+      }));
+  }
+
+  // Map lights to Light format
+  let lights: Light[] = [];
+  if (activeSceneLights && Array.isArray(activeSceneLights)) {
+    lights = activeSceneLights.map((light) => ({
+      id: light.id,
+      position: toStagePosition(light.positionX, light.positionY),
+      radius: light.radius,
+      color: light.color,
+      style: light.style as LightStyle,
+      pulse: light.pulse as LightPulse,
+      opacity: light.opacity
+    }));
+  }
+
+  return {
+    mode: mode === 'client' ? StageMode.Player : StageMode.DM,
+    activeLayer: MapLayerType.None,
+    backgroundColor: activeScene.backgroundColor,
+    annotations: {
+      layers: annotationLayers,
+      activeLayer: null
+    },
+    debug: {
+      enableStats: false,
+      loggingRate: 1000,
+      enableMetrics: false,
+      logMetricsToConsole: false,
+      disabledLayers: []
+    },
+    display: {
+      padding: {
+        x: activeScene.displayPaddingX ?? 0,
+        y: activeScene.displayPaddingY ?? 0
+      },
+      size: {
+        x: activeScene.displaySizeX ?? 1920,
+        y: activeScene.displaySizeY ?? 1080
+      },
+      resolution: {
+        x: activeScene.displayResolutionX ?? 1920,
+        y: activeScene.displayResolutionY ?? 1080
+      }
+    },
+    edgeOverlay: {
+      enabled: activeScene.edgeEnabled ?? false,
+      url:
+        bucketUrl && activeScene.edgeUrl?.startsWith('https://files.tableslayer.com/')
+          ? activeScene.edgeUrl.replace('https://files.tableslayer.com', bucketUrl)
+          : (activeScene.edgeUrl ?? ''),
+      opacity: activeScene.edgeOpacity ?? 1,
+      scale: activeScene.edgeScale ?? 1,
+      fadeStart: activeScene.edgeFadeStart ?? 0,
+      fadeEnd: activeScene.edgeFadeEnd ?? 1
+    },
+    fog: {
+      enabled: activeScene.fogEnabled ?? false,
+      color: activeScene.fogColor ?? '#ffffff',
+      opacity: activeScene.fogOpacity ?? 1,
+      speed: 0.05,
+      persistence: 0.5,
+      lacunarity: 2.5,
+      frequency: 1.5,
+      amplitude: 1.5,
+      offset: -0.5,
+      levels: 4
+    },
+    fogOfWar: {
+      url: activeScene.fogOfWarUrl ?? '',
+      rooms: parseFogRooms(activeScene.fogOfWarRooms),
+      opacity: {
+        dm: activeScene.fogOfWarOpacityDm ?? 0.3,
+        player: activeScene.fogOfWarOpacityPlayer ?? 0.9
+      },
+      outline: {
+        color: '#FFFFFF',
+        opacity: 1,
+        thickness: 2
+      },
+      tool: {
+        type: ToolType.Brush,
+        size: 2, // Default brush size in grid units (0.25-3 range)
+        mode: DrawMode.Erase
+      },
+      edge: {
+        minMipMapLevel: 0,
+        maxMipMapLevel: 7,
+        frequency: { x: 0.0005, y: 0.001, z: 0.0025, w: 0.005 },
+        amplitude: { x: 0.6, y: 0.5, z: 0.5, w: 0.5 },
+        offset: 0.8,
+        speed: 0.2
+      },
+      noise: {
+        baseColor: fogColors[0],
+        fogColor1: fogColors[1],
+        fogColor2: fogColors[2],
+        fogColor3: fogColors[3],
+        fogColor4: fogColors[4],
+        speed: { x: -0.015, y: 0.03, z: -0.05, w: 0.1 },
+        frequency: { x: 0.0008, y: 0.002, z: 0.001, w: 0.001 },
+        offset: { x: -0.4, y: -0.2, z: -0.3, w: -0.25 },
+        amplitude: { x: -2.0, y: 0.5, z: 0.5, w: 1 },
+        persistence: { x: 0.4, y: 0.4, z: 0.3, w: 0.48 },
+        lacunarity: { x: 2.5, y: 2.5, z: 2.5, w: 2 },
+        levels: { x: 6, y: 4, z: 3, w: 6 }
+      }
+    },
+    grid: {
+      gridType: (activeScene.gridType as GridType) ?? GridType.Square,
+      gridMode: (activeScene.gridMode as GridMode) ?? GridMode.FillSpace,
+      fixedGridCount: {
+        x: activeScene.gridMapDefinedX ?? 24,
+        y: activeScene.gridMapDefinedY ?? 17
+      },
+      spacing: activeScene.gridSpacing ?? 50,
+      opacity: activeScene.gridOpacity ?? 0.5,
+      lineColor: activeScene.gridLineColor ?? '#ffffff',
+      lineThickness: activeScene.gridLineThickness ?? 1,
+      shadowColor: activeScene.gridShadowColor ?? '#000000',
+      shadowOpacity: 0,
+      shadowBlur: activeScene.gridShadowBlur ?? 0,
+      shadowSpread: activeScene.gridShadowSpread ?? 0,
+      worldGridUnits: 'FT',
+      worldGridSize: 5
+    },
+    map: {
+      rotation: activeScene.mapRotation ?? 0,
+      offset: {
+        x: activeScene.mapOffsetX ?? 0,
+        y: activeScene.mapOffsetY ?? 0
+      },
+      zoom: activeScene.mapZoom ?? 1,
+      url: thumbUrl // Empty string if no thumbnail exists - Stage component handles fallback
+    },
+    marker: {
+      visible: true,
+      snapToGrid: true,
+      shape: {
+        strokeColor: activeScene.markerStrokeColor ?? '#ffffff',
+        strokeWidth: activeScene.markerStrokeWidth ?? 2,
+        shadowColor: '#000000',
+        shadowBlur: 120,
+        shadowOffset: {
+          x: 0,
+          y: 0
+        }
+      },
+      text: {
+        color: activeScene.markerTextColor ?? '#ffffff',
+        strokeColor: activeScene.markerTextStrokeColor ?? '#000000',
+        size: 300,
+        strokeWidth: 1
+      },
+      markers: markers
+    },
+    light: {
+      visible: true,
+      snapToGrid: false,
+      lights: lights
+    },
+    measurement: {
+      type: MeasurementType.Line,
+      opacity: 1,
+      autoHideDelay: 3000,
+      fadeoutTime: 500,
+      markerSize: 12,
+      color: '#FFFFFF',
+      outlineColor: '#000000',
+      outlineThickness: 2,
+      snapToGrid: true,
+      enableDMG252: true,
+      thickness: 6,
+      showDistance: true,
+      beamWidth: 10,
+      coneAngle: 60
+    },
+    postProcessing: {
+      enabled: true,
+      bloom: {
+        enabled: true,
+        intensity: activeScene.effectsBloomIntensity,
+        threshold: activeScene.effectsBloomThreshold,
+        smoothing: activeScene.effectsBloomSmoothing,
+        radius: activeScene.effectsBloomRadius,
+        levels: activeScene.effectsBloomLevels,
+        mipmapBlur: activeScene.effectsBloomMipMapBlur
+      },
+      chromaticAberration: {
+        enabled: true,
+        offset: activeScene.effectsChromaticAberrationOffset
+      },
+      lut: {
+        enabled: true,
+        url:
+          bucketUrl && activeScene.effectsLutUrl?.startsWith('https://files.tableslayer.com/')
+            ? activeScene.effectsLutUrl.replace('https://files.tableslayer.com', bucketUrl)
+            : activeScene.effectsLutUrl
+      },
+      toneMapping: {
+        enabled: true,
+        mode: activeScene.effectsToneMappingMode
+      },
+      vignette: {
+        enabled: false,
+        offset: 0.5,
+        darkness: 0.5
+      }
+    },
+    scene: {
+      autoFit: true,
+      offset: {
+        x: activeScene.sceneOffsetX ?? 0,
+        y: activeScene.sceneOffsetY ?? 0
+      },
+      rotation: mode === 'editor' ? (activeScene.sceneRotation ?? SceneRotation.Deg0) : SceneRotation.Deg0,
+      zoom: 1
+    },
+    weather: {
+      type: activeScene.weatherType,
+      opacity: activeScene.weatherOpacity,
+      intensity: activeScene.weatherIntensity,
+      fov: activeScene.weatherFov,
+      custom: { ...RainPreset }
+    }
+  };
+};

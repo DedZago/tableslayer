@@ -1,0 +1,39 @@
+name: tableslayer-release
+x-release: &release
+  image: tableslayer-local:release
+  build:
+    context: .
+    dockerfile: containers/Dockerfile
+    target: release
+  init: true
+  pids_limit: -1
+  restart: unless-stopped
+  volumes:
+    - ${DATA_ROOT:?Set an absolute DATA_ROOT}/release:/data:z
+services:
+  web:
+    <<: *release
+    environment:
+      ENV_NAME: production
+      TURSO_APP_DB_URL: file:/data/database/app.db
+      ASSET_STORAGE: local
+      LOCAL_ASSET_DIR: /data/assets
+      CLOUDFLARE_R2_BUCKET_URL: /assets
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run containers/host.sh setup first}
+      PARTYKIT_INTERNAL_URL: http://party:1999
+      PUBLIC_PARTYKIT_HOST: ${LAN_HOST:?Set the host LAN IP or hostname}:2000
+      PUBLIC_PARTYKIT_PROTOCOL: ws
+      BASE_URL: http://${LAN_HOST}:8080
+      ORIGIN: http://${LAN_HOST}:8080
+      SESSION_COOKIE_SECURE: 'false'
+    ports:
+      - '${BIND_ADDRESS:-127.0.0.1}:8080:3000'
+  party:
+    <<: *release
+    command: ['node', '../../containers/party.mjs']
+    environment:
+      APP_API_URL: http://web:3000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run containers/host.sh setup first}
+      DO_NOT_TRACK: '1'
+    ports:
+      - '${BIND_ADDRESS:-127.0.0.1}:2000:1999'

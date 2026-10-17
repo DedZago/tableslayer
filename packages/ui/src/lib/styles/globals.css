@@ -1,0 +1,108 @@
+@import 'reset.css';
+@import 'normalize.css';
+@import 'vars.css';
+@import 'utilities.css';
+
+/* license
+* Mota Italic Order# 23530
+*
+* The fonts listed in this notice are subject to the End User License
+* Agreement(s) entered into by the website owner. The fonts may not be
+* downloaded, linked to, or used (on or offline) by any other party.
+*
+* You may obtain a valid license directly at Mota Italic.
+*
+* Webfonts: Chikki
+* URL: http://www.motaitalic.com/product/chikki/
+* Copyright: Copyright 2015 Mota Italic. All rights reserved.
+*/
+
+/*  @font-face {  */
+/*  src: url('/Chikki-Variable.woff2') format('woff2');  */
+/*  font-family: 'Chikki Variable';  */
+/*  font-weight: 300 900;  */
+/*  font-style: normal;  */
+/*  font-display: swap;  */
+/*  }  */
+
+@font-face {
+  src: url('/RavenHellVariableGX.woff2') format('woff2');
+  font-family: 'Raven Hell';
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  src: url('/InterVariable.woff2') format('woff2');
+  font-family: 'Inter';
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+.light {
+  color-scheme: light;
+  --bg: #e5e5e5;
+  --fg: black;
+  --contrastFull: black;
+  --consttrastHighest: #111;
+  --contrastHigh: #222;
+  --contrastMedium: #ccc;
+  --contrastLow: #ddd;
+  --contrastLowest: #eee;
+  --contrastEmpty: #fff;
+  --fgPrimary: var(--primary-600);
+  --fgMuted: #666;
+  --fgDanger: var(--yellow-800);
+  --fgSuccess: var(--green-800);
+  --borderThin: solid var(--borderWidthThin) var(--contrastMedium);
+  --borderThick: solid var(--borderWidthThick) var(--contrastMedium);
+  --surfaceBg: var(--contrastLowest);
+  --inputBg: #f5f5f5;
+  --inputFocusBg: #fff;
+  --inputBorderColor: var(--contrastMedium);
+  --popoverBg: var(--contrastLowest);
+  --menuItemHover: var(--primary-50);
+  --menuItemBorderHover: solid 2px var(--primary-600);
+  color: var(--fg);
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #151515;
+  --fg: white;
+  --contrastFull: white;
+  --consttrastHighest: #eee;
+  --contrastHigh: #aaa;
+  --contrastMedium: #333;
+  --contrastLow: #222;
+  --contrastLowest: #111;
+  --contrastEmpty: #000;
+  --fgPrimary: var(--primary-500);
+  --fgMuted: #777;
+  --fgDanger: var(--yellow-200);
+  --fgSuccess: var(--green-200);
+  --borderThin: solid var(--borderWidthThin) var(--contrastMedium);
+  --borderThick: solid var(--borderWidthThick) var(--contrastMedium);
+  --surfaceBg: var(--contrastLowest);
+  --inputBg: #1c1c1c;
+  --inputFocusBg: #222;
+  --inputBorderColor: var(--contrastMedium);
+  --popoverBg: var(--bg);
+  --menuItemHover: var(--primary-950);
+  --menuItemBorderHover: solid 2px var(--primary-500);
+  color: var(--fg);
+}
+
+html {
+  font-family: var(--font-sans);
+  background-color: var(--bg);
+}
+
+.globalLoader {
+  position: fixed;
+  bottom: 2.5rem;
+  right: 2.5rem;
+  z-index: 2;
+}

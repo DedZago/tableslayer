@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Canvas, T } from '@threlte/core';
   import * as THREE from 'three';
-  import type { Callbacks, StageInteractionProps, StageProps } from './types';
+  import { StageMode, type Callbacks, type StageInteractionProps, type StageProps } from './types';
+  import { GridMode } from '../GridLayer/types';
   import Scene from '../Scene/Scene.svelte';
   import { type SceneExports, SceneLayerOrder } from '../Scene/types';
   import { setContext } from 'svelte';
@@ -129,6 +130,8 @@
     // Set by MarkerLayer when a pointer-down hits a marker; other layers use
     // it to yield shared gestures (e.g. fog-room double-tap) to the marker
     markerClaimAt: 0,
+    // Alt-drag moves the TV viewport rectangle, so layers must not start their own gestures with Alt held
+    altPansView: props.mode === StageMode.DM && props.grid.gridMode === GridMode.MapDefined,
     // Whether the Main pass renders through the EffectComposer (into a render
     // target) or straight to the canvas. Materials that precompile need it
     // because three keys programs on the output target.
@@ -138,6 +141,7 @@
 
   $effect(() => {
     stageContext.mode = props.mode;
+    stageContext.altPansView = props.mode === StageMode.DM && props.grid.gridMode === GridMode.MapDefined;
     stageContext.hoveredMarkerId = hoveredMarkerId;
     stageContext.pinnedMarkerIds = pinnedMarkerIds;
     stageContext.selectedMarkerIds = selectedMarkerIds;

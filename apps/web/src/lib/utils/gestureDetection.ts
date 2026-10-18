@@ -307,3 +307,74 @@ export function createMultiFingerPan(options: MultiFingerPanOptions): GestureDet
     }
   };
 }
+
+export interface PinchGestureOptions {
+  /**
+   * Called per touchmove with the change in finger spread and midpoint since the previous move
+   */
+  onPinch: (step: { scale: number; centroid: { x: number; y: number }; delta: { x: number; y: number } }) => void;
+
+  /**
+   * Optional target element (defaults to document.body)
+   */
+  target?: HTMLElement;
+}
+
+/**
+ * Creates a two-finger pinch/drag gesture. Only active while exactly two fingers are down;
+ * adding or lifting a finger restarts tracking so no step ever spans a change in finger count.
+ */
+export function createPinchGesture(options: PinchGestureOptions): GestureDetector {
+  if (!browser) {
+    return { destroy: () => {} };
+  }
+
+  const { onPinch, target = document.body } = options;
+
+  let previous: { distance: number; x: number; y: number } | null = null;
+
+  function measure(touches: TouchList) {
+    const [a, b] = [touches[0], touches[1]];
+    return {
+      distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      x: (a.clientX + b.clientX) / 2,
+      y: (a.clientY + b.clientY) / 2
+    };
+  }
+
+  function syncTracking(e: TouchEvent) {
+    previous = e.touches.length === 2 ? measure(e.touches) : null;
+  }
+
+  function handleTouchMove(e: TouchEvent) {
+    if (e.touches.length !== 2) {
+      previous = null;
+      return;
+    }
+
+    e.preventDefault();
+    const current = measure(e.touches);
+    if (previous && previous.distance > 0 && current.distance > 0) {
+      onPinch({
+        scale: current.distance / previous.distance,
+        centroid: { x: current.x, y: current.y },
+        delta: { x: current.x - previous.x, y: current.y - previous.y }
+      });
+    }
+    previous = current;
+  }
+
+  target.addEventListener('touchstart', syncTracking, { passive: true });
+  target.addEventListener('touchend', syncTracking, { passive: true });
+  target.addEventListener('touchcancel', syncTracking, { passive: true });
+  target.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+  return {
+    destroy() {
+      target.removeEventListener('touchstart', syncTracking);
+      target.removeEventListener('touchend', syncTracking);
+      target.removeEventListener('touchcancel', syncTracking);
+      target.removeEventListener('touchmove', handleTouchMove);
+    }
+  };
+}

@@ -19,18 +19,25 @@ cleanup() {
   wait || true
 }
 trap cleanup EXIT INT TERM
-pnpm --filter @tableslayer/ui dev & pids+=("$!")
-stage_log=/tmp/tableslayer-stage.log
-rm -f "$stage_log"
-# svelte-package --watch empties dist before its first build, so warm waits for "Watching" below
-pnpm --filter @tableslayer/stage dev > >(tee "$stage_log") 2>&1 & pids+=("$!")
+# svelte-package --watch empties dist before its first build; vite must not load packages until "Watching" appears
+watch_package() {
+  local log=/tmp/tableslayer-$1.log
+  rm -f "$log"
+  pnpm --filter "@tableslayer/$1" dev > >(tee "$log") 2>&1 & pids+=("$!")
+}
+package_ready() {
+  until grep -q 'Watching src/lib' "/tmp/tableslayer-$1.log" 2>/dev/null; do sleep 0.5; done
+}
+watch_package ui
+watch_package stage
+package_ready ui
+package_ready stage
 pnpm --filter docs exec vite dev --host 0.0.0.0 --port 5173 --strictPort & pids+=("$!")
 pnpm --filter web exec vite dev --host 0.0.0.0 --port 5174 --strictPort & pids+=("$!")
 (cd apps/web && node ../../containers/party.mjs) & pids+=("$!")
 
 # Compile the app's routes now so the first browser visit is served from cache
 warm() {
-  until grep -q 'Watching src/lib' "$stage_log" 2>/dev/null; do sleep 0.5; done
   for _ in $(seq 1 150); do
     node -e "fetch('http://127.0.0.1:5174/login').then(() => process.exit(0), () => process.exit(1))" && break
     sleep 0.5

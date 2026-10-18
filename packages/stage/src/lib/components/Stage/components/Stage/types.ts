@@ -52,6 +52,8 @@ export interface Callbacks {
   /** Multi-selection; when omitted, `onAoeTemplateSelected` receives the last id */
   onAoeTemplatesSelected?: (ids: string[]) => void;
   onAoeTemplateDeleted?: (id: string) => void;
+  /** A shape was right-clicked (mouse) or held down (touch); `position` is in client pixels */
+  onAoeTemplateMenu?: (id: string, position: { x: number; y: number }, trigger: 'contextmenu' | 'longpress') => void;
 }
 
 /**

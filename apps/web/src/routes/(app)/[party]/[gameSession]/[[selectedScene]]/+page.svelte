@@ -43,6 +43,7 @@
     startCombat,
     type CombatAction
   } from '$lib/components/Combat';
+  import AoeTemplateContextPanel from '$lib/components/GameSession/AoeTemplateContextPanel.svelte';
   import AoeTemplateManager from '$lib/components/GameSession/AoeTemplateManager.svelte';
   import SidePanelTabs, { type SidePanelTab } from '$lib/components/GameSession/SidePanelTabs.svelte';
   import TokenContextPanel from '$lib/components/GameSession/TokenContextPanel.svelte';
@@ -101,7 +102,9 @@
   import { throttle } from '$lib/utils/throttle';
   import { conditionPickerState, stepConditionValue } from '$lib/utils/markerConditionPicker';
   import {
+    AOE_EFFECT_DEFAULT_COLORS,
     AnnotationEffect,
+    type AoeEffect,
     AoeShape,
     type AoeTemplate,
     type AoeToolSettings,
@@ -1628,6 +1631,29 @@
 
   const removeSelectedAoeTemplates = () => [...(stageProps.aoeTemplates?.selectedIds ?? [])].forEach(removeAoeTemplate);
 
+  // Right-click or hold on a shape opens a quick editor for it (or for the whole selection it belongs to)
+  let aoeMenu = $state<{ ids: string[]; x: number; y: number } | null>(null);
+  const aoeMenuTemplates = $derived(
+    (stageProps.aoeTemplates?.templates ?? []).filter((template) => aoeMenu?.ids.includes(template.id))
+  );
+
+  const onAoeTemplateMenu = (id: string, position: { x: number; y: number }) => {
+    // A token under the same right-click opens its own panel instead
+    setTimeout(() => {
+      if (performance.now() - markerContextMenuOpenedAt < 100) return;
+      const selected = stageProps.aoeTemplates?.selectedIds ?? [];
+      const ids = selected.includes(id) ? selected : [id];
+      if (!selected.includes(id)) selectAoeTemplates(ids);
+      aoeMenu = { ids, ...position };
+    }, 0);
+  };
+
+  const changeAoeMenuEffect = (effect: AoeEffect) =>
+    aoeMenu?.ids.forEach((id) => updateAoeTemplate(id, { effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] }));
+
+  const changeAoeMenuField = (patch: Partial<Pick<AoeTemplate, 'opacity' | 'visibility'>>) =>
+    aoeMenu?.ids.forEach((id) => updateAoeTemplate(id, patch));
+
   const changeAoeTool = (patch: Partial<AoeToolSettings>) => {
     const layer = stageProps.aoeTemplates;
     if (!layer) return;
@@ -2443,6 +2469,7 @@
               onAoeTemplateSelected: selectAoeTemplate,
               onAoeTemplatesSelected: selectAoeTemplates,
               onAoeTemplateDeleted: removeAoeTemplate,
+              onAoeTemplateMenu,
               onCursorMove: handleCursorMove
             }}
             trackLocalCursor={true}
@@ -2471,6 +2498,23 @@
               : null}
           />
           <PerformanceDebugger />
+          {#if aoeMenu && aoeMenuTemplates.length > 0}
+            {@const first = aoeMenuTemplates[0]}
+            <AoeTemplateContextPanel
+              targetCount={aoeMenuTemplates.length}
+              position={{ x: aoeMenu.x, y: aoeMenu.y }}
+              currentEffect={aoeMenuTemplates.every((t) => t.effect === first.effect) ? first.effect : undefined}
+              opacity={aoeMenuTemplates.every((t) => t.opacity === first.opacity) ? first.opacity : undefined}
+              visibility={aoeMenuTemplates.every((t) => t.visibility === first.visibility)
+                ? first.visibility
+                : undefined}
+              onEffectChange={changeAoeMenuEffect}
+              onOpacityChange={(opacity) => changeAoeMenuField({ opacity })}
+              onVisibilityChange={(visibility) => changeAoeMenuField({ visibility })}
+              onDelete={() => aoeMenu?.ids.forEach(removeAoeTemplate)}
+              onClose={() => (aoeMenu = null)}
+            />
+          {/if}
           {#if tokenPanel && tokenPanelMarker}
             <TokenContextPanel
               name={tokenPanelMarker.title || tokenPanelMarker.label || 'Token'}

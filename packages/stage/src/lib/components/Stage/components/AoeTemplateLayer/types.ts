@@ -68,6 +68,8 @@ export interface AoeTemplateLayerProps {
   selectedIds?: string[];
   showLabels: boolean;
   tool: AoeToolSettings;
+  /** Lets a player-mode screen (the TV) pick, move and edit shapes while no tool is active */
+  playerSelectable?: boolean;
 }
 
 export interface AoeTemplateLayerExports {

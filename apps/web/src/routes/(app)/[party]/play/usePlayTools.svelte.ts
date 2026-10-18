@@ -94,6 +94,8 @@ export class PlayTools {
     visibility: StageMode.Player
   });
   aoeSelectedIds = $state<string[]>([]);
+  /** Long-press menu for the selected shapes; the TV is a touchscreen, so right-click keeps opening the radial menu */
+  aoeMenu = $state<{ x: number; y: number } | null>(null);
 
   // Temporary drawing state
   currentTemporaryLayerId = $state<string | null>(null);
@@ -318,6 +320,21 @@ export class PlayTools {
     this.aoeSelectedIds = this.aoeSelectedIds.filter((selected) => selected !== id);
     if (sceneId) this.#options.session.client?.write.deleteAoeTemplate(sceneId, id);
   };
+
+  onAoeTemplateMenu = (id: string, position: { x: number; y: number }, trigger: 'contextmenu' | 'longpress') => {
+    if (trigger !== 'longpress') return;
+    if (!this.aoeSelectedIds.includes(id)) this.aoeSelectedIds = [id];
+    this.aoeMenu = position;
+  };
+
+  setSelectedAoeEffect(effect: AoeEffect) {
+    const patch = { effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] };
+    this.aoeSelectedIds.forEach((id) => this.onAoeTemplateUpdated(id, patch));
+  }
+
+  setSelectedAoeOpacity(opacity: number) {
+    this.aoeSelectedIds.forEach((id) => this.onAoeTemplateUpdated(id, { opacity }));
+  }
 
   deleteSelectedAoeTemplates() {
     [...this.aoeSelectedIds].forEach(this.onAoeTemplateDeleted);

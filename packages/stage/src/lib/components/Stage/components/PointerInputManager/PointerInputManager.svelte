@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { StageProps } from '../Stage/types';
+  import { StageMode, type StageProps } from '../Stage/types';
+  import { GridMode } from '../GridLayer/types';
 
   interface Props {
     minZoom: number;
@@ -43,6 +44,8 @@
   let isDragging = $state(false);
   let lastPointerCount = $state(0);
   let prevCentroid = $state<{ x: number; y: number } | null>(null);
+  // Alt held at press time drags the TV viewport rectangle (map-defined DM view); later Alt presses still reach the tools
+  let altDragsTvView = false;
 
   $effect(() => {
     if (!stageElement) return;
@@ -67,6 +70,10 @@
 
   // Event handlers
   function onPointerDown(e: PointerEvent) {
+    if (pointerCache.length === 0) {
+      altDragsTvView =
+        e.altKey && !e.ctrlKey && stageProps.mode === StageMode.DM && stageProps.grid.gridMode === GridMode.MapDefined;
+    }
     pointerCache.push(e);
     isDragging = true;
   }
@@ -130,6 +137,10 @@
 
     if (e.ctrlKey) {
       onScenePan(dx, dy);
+    } else if (altDragsTvView) {
+      // The rectangle follows the cursor, so the map moves the opposite way underneath it
+      const movementFactor = 1 / stageProps.scene.zoom;
+      onMapPan(-dx * movementFactor, -dy * movementFactor);
     }
   }
 
@@ -214,6 +225,7 @@
 
     // Reset state if no pointers are down
     if (pointerCache.length === 0) {
+      altDragsTvView = false;
       isDragging = false;
       prevDiff = -1;
       prevAngle = 0;

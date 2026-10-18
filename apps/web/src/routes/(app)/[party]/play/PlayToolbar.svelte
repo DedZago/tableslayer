@@ -5,6 +5,7 @@
     IconCircle,
     IconCone2,
     IconRectangleVertical,
+    IconArrowsMaximize,
     IconRuler2,
     IconSelectAll,
     IconSquare,
@@ -13,7 +14,7 @@
   import { AOE_EFFECT_ORDER, AOE_EFFECT_SWATCHES } from '$lib/utils/aoeEffectSwatches';
   import type { PlayTools } from './usePlayTools.svelte';
 
-  let { tools }: { tools: PlayTools } = $props();
+  let { tools, showFit = false, onFit }: { tools: PlayTools; showFit?: boolean; onFit?: () => void } = $props();
 
   const shapes = [
     { value: AoeShape.Circle, label: 'Circle', icon: IconCircle },
@@ -100,6 +101,12 @@
       <Icon Icon={aoeIcon} size="1.75rem" />
       <span class="playToolbar__text">AoE</span>
     </button>
+    {#if showFit}
+      <button type="button" class="playToolbar__button" aria-label="Fit view" onclick={() => onFit?.()}>
+        <Icon Icon={IconArrowsMaximize} size="1.75rem" />
+        <span class="playToolbar__text">Fit</span>
+      </button>
+    {/if}
   </div>
 </div>
 

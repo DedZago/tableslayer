@@ -62,12 +62,14 @@
   const stage = getContext<{ performanceTier: PerformanceTier; markerClaimAt: number }>('stage');
   const framePacer = getContext<FramePacer | undefined>('framePacer');
   const MARKER_CLAIM_WINDOW_MS = 100;
-  const { onAoeTemplateAdded, onAoeTemplateUpdated, onAoeTemplateSelected, onAoeTemplatesSelected } =
+  const { onAoeTemplateAdded, onAoeTemplateUpdated, onAoeTemplateSelected, onAoeTemplatesSelected, onAoeTemplateMenu } =
     getContext<Callbacks>('callbacks');
 
   const EDIT_EMIT_INTERVAL_MS = 50;
   // A press that starts on an existing shape is a tap (select / cycle) until it travels this far
   const TAP_SLOP_PX = 10;
+  const LONG_PRESS_MS = 500;
+  const LONG_PRESS_SLOP_PX = 12;
 
   type Interaction =
     | { kind: 'idle' }
@@ -81,6 +83,7 @@
   let interaction = $state<Interaction>({ kind: 'idle' });
   let edit: { patches: Record<string, Partial<AoeTemplate>> } | null = $state(null);
   let lastEmitAt = 0;
+  let longPress: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
 
   // Shared time for every fill; each template's uTime is this same object
   const sharedTime = { value: 0 };
@@ -200,6 +203,7 @@
 
   // Ends any gesture; an in-progress move/resize lands its latest patch first
   const endInteraction = () => {
+    cancelLongPress();
     if (interaction.kind === 'moving' || interaction.kind === 'resizing') emitEdit(true);
     edit = null;
     interaction = { kind: 'idle' };
@@ -230,6 +234,67 @@
     edit = { patches: {} };
   };
 
+  // Grabbing a selected shape's origin moves the selection; grabbing its far end resizes it
+  const grabHandle = (point: TemplatePoint): boolean => {
+    const handles = editedTemplates
+      .filter((template) => selectedSet.has(template.id))
+      .map((template) => ({ template, ...getTemplateHandlePoints(template, ftPerPx) }));
+    const grabbedOrigin = handles.find((handle) => isNear(point, handle.origin));
+    if (grabbedOrigin) {
+      startMove(grabbedOrigin.template, point);
+      return true;
+    }
+    const grabbedEnd = handles.find((handle) => isNear(point, handle.end));
+    if (grabbedEnd) {
+      startResize(grabbedEnd.template.id);
+      return true;
+    }
+    return false;
+  };
+
+  const cancelLongPress = () => {
+    if (longPress) clearTimeout(longPress.timer);
+    longPress = null;
+  };
+
+  const touchClientPoint = (e: TouchEvent) => {
+    const touch = e.touches[0] ?? e.changedTouches[0];
+    return touch ? { x: touch.clientX, y: touch.clientY } : null;
+  };
+
+  // Holding a finger on a shape opens its menu; a token under the same press, or any drag, wins instead
+  const armLongPress = (e: TouchEvent, stack: string[]) => {
+    cancelLongPress();
+    const client = touchClientPoint(e);
+    if (!onAoeTemplateMenu || !client || stack.length === 0) return;
+    setTimeout(() => {
+      if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
+      cancelLongPress();
+      longPress = {
+        ...client,
+        timer: setTimeout(() => {
+          longPress = null;
+          if (interaction.kind === 'dragging' && interaction.crossed) return;
+          interaction = { kind: 'idle' };
+          const target = props.selectedId && stack.includes(props.selectedId) ? props.selectedId : stack[0];
+          if (!selectedSet.has(target)) selectTemplates([target]);
+          onAoeTemplateMenu(target, client, 'longpress');
+        }, LONG_PRESS_MS)
+      };
+    }, 0);
+  };
+
+  const onContextMenu = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
+    if (!coords || !(e instanceof MouseEvent)) return;
+    const id = findTemplatesAt(toLayerPoint(coords))[0]?.id;
+    if (!id) return;
+    e.preventDefault();
+    // A touch long-press is handled by the press timer
+    if ((e as PointerEvent).pointerType === 'touch') return;
+    if (interaction.kind === 'dragging' && !interaction.crossed) interaction = { kind: 'idle' };
+    onAoeTemplateMenu?.(id, { x: e.clientX, y: e.clientY }, 'contextmenu');
+  };
+
   const onMouseDown = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
     if (!coords) return;
     if (e instanceof MouseEvent && e.button !== 0) return;
@@ -238,9 +303,17 @@
     const point = toLayerPoint(coords);
     const disableSnap = e instanceof MouseEvent && e.altKey;
 
+    cancelLongPress();
+
     if (!isActive) {
+      if (grabHandle(point)) return;
+
       const stack = findTemplatesAt(point).map((template) => template.id);
-      if (stack.length === 0) return;
+      if (stack.length === 0) {
+        if (props.playerSelectable && selectedIds.length > 0) selectTemplates([]);
+        return;
+      }
+      if (e instanceof TouchEvent) armLongPress(e, stack);
       // A token or light under the same click wins; markers stamp the claim on their own mouse-down
       setTimeout(() => {
         if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
@@ -255,31 +328,23 @@
     }
     if (interaction.kind !== 'idle') return;
 
-    const selected = editedTemplates.filter((template) => selectedSet.has(template.id));
-    const handles = selected.map((template) => ({ template, ...getTemplateHandlePoints(template, ftPerPx) }));
-    const grabbedOrigin = handles.find((handle) => isNear(point, handle.origin));
-    if (grabbedOrigin) {
-      startMove(grabbedOrigin.template, point);
-      return;
-    }
-    const grabbedEnd = handles.find((handle) => isNear(point, handle.end));
-    if (grabbedEnd) {
-      startResize(grabbedEnd.template.id);
-      return;
-    }
+    if (grabHandle(point)) return;
 
     // Starts a new shape even on top of existing ones; a short tap instead selects the shape under it
-    startDraft(
-      point,
-      disableSnap,
-      findTemplatesAt(point).map((template) => template.id)
-    );
+    const stack = findTemplatesAt(point).map((template) => template.id);
+    startDraft(point, disableSnap, stack);
+    if (e instanceof TouchEvent) armLongPress(e, stack);
   };
 
   const onMouseMove = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
     if (!coords) return;
     const point = toLayerPoint(coords);
     const disableSnap = e instanceof MouseEvent && e.altKey;
+
+    if (longPress && e instanceof TouchEvent) {
+      const client = touchClientPoint(e);
+      if (client && Math.hypot(client.x - longPress.x, client.y - longPress.y) > LONG_PRESS_SLOP_PX) cancelLongPress();
+    }
 
     // The button was released outside the canvas, where no mouseup reaches us
     const isEditing = interaction.kind === 'moving' || interaction.kind === 'resizing';
@@ -334,6 +399,7 @@
   };
 
   const onMouseUp = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
+    cancelLongPress();
     // Released off the layer, or a pinch cancelled the gesture
     if (!coords) {
       if (interaction.kind !== 'aiming') endInteraction();
@@ -377,7 +443,7 @@
     if (hasDraft()) interaction = { kind: 'idle' };
   };
 
-  const inputIsActive = $derived(isActive || (selectable && mode === StageMode.DM));
+  const inputIsActive = $derived(isActive || (selectable && (mode === StageMode.DM || !!props.playerSelectable)));
 </script>
 
 <LayerInput
@@ -388,6 +454,8 @@
   {onMouseDown}
   {onMouseMove}
   {onMouseUp}
+  {onContextMenu}
+  isContextMenuActive={inputIsActive}
 />
 
 <!-- Invisible quad that receives pointer input in layer space -->

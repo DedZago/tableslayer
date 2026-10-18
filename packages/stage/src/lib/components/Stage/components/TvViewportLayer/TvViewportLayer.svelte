@@ -28,7 +28,7 @@
   const DIM_COLOR = '#000000';
   const DIM_OPACITY = 0.4;
 
-  const HINT_TEXT = 'Ctrl-drag to pan the view';
+  const HINT_TEXT = 'Ctrl-drag to pan · Alt-drag to move the TV view';
   const HINT_FONT_SCREEN_PX = 13;
   const HINT_MARGIN_SCREEN_PX = 8;
   const HINT_VISIBLE_S = 10;

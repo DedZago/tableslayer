@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as THREE from 'three';
-  import { onDestroy, onMount } from 'svelte';
+  import { getContext, onDestroy, onMount } from 'svelte';
   import { useThrelte } from '@threlte/core';
   import type { Size } from '../../types';
   import { SceneLayer } from '../Scene/types';
@@ -47,6 +47,7 @@
   }: Props = $props();
 
   const { camera, renderer, size } = useThrelte();
+  const stage = getContext<{ altPansView?: boolean } | undefined>('stage');
 
   let raycaster = new THREE.Raycaster();
   raycaster.layers.enable(SceneLayer.Overlay);
@@ -112,7 +113,7 @@
 
   // Internal event handler methods for mouse
   function handleMouseDown(event: MouseEvent) {
-    if (onMouseDown && isActive && !event.ctrlKey && !event.metaKey) {
+    if (onMouseDown && isActive && !event.ctrlKey && !event.metaKey && !(event.altKey && stage?.altPansView)) {
       onMouseDown(event, mouseToCanvasCoords(event));
     }
   }

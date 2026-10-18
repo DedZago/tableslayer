@@ -38,7 +38,7 @@ A mode where the grid has a fixed cell count matching the map's actual grid (e.g
 - Map **rotation is cardinal-only** (90° steps); free-form rotation is disabled
 - Map **pan is the synced control** for what the TV shows — anchored content rides along
 - Marker/light positions are **center-relative map pixels** (map source-image pixels, origin at map center, +y up); the scene's `mapCoordVersion` column records this (0 = legacy display-space, 1 = map-local)
-- In the editor (DM mode), the display-rect clipping is disabled so the whole map is visible; a `TvViewportLayer` rectangle (outline + dim mask) shows the playfield-visible region, and `scene.fit()` frames the map plus the TV rect
+- In the editor (DM mode), the display-rect clipping is disabled so the whole map is visible; a `TvViewportLayer` rectangle (outline + dim mask) shows the playfield-visible region (Alt-drag moves it by panning the map underneath), and `scene.fit()` frames the map plus the TV rect
 - The playfield (Player mode) renders exactly as before: clipped to the display rect, map transform applied
 
 **Map alignment** (`getAlignedMapTransform` in `helpers/mapSpace.ts`, used by the editor's "Reset map position" and server-side scene creation): cardinal rotation to match display orientation, locked zoom, and an offset that centers the map when it fits the display rect or aligns top-left corners when it overflows.

@@ -7,7 +7,8 @@
   import { buildSceneProps, throttle } from '$lib/utils';
   import { transformCursorsToArray } from '$lib/utils/cursors';
   import { StageDefaultProps } from '$lib/utils/defaultMapState';
-  import { createMultiFingerPan, createUnifiedGestureDetector } from '$lib/utils/gestureDetection';
+  import { createMultiFingerPan, createPinchGesture, createUnifiedGestureDetector } from '$lib/utils/gestureDetection';
+  import { applyPinchStep, type PinchStep } from '$lib/utils/pinchZoom';
   import { extractMeasurementProps, getLatestMeasurement } from '$lib/utils/measurements';
   import { createConditionalActivityTimer } from '$lib/utils/activityTimer';
   import { devLog } from '$lib/utils/debug';
@@ -28,6 +29,7 @@
   import { PersistButton } from '@tableslayer/ui';
   import { IconArrowBackUp } from '@tabler/icons-svelte';
   import { onMount, untrack } from 'svelte';
+  import AoeTemplateContextPanel from '$lib/components/GameSession/AoeTemplateContextPanel.svelte';
   import PauseOverlay from './PauseOverlay.svelte';
   import PlayToolbar from './PlayToolbar.svelte';
   import SleepOverlay from './SleepOverlay.svelte';
@@ -166,6 +168,10 @@
   // Plain variable on purpose: zoom comes back from the Stage's autofit, and a
   // reactive read here would rebuild renderedProps -> refit -> zoom -> loop.
   let sceneZoom = 1;
+  // Pinch-zoom view, local to this screen like sceneZoom; autoFit comes back with the Fit button
+  let viewOffset = { x: 0, y: 0 };
+  let viewAutoFit = true;
+  let viewZoomed = $state(false);
   let dragPositions = $state<Record<string, { x: number; y: number }>>({});
 
   const fallbackProps: StageProps = untrack(() =>
@@ -185,7 +191,7 @@
       {
         mode: 'client',
         activeLayer: tools.activeLayer,
-        viewport: { offset: { x: 0, y: 0 }, zoom: sceneZoom },
+        viewport: { offset: viewOffset, zoom: sceneZoom, autoFit: viewAutoFit },
         mapTransform: mapDragOffset ? { offset: mapDragOffset } : undefined,
         // Untracked on purpose: drag movement is applied to renderedProps in
         // place by onMarkerMoved; the overrides only matter when a rebuild
@@ -200,7 +206,12 @@
           smoothingEnabled: false
         },
         measurement: tools.measurement,
-        aoeTemplates: { tool: tools.aoeTool, selectedIds: tools.aoeSelectedIds, showLabels: false }
+        aoeTemplates: {
+          tool: tools.aoeTool,
+          selectedIds: tools.aoeSelectedIds,
+          showLabels: false,
+          playerSelectable: true
+        }
       },
       data.bucketUrl
     );
@@ -367,6 +378,34 @@
     }
   }
 
+  // Two-finger pinch zooms about the fingers and drags with them; mutated in place, never through the doc
+  function onPinch(step: PinchStep) {
+    const bounds = stageElement?.getBoundingClientRect();
+    if (!bounds) return;
+    const next = applyPinchStep(
+      { offset: viewOffset, zoom: sceneZoom },
+      { ...step, centroid: { x: step.centroid.x - bounds.left, y: step.centroid.y - bounds.top } },
+      bounds,
+      renderedProps.scene.rotation
+    );
+    viewOffset = next.offset;
+    sceneZoom = next.zoom;
+    viewAutoFit = false;
+    viewZoomed = true;
+    renderedProps.scene.autoFit = false;
+    renderedProps.scene.zoom = next.zoom;
+    renderedProps.scene.offset = next.offset;
+  }
+
+  function resetView() {
+    viewOffset = { x: 0, y: 0 };
+    viewAutoFit = true;
+    viewZoomed = false;
+    renderedProps.scene.autoFit = true;
+    renderedProps.scene.offset = { x: 0, y: 0 };
+    stage?.scene?.fit();
+  }
+
   function onMeasurementStart(startPoint: { x: number; y: number }, type: number) {
     session.presence?.updateMeasurement(
       startPoint,
@@ -489,6 +528,8 @@
       ? createMultiFingerPan({ fingerCount: 4, target: stageElement, onPan: onMapPan })
       : null;
 
+    const pinchGesture = stageElement ? createPinchGesture({ target: stageElement, onPinch }) : null;
+
     // Drop back to no tool after 5s of inactivity while a tool is active
     const activityTimer = stageElement
       ? createConditionalActivityTimer(
@@ -529,6 +570,7 @@
       document.removeEventListener('visibilitychange', commitPendingGestureWrites);
       gestureDetector?.destroy();
       mapPanGesture?.destroy();
+      pinchGesture?.destroy();
       activityTimer?.destroy();
       for (const timer of dragClearTimers.values()) clearTimeout(timer);
       clearTimeout(mapDragClearTimer);
@@ -603,7 +645,8 @@
       onAoeTemplateUpdated: tools.onAoeTemplateUpdated,
       onAoeTemplateSelected: (id) => (tools.aoeSelectedIds = id ? [id] : []),
       onAoeTemplatesSelected: (ids) => (tools.aoeSelectedIds = ids),
-      onAoeTemplateDeleted: tools.onAoeTemplateDeleted
+      onAoeTemplateDeleted: tools.onAoeTemplateDeleted,
+      onAoeTemplateMenu: tools.onAoeTemplateMenu
     }}
     cursors={cursorArray}
     trackLocalCursor={false}
@@ -632,7 +675,29 @@
 </div>
 
 {#if !gameIsPaused && !stageIsLoading}
-  <PlayToolbar {tools} />
+  <PlayToolbar {tools} showFit={viewZoomed} onFit={resetView} />
+{/if}
+
+{#if tools.aoeMenu && tools.aoeSelectedIds.length}
+  {@const menuTemplates = (renderedProps.aoeTemplates?.templates ?? []).filter((t) =>
+    tools.aoeSelectedIds.includes(t.id)
+  )}
+  {#if menuTemplates.length}
+    <AoeTemplateContextPanel
+      targetCount={menuTemplates.length}
+      position={tools.aoeMenu}
+      currentEffect={menuTemplates.every((t) => t.effect === menuTemplates[0].effect)
+        ? menuTemplates[0].effect
+        : undefined}
+      opacity={menuTemplates.every((t) => t.opacity === menuTemplates[0].opacity)
+        ? menuTemplates[0].opacity
+        : undefined}
+      onEffectChange={(effect) => tools.setSelectedAoeEffect(effect)}
+      onOpacityChange={(opacity) => tools.setSelectedAoeOpacity(opacity)}
+      onDelete={() => tools.deleteSelectedAoeTemplates()}
+      onClose={() => (tools.aoeMenu = null)}
+    />
+  {/if}
 {/if}
 
 {#if isTouchDevice && showTouchHint && !gameIsPaused}

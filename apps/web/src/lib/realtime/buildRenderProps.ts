@@ -44,6 +44,7 @@ export interface LocalView {
     selectedId?: string | null;
     selectedIds?: string[];
     showLabels?: boolean;
+    playerSelectable?: boolean;
   };
 }
 
@@ -102,6 +103,9 @@ export const buildRenderProps = (snapshot: SceneSnapshot, view: LocalView, bucke
   if (view.aoeTemplates?.selectedId !== undefined) props.aoeTemplates!.selectedId = view.aoeTemplates.selectedId;
   if (view.aoeTemplates?.selectedIds !== undefined) props.aoeTemplates!.selectedIds = view.aoeTemplates.selectedIds;
   if (view.aoeTemplates?.showLabels !== undefined) props.aoeTemplates!.showLabels = view.aoeTemplates.showLabels;
+  if (view.aoeTemplates?.playerSelectable !== undefined) {
+    props.aoeTemplates!.playerSelectable = view.aoeTemplates.playerSelectable;
+  }
 
   return props;
 };

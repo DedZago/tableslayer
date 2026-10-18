@@ -1,4 +1,7 @@
 import {
+  AOE_EFFECT_DEFAULT_COLORS,
+  AoeEffect,
+  AoeShape,
   DrawMode,
   GridType,
   MapLayerType,
@@ -17,6 +20,21 @@ export const StageDefaultProps: StageProps = {
   mode: StageMode.DM,
   activeLayer: MapLayerType.None,
   backgroundColor: '#404040',
+  aoeTemplates: {
+    templates: [],
+    selectedId: null,
+    showLabels: true,
+    tool: {
+      shape: AoeShape.Circle,
+      effect: AoeEffect.Fire,
+      color: AOE_EFFECT_DEFAULT_COLORS[AoeEffect.Fire],
+      opacity: 0.85,
+      lineWidth: 5,
+      snapToGrid: true,
+      snapAngle: true,
+      visibility: StageMode.Player
+    }
+  },
   annotations: {
     layers: [
       {

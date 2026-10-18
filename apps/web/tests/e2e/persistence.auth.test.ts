@@ -24,8 +24,8 @@ test('registered artwork, assets, catalog and handouts survive a controlled rest
     const dismiss = page.getByTestId('checklistDismissButton');
     if (await dismiss.isVisible()) await dismiss.click();
     await page.keyboard.press('m');
-    const controls = page.locator('.handout-controls');
-    await controls.locator('summary').click();
+    await page.getByRole('tab', { name: /^Handout/ }).click();
+    const controls = page.locator('#sidePanel-handout');
     await controls
       .getByLabel('Upload handout image', { exact: true })
       .setInputFiles(path.resolve('tests/e2e/fixtures/test-image.png'));

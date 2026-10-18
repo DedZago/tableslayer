@@ -1,3 +1,5 @@
+import type { StatBlock } from '$lib/utils/statBlock/types';
+
 export type FiveToolsPreview = {
   identity: string;
   name: string;
@@ -6,6 +8,10 @@ export type FiveToolsPreview = {
   artworkUrl: string | null;
   warnings: string[];
   duplicates?: { id: string; name: string }[];
+  cr?: string;
+  creatureType?: string;
+  size?: string;
+  statBlock?: StatBlock | null;
 };
 
 export type FiveToolsImportItem = {
@@ -36,5 +42,5 @@ export type FiveToolsCatalogResult = {
   status: FiveToolsCatalogStatus;
   records: FiveToolsPreview[];
   totalMatches: number;
-  sources: string[];
+  sources: { source: string; count: number }[];
 };

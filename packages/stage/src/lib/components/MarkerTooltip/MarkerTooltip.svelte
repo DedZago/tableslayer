@@ -12,6 +12,8 @@
   type MarkerVisibility = (typeof MarkerVisibility)[keyof typeof MarkerVisibility];
   import { onDestroy } from 'svelte';
   import { IconPin, IconPinFilled } from '@tabler/icons-svelte';
+  import type { MarkerCondition } from '../Stage/components/MarkerLayer/types';
+  import { resolveCondition, sortConditions } from '../Stage/helpers/markerConditions';
 
   interface MarkerData {
     id: string;
@@ -19,6 +21,7 @@
     note?: unknown;
     visibility?: number;
     size?: number;
+    conditions?: MarkerCondition[];
     tooltip?: {
       title?: string;
       content?: unknown;
@@ -135,8 +138,16 @@
     return null;
   };
 
+  const getConditionRows = (marker: MarkerData | null, isDM: boolean) =>
+    sortConditions((marker?.conditions ?? []).filter((c) => isDM || !c.dmOnly)).map((c) => ({
+      key: c.id,
+      value: c.value,
+      ...resolveCondition(c)
+    }));
+
   let markerContent = $derived(getMarkerContent(marker));
   let markerTitle = $derived(getMarkerTitle(marker));
+  let conditionRows = $derived(getConditionRows(marker, isDM));
 
   function getEstimatedBounds(
     virtualEl: {
@@ -344,7 +355,7 @@
   });
 </script>
 
-{#if (markerContent || markerTitle) && position}
+{#if (markerContent || markerTitle || conditionRows.length > 0) && position}
   <div
     bind:this={tooltipElement}
     class="markerTooltip"
@@ -370,6 +381,17 @@
     {/if}
     {#if markerTitle}
       <div class="markerTooltip__title {isDM ? 'markerTooltip__title--dm' : ''}">{markerTitle}</div>
+    {/if}
+    {#if conditionRows.length > 0}
+      <ul class="markerTooltip__conditions">
+        {#each conditionRows as row (row.key)}
+          <li class="markerTooltip__condition">
+            <span class="markerTooltip__conditionSwatch" style:background={row.color}></span>
+            <span class="markerTooltip__conditionLabel">{row.label}{row.value ? ` ${row.value}` : ''}</span>
+            <span class="markerTooltip__conditionDescription">{row.description}</span>
+          </li>
+        {/each}
+      </ul>
     {/if}
     {#if markerContent}
       <Editor content={markerContent} editable={false} />
@@ -424,6 +446,43 @@
 
   .markerTooltip__title:last-child {
     margin-bottom: 0;
+  }
+
+  .markerTooltip__conditions {
+    list-style: none;
+    margin: 0 0 0.5rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .markerTooltip__condition {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.5rem;
+    align-items: baseline;
+  }
+
+  .markerTooltip__conditionSwatch {
+    grid-row: span 2;
+    align-self: center;
+    width: 0.625rem;
+    height: 0.625rem;
+    border: var(--borderThin);
+    border-radius: 999px;
+  }
+
+  .markerTooltip__conditionLabel {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .markerTooltip__conditionDescription {
+    grid-column: 2;
+    font-size: 0.75rem;
+    color: var(--fgMuted);
   }
 
   /* Arrow indicator */

@@ -1,4 +1,10 @@
-import { insertAnnotationSchema, insertLightSchema, insertMarkerSchema, insertSceneSchema } from '$lib/db/app/schema';
+import {
+  insertAnnotationSchema,
+  insertAoeTemplateSchema,
+  insertLightSchema,
+  insertMarkerSchema,
+  insertSceneSchema
+} from '$lib/db/app/schema';
 import { apiFactory } from '$lib/factories';
 import type { PersistSessionWire } from '$lib/realtime/wire';
 import {
@@ -17,9 +23,11 @@ const sceneWireSchema = z.object({
     .extend({ id: z.string(), order: z.number() }),
   markers: z.array(insertMarkerSchema),
   lights: z.array(insertLightSchema),
+  // Wire timestamps are Unix seconds (the doc form); the server converts them back to Dates
+  aoeTemplates: z.array(insertAoeTemplateSchema.extend({ createdAt: z.number().int() })).default([]),
   annotations: z.array(insertAnnotationSchema),
   fogMask: z.string().nullable().optional(),
-  parts: z.array(z.enum(['settings', 'markers', 'lights', 'annotations', 'fogMask']))
+  parts: z.array(z.enum(['settings', 'markers', 'lights', 'aoeTemplates', 'annotations', 'fogMask']))
 });
 
 const validationSchema = z.object({

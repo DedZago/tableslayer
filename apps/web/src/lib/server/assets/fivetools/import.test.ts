@@ -33,6 +33,14 @@ for (const statement of assetMigration
 await testClient.execute(
   await readFile(new URL('../../../db/app/migrations/0053_famous_mac_gargan.sql', import.meta.url), 'utf8')
 );
+const combatMigration = await readFile(
+  new URL('../../../db/app/migrations/0056_known_doomsday.sql', import.meta.url),
+  'utf8'
+);
+for (const statement of combatMigration
+  .split('--> statement-breakpoint')
+  .filter((statement) => statement.includes('ALTER TABLE `asset`')))
+  await testClient.execute(statement);
 afterAll(() => testClient.close());
 beforeEach(async () => {
   await db.delete(assetImportReceiptsTable);
@@ -95,7 +103,7 @@ describe('durable per-item asset imports', () => {
       artworkLocation: asset.artworkLocation,
       tokenArtworkLocation: asset.tokenArtworkLocation,
       originalName: 'Wolf',
-      adapterVersion: 'bestiary-art-v1'
+      adapterVersion: 'bestiary-stats-v1'
     });
   });
   it('replaces only supplied artwork and never changes edited names', async () => {

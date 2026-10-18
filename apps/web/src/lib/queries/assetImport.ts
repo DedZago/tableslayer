@@ -6,6 +6,7 @@ import type {
   FiveToolsImportResult,
   FiveToolsPreview
 } from '$lib/server/assets/fivetools/types';
+import type { StatBlock } from '$lib/utils/statBlock/types';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 
 export const useAssetImportPreviewMutation = () =>
@@ -34,16 +35,23 @@ export const createAssetCatalogQuery = (
   search: () => string,
   source: () => string,
   offset: () => number,
-  enabled: () => boolean
+  enabled: () => boolean,
+  filters: () => { crRange: string; creatureType: string }
 ) =>
   createQuery<FiveToolsCatalogResult>(() => ({
-    queryKey: ['assetCatalog', search(), source(), offset()],
+    queryKey: ['assetCatalog', search(), source(), offset(), filters()],
     enabled: enabled(),
     queryFn: async () => {
       const response = await fetch('/api/assets/catalog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'search', search: search(), source: source(), offset: offset() })
+        body: JSON.stringify({
+          action: 'search',
+          search: search(),
+          source: source(),
+          offset: offset(),
+          ...filters()
+        })
       });
       if (!response.ok) throw new Error((await response.json()).message || 'Catalog search failed');
       return response.json();
@@ -52,6 +60,26 @@ export const createAssetCatalogQuery = (
     refetchInterval: (query) => (query.state.data?.status.state === 'loading' ? 1500 : false),
     retry: false
   }));
+
+export const createCatalogStatBlockQuery = (identity: () => string | null) =>
+  createQuery<StatBlock | null>(() => {
+    const current = identity();
+    return {
+      queryKey: ['assetCatalogStatBlock', current],
+      enabled: !!current,
+      queryFn: async () => {
+        const response = await fetch('/api/assets/catalog', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'statBlock', identity: current })
+        });
+        if (!response.ok) throw new Error((await response.json()).message || 'Stat block lookup failed');
+        return (await response.json()).statBlock;
+      },
+      staleTime: Infinity,
+      retry: false
+    };
+  });
 
 export const useAssetCatalogRefreshMutation = () => {
   const client = useQueryClient();

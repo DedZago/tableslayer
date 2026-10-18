@@ -1,5 +1,5 @@
 import { db } from '$lib/db/app';
-import { sceneTable } from '$lib/db/app/schema';
+import { aoeTemplateTable, sceneTable } from '$lib/db/app/schema';
 import { getAnnotationMaskData, getAnnotationsForScene } from '$lib/server/annotations';
 import { getGameSession } from '$lib/server/gameSession';
 import { getLightsForScene } from '$lib/server/light';
@@ -39,6 +39,11 @@ export const POST = async ({ request, locals }: RequestEvent) => {
       scenes.map(async (scene) => {
         const markers = await getMarkersForScene(scene.id);
         const lights = await getLightsForScene(scene.id);
+        const aoeTemplates = await db
+          .select()
+          .from(aoeTemplateTable)
+          .where(eq(aoeTemplateTable.sceneId, scene.id))
+          .all();
         const annotations = await getAnnotationsForScene(scene.id);
 
         // Get the fogOfWarMask from the database for this scene
@@ -77,6 +82,7 @@ export const POST = async ({ request, locals }: RequestEvent) => {
             return markerWithoutThumb;
           }),
           lights,
+          aoeTemplates,
           annotations: annotationsWithMasks
         };
       })

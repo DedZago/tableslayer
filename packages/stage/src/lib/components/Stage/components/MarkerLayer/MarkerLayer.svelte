@@ -2,13 +2,13 @@
   import * as THREE from 'three';
   import { T, type Props as ThrelteProps } from '@threlte/core';
   import { MarkerShape, MarkerSize, MarkerVisibility, type Marker } from './types';
-  import { getContext } from 'svelte';
+  import { getContext, onDestroy, untrack } from 'svelte';
   import LayerInput from '../LayerInput/LayerInput.svelte';
   import type { Callbacks } from '../Stage/types';
   import { type StageProps, StageMode } from '../Stage/types';
   import MarkerToken from './MarkerToken.svelte';
   import { getGridCellSize, snapToGrid } from '../../helpers/grid';
-  import type { GridLayerProps } from '../GridLayer/types';
+  import { GridType, type GridLayerProps } from '../GridLayer/types';
   import type { DisplayProps } from '../Stage/types';
   import { SceneLayer } from '../Scene/types';
   import { MapLayerType } from '../MapLayer/types';
@@ -31,19 +31,45 @@
     mode: StageMode;
     hoveredMarkerId: string | null;
     pinnedMarkerIds: string[];
+    selectedMarkerIds?: string[];
+    dropTargetMarkerId?: string | null;
+    activeTurnMarkerId?: string | null;
     markerClaimAt: number;
   }>('stage');
-  const { onMarkerAdded, onMarkerMoved, onMarkerSelected, onMarkerDoubleClick, onMarkerContextMenu, onMarkerHover } =
-    getContext<Callbacks>('callbacks');
+  const {
+    onMarkerAdded,
+    onMarkerMoved,
+    onMarkersMoved,
+    onMarkersMoveEnd,
+    onMarkerSelected,
+    onMarkerDoubleClick,
+    onMarkerContextMenu,
+    onMarkerHover
+  } = getContext<Callbacks>('callbacks');
 
   // Double-click / double-tap detection on markers
   const DOUBLE_CLICK_MS = 350;
   let lastMarkerClick: { id: string; time: number } | null = null;
 
-  // A drag that actually moved must not pop the selection tooltip on release; a
+  // A press only becomes a drag once the pointer moves past the threshold, so
+  // a stationary click never writes a position (and never adds an undo step)
+  const DRAG_START_THRESHOLD_PX = 3;
+  const TOUCH_DRAG_START_THRESHOLD_PX = 8;
+  type PendingDrag = { clientX: number; clientY: number; isTouch: boolean };
+  // Reactive: the player tooltip stays hidden while a press may still become a drag
+  let pendingDrag: PendingDrag | null = $state.raw(null);
+
+  // Pressing a selected token while several are selected moves the whole selection
+  type GroupDrag = {
+    anchorStart: THREE.Vector2;
+    grabOffset: THREE.Vector2;
+    members: { marker: Marker; start: THREE.Vector2 }[];
+    lastDelta: THREE.Vector2 | null;
+  };
+  let groupDrag: GroupDrag | null = null;
+
+  // A drag that actually started must not pop the selection tooltip on release; a
   // simple tap still does, and a tooltip already open before the drag survives it
-  const DRAG_TOOLTIP_THRESHOLD_PX = 5;
-  let downClientPoint: { x: number; y: number } | null = null;
   let tooltipWasOpenAtDown = false;
   let dragMoved = false;
   let tooltipSuppressed = $state(false);
@@ -135,7 +161,7 @@
       tooltipWasOpenAtDown = selectedMarker?.id === closestMarker.id && !tooltipSuppressed;
       tooltipSuppressed = false;
       dragMoved = false;
-      downClientPoint = getClientPoint(e);
+      const clientPoint = getClientPoint(e);
       selectedMarker = closestMarker;
 
       // Double-click/tap detection (only when a consumer is registered):
@@ -148,13 +174,19 @@
       lastMarkerClick = isDoubleClick ? null : { id: closestMarker.id, time: now };
 
       // Allow dragging in both DM and Player mode, except for pin-shaped markers (locked)
-      if (!isDoubleClick && closestMarker.shape !== MarkerShape.Pin) {
-        isDragging = true;
-        // Clear tooltip when drag starts
+      if (!isDoubleClick && closestMarker.shape !== MarkerShape.Pin && clientPoint) {
+        pendingDrag = { clientX: clientPoint.x, clientY: clientPoint.y, isTouch: isTouchEvent };
+        groupDrag = createGroupDrag(closestMarker, gridCoords);
+        // Clear tooltip when a drag may start
         hoveredMarkerDelayed = null;
         clearHoverTimer();
+        listenForRelease();
       }
-      onMarkerSelected(selectedMarker);
+      // A press on a group member keeps the selection until the press resolves:
+      // a click collapses it to the token, a drag moves the group
+      if (!groupDrag) {
+        onMarkerSelected(selectedMarker);
+      }
       if (isDoubleClick) {
         onMarkerDoubleClick(closestMarker);
       }
@@ -232,19 +264,108 @@
       clearHoverTimer();
     }
 
-    if (isDragging && selectedMarker) {
-      if (!dragMoved && downClientPoint) {
-        const clientPoint = getClientPoint(e);
-        if (
-          clientPoint &&
-          Math.hypot(clientPoint.x - downClientPoint.x, clientPoint.y - downClientPoint.y) > DRAG_TOOLTIP_THRESHOLD_PX
-        ) {
-          dragMoved = true;
-        }
-      }
-      onMarkerMoved(selectedMarker, snapPosition);
+    if (pendingDrag) {
+      if (!hasPassedDragThreshold(e, pendingDrag)) return;
+      pendingDrag = null;
+      isDragging = true;
+      dragMoved = true;
+    }
+
+    if (!isDragging || !selectedMarker) return;
+    if (groupDrag) {
+      moveGroup(groupDrag, position);
+      return;
+    }
+    onMarkerMoved(selectedMarker, snapPosition);
+  }
+
+  function hasPassedDragThreshold(e: Event, drag: PendingDrag) {
+    const clientPoint = getClientPoint(e);
+    if (!clientPoint) return false;
+    const threshold = drag.isTouch ? TOUCH_DRAG_START_THRESHOLD_PX : DRAG_START_THRESHOLD_PX;
+    return Math.hypot(clientPoint.x - drag.clientX, clientPoint.y - drag.clientY) > threshold;
+  }
+
+  function currentSelection(): string[] {
+    return stage.selectedMarkerIds ?? props.marker.selectedIds ?? [];
+  }
+
+  function createGroupDrag(anchor: Marker, cursor: THREE.Vector2): GroupDrag | null {
+    const selection = currentSelection();
+    if (stage.mode !== StageMode.DM || selection.length < 2 || !selection.includes(anchor.id)) return null;
+
+    const members = props.marker.markers
+      .filter((m) => selection.includes(m.id) && m.shape !== MarkerShape.Pin && isTokenInteractable(m))
+      .map((marker) => ({ marker, start: new THREE.Vector2(marker.position.x, marker.position.y) }));
+    if (members.length < 2) return null;
+
+    const anchorStart = new THREE.Vector2(anchor.position.x, anchor.position.y);
+    return { anchorStart, grabOffset: cursor.clone().sub(anchorStart), members, lastDelta: null };
+  }
+
+  function resolveGroupDelta(cursor: THREE.Vector2, drag: GroupDrag): THREE.Vector2 {
+    const delta = cursor.clone().sub(drag.grabOffset).sub(drag.anchorStart);
+    if (!props.marker.snapToGrid) return delta;
+
+    if (grid.gridType === GridType.Square) {
+      const cell = getGridCellSize(grid, display);
+      return new THREE.Vector2(Math.round(delta.x / cell) * cell, Math.round(delta.y / cell) * cell);
+    }
+    const snapped = snapToGrid(drag.anchorStart.clone().add(delta), grid, display, true, localScale);
+    return snapped.sub(drag.anchorStart);
+  }
+
+  function moveGroup(drag: GroupDrag, cursor: THREE.Vector2) {
+    const delta = resolveGroupDelta(cursor, drag);
+    if (drag.lastDelta?.equals(delta)) return;
+    drag.lastDelta = delta;
+    applyGroupDelta(drag, delta);
+  }
+
+  function applyGroupDelta(drag: GroupDrag, delta: THREE.Vector2) {
+    const moves = drag.members.map(({ marker, start }) => ({
+      marker,
+      position: { x: start.x + delta.x, y: start.y + delta.y }
+    }));
+    if (onMarkersMoved) {
+      onMarkersMoved(moves);
+    } else {
+      moves.forEach(({ marker, position }) => onMarkerMoved(marker, position));
     }
   }
+
+  // Tells the consumer the gesture is over (it closes its undo group there); only for drags that moved
+  function endGroupDrag(cancelled: boolean) {
+    const drag = groupDrag;
+    groupDrag = null;
+    if (!drag || !dragMoved) return;
+    onMarkersMoveEnd?.({ ids: drag.members.map(({ marker }) => marker.id), cancelled });
+  }
+
+  function onGroupDragKeyDown(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || !groupDrag || !isDragging) return;
+    e.preventDefault();
+    applyGroupDelta(groupDrag, new THREE.Vector2());
+    endGroupDrag(true);
+    isDragging = false;
+  }
+
+  function listenForRelease() {
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('blur', onMouseUp);
+    window.addEventListener('keydown', onGroupDragKeyDown);
+  }
+
+  function stopListeningForRelease() {
+    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('blur', onMouseUp);
+    window.removeEventListener('keydown', onGroupDragKeyDown);
+  }
+
+  onDestroy(() => {
+    stopListeningForRelease();
+    endGroupDrag(false);
+  });
 
   function clearHoverTimer() {
     if (hoverTimer) {
@@ -301,11 +422,16 @@
   export const isSelectable = (marker: Marker) => props.marker.visible && isTokenInteractable(marker);
 
   function onMouseUp() {
+    stopListeningForRelease();
+    if (groupDrag && !dragMoved && selectedMarker) {
+      onMarkerSelected(selectedMarker);
+    }
+    endGroupDrag(false);
+    pendingDrag = null;
     if (isDragging && selectedMarker) {
       isDragging = false;
       tooltipSuppressed = dragMoved && !tooltipWasOpenAtDown;
     }
-    downClientPoint = null;
   }
 
   function onMouseLeave() {
@@ -353,8 +479,10 @@
     hoveredMarker = null;
     hoveredMarkerDelayed = null;
     tooltipSuppressed = false;
+    endGroupDrag(false);
     dragMoved = false;
-    downClientPoint = null;
+    pendingDrag = null;
+    stopListeningForRelease();
 
     if (hoverTimer) {
       clearTimeout(hoverTimer);
@@ -365,6 +493,16 @@
       hideTimer = null;
     }
   }
+
+  // Once the parent passes its selection in, a stale local pick must not stay highlighted
+  $effect(() => {
+    const selectedIds = stage.selectedMarkerIds;
+    untrack(() => {
+      if (selectedIds && selectedMarker && !selectedIds.includes(selectedMarker.id)) {
+        selectedMarker = null;
+      }
+    });
+  });
 
   // Export reactive state for hover and drag
   export const markerState = {
@@ -398,7 +536,8 @@
       return selectedMarker;
     },
     get tooltipSuppressed() {
-      return tooltipSuppressed;
+      // A press that may still become a drag keeps a closed tooltip closed (no flash on drag start)
+      return tooltipSuppressed || (pendingDrag !== null && !tooltipWasOpenAtDown);
     }
   };
 </script>
@@ -439,8 +578,10 @@
         shadowOffset={props.marker.shape.shadowOffset}
         strokeColor={props.marker.shape.strokeColor}
         strokeWidth={props.marker.shape.strokeWidth}
-        isSelected={props.marker.selectedIds?.includes(marker.id) ?? selectedMarker?.id === marker.id}
-        isHovered={hoveredMarker?.id === marker.id || props.marker.dropTargetId === marker.id}
+        isSelected={selectedMarker?.id === marker.id || currentSelection().includes(marker.id)}
+        isHovered={hoveredMarker?.id === marker.id ||
+          (stage.dropTargetMarkerId ?? props.marker.dropTargetId) === marker.id}
+        isActiveTurn={marker.id === stage.activeTurnMarkerId}
         sceneRotation={props.scene.rotation}
         {mapRotation}
       />

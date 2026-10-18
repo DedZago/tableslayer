@@ -5,7 +5,7 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 
 # @tableslayer/stage rendering architecture
 
-> **Freshness**: last verified 2026-10-06 (Threlte 8.6, Three 0.186, postprocessing 6.39).
+> **Freshness**: last verified 2026-10-18 (Threlte 8.6, Three 0.186, postprocessing 6.39).
 > Anchor files at the bottom — if one is missing/renamed, the code wins; update this skill.
 > Deeper current docs: `docs/grid-system-architecture.md` (grid math), `docs/stage-performance-guide.md` (perf workflow).
 
@@ -56,6 +56,18 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 - Touch input debounces 50ms to disambiguate draw vs pinch-zoom (`LayerInput.svelte`).
 - Annotation layers with visual effects render on `SceneLayer.Main` (get postprocessing); plain-color layers render on `Overlay`.
 
+## Tokens, selection and combat state
+
+- **Selection is not in props.** Consumers pass `selectedMarkerIds`, `dropTargetMarkerId` and `activeTurnMarkerId` as `<Stage>` component props (`StageInteractionProps`); `Stage.svelte` copies them into the `'stage'` context, and MarkerLayer reads them from there. Keeping them out of the `props` root means a click does not invalidate every effect chained to `props` (see the effects gotcha above). `marker.selectedIds`/`dropTargetId` remain as a fallback.
+- **Token raster never encodes selection, hover or turn state.** `MarkerToken` draws image/shape/label into a 512px `CanvasTexture` that is reused across redraws and recreated only when the raster size changes, since three allocates immutable GPU storage on first upload (design space stays 1024 via `setTransform`; shadow blur is scaled by hand). Selection, hover and active-turn are separate ring meshes with shared materials (`helpers/tokenRasterCache.ts`: shared quad geometry, `ImageBitmap` cache via `loadTokenImage`, CSS colour cache invalidated by a theme `MutationObserver`; colours are normalised to `rgb()` through a 1px canvas because `THREE.Color` can't parse the oklch theme tokens). The active-turn pulse is one `useTask` with `running: () => isActiveTurn` (a `useTask` cannot sit inside `{#if}`).
+- **Drag threshold**: a press becomes a drag only after 3px (mouse) / 8px (touch); a stationary click never calls `onMarkerMoved`. Pressing a token that belongs to a ≥2 selection starts a group drag that reports through `onMarkersMoved(moves)` (falls back to per-marker `onMarkerMoved`); the gesture end (mouseup, window blur, layer reset/unmount) fires `onMarkersMoveEnd({ ids, cancelled })` — consumers close their undo group there, never on an idle timer. Escape mid-drag restores start positions, calls `preventDefault` and reports `cancelled: true`. While a press is still below the threshold, `markerState.tooltipSuppressed` is true so the player tooltip doesn't flash.
+- **Conditions**: `Marker.conditions` (`MarkerCondition { id, label?, color?, value?, dmOnly? }`). Catalog and pure helpers live in `helpers/markerConditions.ts` (`MARKER_CONDITIONS`, `MARKER_CONDITION_ORDER`, `resolveCondition`, `toggleCondition`, `sortConditions`), exported for apps/web. `MarkerConditionBadges` renders inside the token's scaled group; `dead` dims the token and overlays a skull. Consumers filter `dmOnly` conditions out of player props.
+
+## AoE templates
+
+- `AoeTemplateLayer` (`components/AoeTemplateLayer/`) renders spell templates (circle, square, cone, line) between lights and markers: `SceneLayerOrder.AoeTemplate = 35.5`; active when `activeLayer === MapLayerType.AoeTemplate`. Sizes are in **feet**; `helpers/aoeTemplates.ts` (THREE-free, unit-tested) holds the SDFs, bounds, handle points and feet↔layer conversion.
+- The fill shader follows the annotation rule: **effect is a compile-time `EFFECT_TYPE` define**, the program links via `compileAsync` before the material becomes visible, and all template materials share one `uTime` uniform object. Templates come in through `props.aoeTemplates` and go out through `onAoeTemplateAdded/Updated/Selected/Deleted`; the in-progress draft is local and cleared via `StageExports.aoeTemplates.cancelDraft()` (the consumer calls it on scene change).
+
 ## Dev / verify workflow
 
 ```bash
@@ -78,6 +90,9 @@ The docs stage page (`apps/docs/src/routes/(components)/stage/+page.svelte` + `d
 - `packages/stage/src/lib/components/Stage/helpers/clippingPlaneStore.svelte.ts` — `noClipPlanes()`, display/map plane stores
 - `packages/stage/src/lib/components/Stage/components/AnnotationLayer/AnnotationMaterial.svelte` — `EFFECT_TYPE` define + `compileAsync` gate
 - `packages/stage/src/lib/components/Stage/shaders/` — GLSL
+- `packages/stage/src/lib/components/Stage/components/MarkerLayer/MarkerLayer.svelte` / `MarkerToken.svelte` — selection context, drag threshold, group drag, ring meshes
+- `packages/stage/src/lib/components/Stage/helpers/tokenRasterCache.ts` / `markerConditions.ts`
+- `packages/stage/src/lib/components/Stage/components/AoeTemplateLayer/AoeTemplateMaterial.ts` / `helpers/aoeTemplates.ts`
 - `apps/docs/src/routes/(components)/stage/+page.svelte` — playground consumer
 
 ## Keeping this skill current

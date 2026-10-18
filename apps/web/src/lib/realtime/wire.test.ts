@@ -96,6 +96,25 @@ const wire: SessionSnapshotWire = {
         }
       ],
       lights: [],
+      aoeTemplates: [
+        {
+          id: 't1',
+          sceneId: 's1',
+          shape: 'cone',
+          positionX: 1,
+          positionY: 2,
+          angle: 45,
+          size: 15,
+          width: 5,
+          effect: 1,
+          color: '#ff6a00',
+          opacity: 0.6,
+          visibility: 0,
+          label: 'Burning Hands',
+          anchorMarkerId: null,
+          createdAt: 1700000000
+        }
+      ],
       annotations: [
         {
           id: 'a1',
@@ -124,8 +143,18 @@ describe('wire round trip', () => {
     expect(getFogMask(doc, 's1')).toEqual(new Uint8Array([1, 2, 3]));
     expect(getAnnotationMask(doc, 's1', 'a1')).toEqual(new Uint8Array([4, 5, 6]));
 
-    const out = sceneWireFromDoc(doc, 's1', ['settings', 'markers', 'lights', 'annotations', 'fogMask']);
-    expect(out).toEqual({ ...wire.scenes[0], parts: ['settings', 'markers', 'lights', 'annotations', 'fogMask'] });
+    const out = sceneWireFromDoc(doc, 's1', [
+      'settings',
+      'markers',
+      'lights',
+      'aoeTemplates',
+      'annotations',
+      'fogMask'
+    ]);
+    expect(out).toEqual({
+      ...wire.scenes[0],
+      parts: ['settings', 'markers', 'lights', 'aoeTemplates', 'annotations', 'fogMask']
+    });
   });
 
   it('includes only dirty parts in the persist payload', () => {
@@ -135,6 +164,7 @@ describe('wire round trip', () => {
     const out = sceneWireFromDoc(doc, 's1', ['markers']);
     expect(out?.parts).toEqual(['markers']);
     expect(out?.markers).toHaveLength(1);
+    expect(out?.aoeTemplates).toEqual([]);
     expect(out?.annotations).toEqual([]);
     expect(out?.fogMask).toBeNull();
     // Settings always ride along so the upsert can create missing rows

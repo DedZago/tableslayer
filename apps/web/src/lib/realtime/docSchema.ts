@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import type {
   AnnotationRow,
+  AoeTemplateRow,
   GameSessionHydrationData,
   HandoutDescriptor,
   LightRow,
@@ -24,6 +25,7 @@ import type {
 //     settings: Y.Map<SceneSettings field, primitive>
 //     markers: Y.Map<markerId, Y.Map<MarkerRow field, primitive>>
 //     lights: Y.Map<lightId, Y.Map<LightRow field, primitive>>
+//     aoeTemplates: Y.Map<aoeTemplateId, Y.Map<AoeTemplateRow field, primitive>>
 //     annotations: Y.Map<annotationId, Y.Map<AnnotationRow field | 'mask', primitive | Uint8Array>>
 //     fogMask: Uint8Array (RLE)
 // party doc
@@ -32,10 +34,14 @@ import type {
 // v2: MapDefined marker/light positions are center-relative map pixels (see
 // scene.mapCoordVersion). The bump fences stale tabs from writing legacy
 // display-space coordinates into upgraded scenes; rooms rehydrate from the DB.
-export const DOC_SCHEMA_VERSION = 2;
+// v3: the aoeTemplates collection. Rooms without it rehydrate from the DB.
+export const DOC_SCHEMA_VERSION = 3;
 export const ANNOTATION_MASK_KEY = 'mask';
+// Editor undo coalesces edits closer together than this into one step
+export const UNDO_CAPTURE_TIMEOUT_MS = 500;
 
 type SceneMap = Y.Map<unknown>;
+type RowCollection = 'markers' | 'lights' | 'annotations' | 'aoeTemplates';
 
 export const getMeta = (doc: Y.Doc) => doc.getMap<unknown>('meta');
 export const getScenesMap = (doc: Y.Doc) => doc.getMap<SceneMap>('scenes');
@@ -59,11 +65,7 @@ const setChangedFields = (map: Y.Map<unknown>, fields: Record<string, unknown>) 
   }
 };
 
-const rowsOf = <T>(
-  scene: SceneMap | undefined,
-  collection: 'markers' | 'lights' | 'annotations',
-  omit?: string
-): T[] => {
+const rowsOf = <T>(scene: SceneMap | undefined, collection: RowCollection, omit?: string): T[] => {
   const rows: T[] = [];
   const map = scene?.get(collection) as Y.Map<Y.Map<unknown>> | undefined;
   map?.forEach((row) => rows.push(yMapToObject<T>(row, omit)));
@@ -89,7 +91,10 @@ export const getSceneSnapshot = (doc: Y.Doc, sceneId: string): SceneSnapshot | n
     settings: yMapToObject<SceneSettings>(settings),
     markers: rowsOf<MarkerRow>(scene, 'markers'),
     lights: rowsOf<LightRow>(scene, 'lights'),
-    aoeTemplates: [], // TODO(W1-DATA): read the aoeTemplates collection
+    // Stable order: templates are matched by index when reused in the stage props
+    aoeTemplates: rowsOf<AoeTemplateRow>(scene, 'aoeTemplates').sort(
+      (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+    ),
     // Masks ride along as stable Uint8Array references (cheap; Y.js returns the
     // same instance until a new mask is set), feeding declarative layer props
     annotations: rowsOf<AnnotationRow & { mask?: Uint8Array | null }>(scene, 'annotations').sort(
@@ -157,15 +162,10 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
     console.warn(`[realtime] write dropped: ${what} — scene ${sceneId} not in doc`);
   };
 
-  const collectionOf = (sceneId: string, collection: 'markers' | 'lights' | 'annotations') =>
+  const collectionOf = (sceneId: string, collection: RowCollection) =>
     scenes().get(sceneId)?.get(collection) as Y.Map<Y.Map<unknown>> | undefined;
 
-  const upsertRow = (
-    sceneId: string,
-    collection: 'markers' | 'lights' | 'annotations',
-    id: string,
-    fields: Record<string, unknown>
-  ) => {
+  const upsertRow = (sceneId: string, collection: RowCollection, id: string, fields: Record<string, unknown>) => {
     transact(() => {
       const map = collectionOf(sceneId, collection);
       if (!map) {
@@ -181,7 +181,7 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
     });
   };
 
-  const deleteRow = (sceneId: string, collection: 'markers' | 'lights' | 'annotations', id: string) => {
+  const deleteRow = (sceneId: string, collection: RowCollection, id: string) => {
     transact(() => {
       const map = collectionOf(sceneId, collection);
       if (!map) {
@@ -205,6 +205,7 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
       content?: {
         markers?: MarkerRow[];
         lights?: LightRow[];
+        aoeTemplates?: AoeTemplateRow[];
         annotations?: Array<AnnotationRow & { mask?: Uint8Array | null }>;
         fogMask?: Uint8Array | null;
       }
@@ -217,7 +218,7 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
         scene.set('settings', settingsMap);
         setChangedFields(settingsMap, settings as unknown as Record<string, unknown>);
 
-        for (const collection of ['markers', 'lights', 'annotations'] as const) {
+        for (const collection of ['markers', 'lights', 'aoeTemplates', 'annotations'] as const) {
           const map = new Y.Map<Y.Map<unknown>>();
           scene.set(collection, map);
           for (const row of content?.[collection] ?? []) {
@@ -289,6 +290,16 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
       deleteRow(sceneId, 'lights', lightId);
     },
 
+    upsertAoeTemplate(sceneId: string, template: AoeTemplateRow) {
+      upsertRow(sceneId, 'aoeTemplates', template.id, template as unknown as Record<string, unknown>);
+    },
+    setAoeTemplateFields(sceneId: string, templateId: string, fields: Partial<AoeTemplateRow>) {
+      upsertRow(sceneId, 'aoeTemplates', templateId, fields as Record<string, unknown>);
+    },
+    deleteAoeTemplate(sceneId: string, templateId: string) {
+      deleteRow(sceneId, 'aoeTemplates', templateId);
+    },
+
     upsertAnnotation(sceneId: string, annotation: AnnotationRow, mask?: Uint8Array | null) {
       transact(() => {
         upsertRow(sceneId, 'annotations', annotation.id, annotation as unknown as Record<string, unknown>);
@@ -333,6 +344,35 @@ export const createPartyWriter = (partyDoc: Y.Doc, origin: unknown) => ({
 export type PartyWriter = ReturnType<typeof createPartyWriter>;
 
 // ---------------------------------------------------------------------------
+// Undo groups: one gesture (group drag, multi-token edit) becomes one undo step
+// no matter how long it runs. Capture timeout is only lifted while the group is open.
+// ---------------------------------------------------------------------------
+
+/** The undo stack top when a group opened; a different top on close means the group recorded a step. */
+export type UndoGroupMark = { readonly top: unknown };
+
+const undoStackTop = (undoManager: Y.UndoManager) => undoManager.undoStack[undoManager.undoStack.length - 1];
+
+export const openUndoCaptureGroup = (undoManager: Y.UndoManager): UndoGroupMark => {
+  undoManager.stopCapturing();
+  undoManager.captureTimeout = Number.POSITIVE_INFINITY;
+  return { top: undoStackTop(undoManager) };
+};
+
+/**
+ * Pass `discard` (the mark from open) when the gesture was cancelled and the doc is back where it
+ * started: its step is undone and dropped so Ctrl+Z doesn't land on a step that changes nothing.
+ */
+export const closeUndoCaptureGroup = (undoManager: Y.UndoManager, discard?: UndoGroupMark) => {
+  undoManager.captureTimeout = UNDO_CAPTURE_TIMEOUT_MS;
+  undoManager.stopCapturing();
+  if (discard && undoStackTop(undoManager) !== discard.top) {
+    undoManager.undo();
+    undoManager.clear(false, true);
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Hydration (server builds the doc from the DB; clients never initialize shared state)
 // ---------------------------------------------------------------------------
 
@@ -351,7 +391,14 @@ export const hydrateGameSessionDoc = (doc: Y.Doc, data: GameSessionHydrationData
 // Change classification for observers
 // ---------------------------------------------------------------------------
 
-const SCENE_PARTS: ReadonlySet<string> = new Set(['settings', 'markers', 'lights', 'annotations', 'fogMask']);
+const SCENE_PARTS: ReadonlySet<string> = new Set([
+  'settings',
+  'markers',
+  'lights',
+  'aoeTemplates',
+  'annotations',
+  'fogMask'
+]);
 
 export const classifySceneEvents = (events: Y.YEvent<Y.Map<unknown>>[], transaction: Y.Transaction): SceneChange[] => {
   const changes: SceneChange[] = [];

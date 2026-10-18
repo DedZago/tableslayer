@@ -1,12 +1,25 @@
 <script lang="ts">
   import * as THREE from 'three';
-  import { T, useLoader } from '@threlte/core';
-  import { onDestroy } from 'svelte';
+  import { T, useTask } from '@threlte/core';
+  import { getContext, onDestroy } from 'svelte';
   import { MarkerShape, type Marker } from './types';
   import { SceneLayer, SceneLayerOrder } from '../Scene/types';
   import { getGridCellSize } from '../../helpers/grid';
   import type { GridLayerProps } from '../GridLayer/types';
-  import type { DisplayProps } from '../Stage/types';
+  import { type DisplayProps, StageMode } from '../Stage/types';
+  import MarkerConditionBadges from './MarkerConditionBadges.svelte';
+  import {
+    activeTurnRingMaterial,
+    createCanvasTexture,
+    getHighlightGeometry,
+    getSkullMaterial,
+    hoverRingMaterial,
+    loadTokenImage,
+    selectedRingMaterial,
+    syncRingColors,
+    TOKEN_CANVAS_SIZE,
+    tokenQuadGeometry
+  } from '../../helpers/tokenRasterCache';
 
   interface Props {
     marker: Marker;
@@ -27,6 +40,7 @@
     textSize: number;
     isSelected: boolean;
     isHovered?: boolean;
+    isActiveTurn?: boolean;
     sceneRotation: number;
     /** Map rotation in degrees, inherited from the map anchor in MapDefined mode */
     mapRotation?: number;
@@ -48,9 +62,12 @@
     shadowOffset: shadowOffsetProp,
     isSelected = false,
     isHovered = false,
+    isActiveTurn = false,
     sceneRotation,
     mapRotation = 0
   }: Props = $props();
+
+  const stage = getContext<{ mode: StageMode }>('stage');
 
   // The style props arrive as template expressions rooted at the consumer's
   // stageProps, and that root is replaced on every remote doc rebuild (e.g.
@@ -70,21 +87,24 @@
   const shadowOffsetX = $derived(shadowOffsetProp.x);
   const shadowOffsetY = $derived(shadowOffsetProp.y);
 
-  const loader = useLoader(THREE.TextureLoader);
-
   // The marker object is replaced on every drag frame (new identity, same
   // visuals). Route the draw inputs through deriveds so the canvas/texture
   // effects below only re-fire when a value actually changes — re-rasterizing
   // and re-uploading the texture per pointermove stalls the render loop.
+  // isSelected, isHovered and isActiveTurn are deliberately NOT draw inputs:
+  // they only drive ring meshes and the group scale.
   const shape = $derived(marker.shape);
   const shapeColor = $derived(marker.shapeColor);
   const label = $derived(marker.label);
   const imageScale = $derived(marker.imageScale);
   const imageUrl = $derived(marker.imageUrl);
+  const isDead = $derived(marker.conditions?.some((c) => c.id === 'dead') ?? false);
+  const highlightGeometry = $derived(getHighlightGeometry(shape));
 
   const baseMarkerSize = $derived(getGridCellSize(grid, display) * marker.size);
   const markerSize = $derived(isHovered ? baseMarkerSize * 1.15 : baseMarkerSize);
   const sizeMultiplier = 0.9;
+  const DEAD_TOKEN_OPACITY = 0.45;
 
   // Counter-rotate markers to keep them upright relative to the viewport.
   // The two rotations compose with opposite signs: scene rotation turns the
@@ -99,7 +119,10 @@
     needsFlip ? -((effectiveRotation + 180) * Math.PI) / 180 : -(effectiveRotation * Math.PI) / 180
   );
 
+  // Drawing is done in a 1024-unit design space (stroke, blur and text sizes
+  // are tuned to it) and scaled down onto the TOKEN_CANVAS_SIZE raster.
   const canvasSize = 1024;
+  const rasterScale = TOKEN_CANVAS_SIZE / canvasSize;
 
   // Extra canvas margin so the shadow's gaussian blur isn't cropped at the quad
   // edge (one grid cell); the mesh scales up by the same ratio so the shape
@@ -108,31 +131,39 @@
     Math.ceil(shadowBlur * 1.5 + Math.max(Math.abs(shadowOffsetX), Math.abs(shadowOffsetY)) + strokeWidth / 2)
   );
   const paddedCanvasSize = $derived(canvasSize + shadowPadding * 2);
+  const rasterSize = $derived(Math.ceil(paddedCanvasSize * rasterScale));
   const shadowScale = $derived(paddedCanvasSize / canvasSize);
 
-  let markerCanvas = new OffscreenCanvas(canvasSize, canvasSize);
-  let ctx = markerCanvas.getContext('2d')!;
+  const markerCanvas = new OffscreenCanvas(TOKEN_CANVAS_SIZE, TOKEN_CANVAS_SIZE);
+  const ctx = markerCanvas.getContext('2d')!;
   ctx.globalCompositeOperation = 'source-over';
 
-  let markerMaterial = new THREE.MeshBasicMaterial({
-    transparent: true,
-    opacity
-  });
-  let imageTexture: THREE.Texture | null = $state(null);
+  // Created by the draw effect; recreated whenever the raster size changes, because three
+  // allocates immutable GPU storage on the first upload and cannot grow it afterwards
+  let markerTexture: THREE.CanvasTexture<OffscreenCanvas> | null = null;
+  const markerMaterial = new THREE.MeshBasicMaterial({ transparent: true });
+  let tokenImage = $state.raw<ImageBitmap | null>(null);
+  let activeRingRef = $state.raw<THREE.Mesh>();
 
-  // Load image if URL is provided
   $effect(() => {
-    if (imageUrl) {
-      loader
-        .load(imageUrl)
-        .then((texture) => {
-          imageTexture = texture;
-          imageTexture.needsUpdate = true;
-        })
-        .catch((err) => console.error('Error loading image:', err));
-    } else {
-      imageTexture = null;
+    markerMaterial.opacity = isDead ? opacity * DEAD_TOKEN_OPACITY : opacity;
+  });
+
+  $effect(() => {
+    const url = imageUrl;
+    if (!url) {
+      tokenImage = null;
+      return;
     }
+    let cancelled = false;
+    loadTokenImage(url)
+      .then((bitmap) => {
+        if (!cancelled) tokenImage = bitmap;
+      })
+      .catch((err) => console.error('Error loading image:', err));
+    return () => {
+      cancelled = true;
+    };
   });
 
   // Create complete marker canvas with shape, stroke, and text
@@ -165,9 +196,9 @@
 
     if (!clipOnly) {
       ctx.shadowColor = shadowColor;
-      ctx.shadowBlur = shadowBlur;
-      ctx.shadowOffsetX = shadowOffsetX;
-      ctx.shadowOffsetY = shadowOffsetY;
+      ctx.shadowBlur = shadowBlur * rasterScale;
+      ctx.shadowOffsetX = shadowOffsetX * rasterScale;
+      ctx.shadowOffsetY = shadowOffsetY * rasterScale;
       ctx.fill();
       if (strokeWidth > 0) {
         ctx.stroke();
@@ -206,31 +237,27 @@
 
   // Create the marker canvas
   function drawMarker() {
-    const width = markerCanvas.width;
-    const height = markerCanvas.height;
-    const centerX = width / 2;
-    const centerY = height / 2;
+    const center = paddedCanvasSize / 2;
 
-    // Clear canvas with transparency
-    ctx.clearRect(0, 0, width, height);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, markerCanvas.width, markerCanvas.height);
+    ctx.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
 
     if (shape !== undefined) {
-      // Set stroke and fill styles for shape
-      // Use --fgPrimary color when hovered or selected, otherwise use the default stroke color
-      ctx.strokeStyle = isHovered || isSelected ? getCSSVariable('--fgPrimary') : (strokeColor ?? '#000000');
+      ctx.strokeStyle = strokeColor ?? '#000000';
       ctx.lineWidth = strokeWidth;
       ctx.fillStyle = shapeColor ?? '#ffffff';
 
-      createShape(centerX, centerY, canvasSize);
+      createShape(center, center, canvasSize);
 
       // Draw image if available
-      if (imageTexture && imageTexture.image) {
+      if (tokenImage) {
         // Save the current canvas state
         ctx.save();
 
         // Create a smaller shape path for clipping that accounts for stroke width
         const innerSize = canvasSize - strokeWidth; // Reduce by twice the stroke width
-        createShape(centerX, centerY, innerSize, true);
+        createShape(center, center, innerSize, true);
 
         // Apply clipping to the shape
         ctx.clip();
@@ -241,9 +268,9 @@
 
         // Draw the image (will only appear inside the clipped shape)
         ctx.drawImage(
-          imageTexture.image as CanvasImageSource,
-          centerX - (canvasSize / 2) * imageScale * sizeMultiplier,
-          centerY - (canvasSize / 2) * imageScale * sizeMultiplier,
+          tokenImage,
+          center - (canvasSize / 2) * imageScale * sizeMultiplier,
+          center - (canvasSize / 2) * imageScale * sizeMultiplier,
           sizeMultiplier * canvasSize * imageScale,
           sizeMultiplier * canvasSize * imageScale
         );
@@ -253,50 +280,45 @@
       }
     }
 
-    // // Draw text if enabled
     if (label) {
-      createText(centerX, centerY);
+      createText(center, center);
     }
-
-    return markerCanvas;
   }
 
-  // Create and update marker texture when properties change (including hover state)
+  // Redraw only when appearance values change; selection and hover never re-raster
   $effect(() => {
-    if (markerCanvas.width !== paddedCanvasSize) {
-      markerCanvas.width = paddedCanvasSize;
-      markerCanvas.height = paddedCanvasSize;
+    let texture = markerTexture;
+    if (!texture || markerCanvas.width !== rasterSize) {
+      markerCanvas.width = rasterSize;
+      markerCanvas.height = rasterSize;
+      texture?.dispose();
+      texture = markerTexture = createCanvasTexture(markerCanvas);
+      markerMaterial.map = texture;
+      markerMaterial.needsUpdate = true;
     }
 
-    markerCanvas = drawMarker();
-
-    // Dispose old texture before creating new one
-    if (markerMaterial.map) {
-      markerMaterial.map.dispose();
-    }
-
-    markerMaterial.map = new THREE.CanvasTexture(markerCanvas);
-    markerMaterial.map.colorSpace = THREE.SRGBColorSpace;
-    markerMaterial.map.needsUpdate = true;
+    drawMarker();
+    texture.needsUpdate = true;
   });
+
+  // One shared task drives the pulse; it only runs while this token is the active turn
+  let pulseElapsed = 0;
+  useTask(
+    (delta) => {
+      pulseElapsed += delta;
+      const wave = Math.sin(pulseElapsed * 3);
+      activeTurnRingMaterial.opacity = 0.55 + 0.35 * wave;
+      activeRingRef?.scale.setScalar(1.12 * (1.08 + 0.04 * wave)); // sits outside the selection ring
+    },
+    { running: () => isActiveTurn }
+  );
+
+  syncRingColors();
 
   onDestroy(() => {
-    if (markerMaterial.map) {
-      markerMaterial.map.dispose();
-    }
+    markerTexture?.dispose();
     markerMaterial.dispose();
-    if (imageTexture) {
-      imageTexture.dispose();
-    }
   });
-
-  // Get CSS variable value for hover color
-  function getCSSVariable(varName: string): string {
-    if (typeof window !== 'undefined') {
-      return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-    }
-    return '#ffffff';
-  }
 </script>
 
 <T.Group
@@ -305,8 +327,45 @@
   rotation={[0, 0, counterRotation]}
 >
   <!-- Combined shape, stroke and text -->
-  <T.Mesh renderOrder={SceneLayerOrder.Marker} layers={[SceneLayer.Main]} scale={[shadowScale, shadowScale, 1]}>
+  <T.Mesh
+    geometry={tokenQuadGeometry}
+    renderOrder={SceneLayerOrder.Marker}
+    layers={[SceneLayer.Main]}
+    scale={[shadowScale, shadowScale, 1]}
+  >
     <T.MeshBasicMaterial is={markerMaterial} />
-    <T.PlaneGeometry args={[1, 1]} />
   </T.Mesh>
+
+  <!-- Selection and hover ring: separate mesh so highlight changes never re-raster the token -->
+  <T.Mesh
+    geometry={highlightGeometry}
+    material={isSelected ? selectedRingMaterial : hoverRingMaterial}
+    visible={isSelected || isHovered}
+    renderOrder={SceneLayerOrder.Marker + 1}
+    layers={[SceneLayer.Main]}
+  />
+
+  <!-- Active turn ring, pulsed by the task above -->
+  <T.Mesh
+    bind:ref={activeRingRef}
+    geometry={highlightGeometry}
+    material={activeTurnRingMaterial}
+    visible={isActiveTurn}
+    renderOrder={SceneLayerOrder.Marker + 1}
+    layers={[SceneLayer.Main]}
+  />
+
+  {#if isDead}
+    <T.Mesh
+      geometry={tokenQuadGeometry}
+      material={getSkullMaterial()}
+      scale={[shadowScale, shadowScale, 1]}
+      renderOrder={SceneLayerOrder.Marker + 0.25}
+      layers={[SceneLayer.Main]}
+    />
+  {/if}
+
+  {#if marker.conditions?.length}
+    <MarkerConditionBadges conditions={marker.conditions} mode={stage.mode} />
+  {/if}
 </T.Group>

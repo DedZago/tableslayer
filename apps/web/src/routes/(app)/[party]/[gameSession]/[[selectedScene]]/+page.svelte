@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useTokenArtworkMutation } from '$lib/queries/assets';
+  import { useAssetMutation, useTokenArtworkMutation } from '$lib/queries/assets';
   import {
     hasFileDrop,
     hasWebsiteImageDrop,
@@ -17,9 +17,38 @@
     TOKEN_CLIPBOARD_FORMAT,
     type ClipboardPoint
   } from '$lib/utils/tokenClipboard';
-  import { AssetLibrary } from '$lib/components/Assets';
-  import { HandoutControls, type HandoutPreview } from '$lib/components/Handouts';
-  import type { SelectAsset } from '$lib/db/app/schema';
+  import {
+    ASSET_DRAG_TYPE,
+    AssetCatalogOverlay,
+    AssetLibrary,
+    markerAssetSnapshot,
+    placeAsset,
+    type PlacementPoint
+  } from '$lib/components/Assets';
+  import {
+    addCombatants,
+    beginCombat,
+    endCombat,
+    InitiativeTracker,
+    nextTurn,
+    nudgeTie,
+    previousTurn,
+    recoverActiveTurn,
+    removeCombatants,
+    rerollAll,
+    rollEmpty,
+    rollOne,
+    setInitiative,
+    setInitiativeBonus,
+    startCombat,
+    type CombatAction
+  } from '$lib/components/Combat';
+  import AoeTemplateManager from '$lib/components/GameSession/AoeTemplateManager.svelte';
+  import SidePanelTabs, { type SidePanelTab } from '$lib/components/GameSession/SidePanelTabs.svelte';
+  import TokenContextPanel from '$lib/components/GameSession/TokenContextPanel.svelte';
+  import { StatBlockQuickCard, type StatBlockRoll } from '$lib/components/StatBlock';
+  import { HandoutLivePill, HandoutPanel, type HandoutPreview } from '$lib/components/Handouts';
+  import type { AssetListItem } from '$lib/queries/assets';
   import { goto } from '$app/navigation';
   import { navigating, page } from '$app/state';
   import {
@@ -47,8 +76,10 @@
     buildRenderProps,
     reuseUnchanged,
     type AnnotationRow,
+    type AoeTemplateRow,
     type MarkerRow
   } from '$lib/realtime';
+  import { isSameTurn, readTurnPosition, sameCombatantView, type TurnPosition } from '$lib/utils/initiative';
   import {
     bindPropertyUpdatesToDoc,
     buildSceneProps,
@@ -66,28 +97,35 @@
   import { stagePerformance } from '$lib/stores';
   import { getLatestMeasurement } from '$lib/utils/measurements';
   import { throttle } from '$lib/utils/throttle';
+  import { conditionPickerState, stepConditionValue } from '$lib/utils/markerConditionPicker';
   import {
     AnnotationEffect,
+    AoeShape,
+    type AoeTemplate,
+    type AoeToolSettings,
     DrawingSliders,
     GridMode,
     MapLayerType,
     MarkerVisibility,
     PerformanceDebugger,
     PointerInputManager,
+    rotateTemplateAngle,
     Stage,
     StageMode,
     ToolType,
     type AnnotationLayerData,
+    sortConditions,
     type HoveredMarker,
     type Light,
     type Marker,
+    type MarkerCondition,
     type StageExports,
     type StageProps
   } from '@tableslayer/stage';
-  import { addToast, ContextMenu, FogSliders, Icon, removeToast, type ContextMenuItem } from '@tableslayer/ui';
+  import { addToast, FogSliders, Icon, removeToast } from '@tableslayer/ui';
   import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp } from '@tabler/icons-svelte';
   import { Pane, PaneGroup, PaneResizer, type PaneAPI } from 'paneforge';
-  import { onMount, untrack } from 'svelte';
+  import { onMount, untrack, type ComponentProps } from 'svelte';
   import { EditorSession } from './useEditorSession.svelte';
 
   let { data } = $props();
@@ -169,11 +207,18 @@
       : { activeSceneId: data.activeScene?.id ?? null, isPaused: data.party.gameSessionIsPaused }
   );
   const activeSceneId = $derived(partyState.activeSceneId ?? undefined);
-  const canPresentHandouts = $derived(
+  const canEditAssets = $derived(
     data.members.some((member) => member.id === data.user.id && ['admin', 'editor'].includes(member.partyRole))
   );
+  const canPresentHandouts = $derived(canEditAssets);
+  const liveHandout = $derived(session.client?.ready ? (session.client.partyState().activeHandout ?? null) : null);
+  let sidePanelTab = $state<SidePanelTab>('tokens');
   let handoutPreview = $state<HandoutPreview | null>(null);
-  const previewAssetHandout = (asset: SelectAsset) => {
+  const openSidePanelTab = (tab: SidePanelTab) => {
+    sidePanelTab = tab;
+    if (isMarkersCollapsed) markersPane?.expand();
+  };
+  const previewAssetHandout = (asset: AssetListItem) => {
     const artworkLocation = asset.artworkLocation || asset.tokenArtworkLocation;
     if (!artworkLocation) return;
     handoutPreview = {
@@ -181,7 +226,7 @@
       artworkLocation,
       title: asset.name
     };
-    markersPane?.expand();
+    openSidePanelTab('handout');
   };
   const previewTokenHandout = (markerId: string) => {
     const marker = session.client?.scene(selectedSceneId)?.markers.find((marker) => marker.id === markerId);
@@ -191,7 +236,28 @@
       artworkLocation: marker.imageLocation,
       title: marker.title
     };
-    markersPane?.expand();
+    openSidePanelTab('handout');
+  };
+  const saveTokenToLibrary = async (markerId: string) => {
+    const row = markerRowFor(markerId);
+    if (!row) return;
+    try {
+      await assetMutation.mutateAsync({
+        action: 'saveMarker',
+        sceneId: selectedSceneId,
+        markerId,
+        snapshot: markerAssetSnapshot(row)
+      });
+      addToast({ data: { title: 'Saved to library', type: 'success' } });
+    } catch (error) {
+      addToast({
+        data: {
+          title: 'Could not save to library',
+          body: error instanceof Error ? error.message : 'Save failed',
+          type: 'danger'
+        }
+      });
+    }
   };
   const currentParty = $derived({ ...party, gameSessionIsPaused: partyState.isPaused });
 
@@ -270,7 +336,8 @@
       'editor',
       ssrAnnotations(),
       data.selectedSceneLights,
-      data.bucketUrl
+      data.bucketUrl,
+      []
     );
     props.fogOfWar.tool.size = clampFogBrush(getPreference('brushSizeGridUnits') || 2);
     props.annotations.lineWidth = snapAnnotationBrush(getPreference('annotationLineWidthGridUnits') || 0.5);
@@ -279,6 +346,7 @@
     props.light.snapToGrid = getPreference('lightSnapToGrid') ?? false;
     props.performanceTier = stagePerformance.effectiveTier;
     props.display.maxPixelRatio = stagePerformance.maxPixelRatio;
+    if (props.aoeTemplates) props.aoeTemplates.tool = { ...props.aoeTemplates.tool, ...getPreference('aoeTool') };
     return props;
   });
 
@@ -303,7 +371,8 @@
             'editor',
             ssrAnnotations(),
             data.selectedSceneLights,
-            data.bucketUrl
+            data.bucketUrl,
+            []
           );
           props.fogOfWar.tool.size = clampFogBrush(getPreference('brushSizeGridUnits') || 2);
           props.annotations.lineWidth = snapAnnotationBrush(getPreference('annotationLineWidthGridUnits') || 0.5);
@@ -373,7 +442,12 @@
                 type: prev.measurement.type,
                 coneAngle: prev.measurement.coneAngle,
                 beamWidth: prev.measurement.beamWidth
-              }
+              },
+          aoeTemplates: {
+            tool: prev.aoeTemplates?.tool,
+            selectedId: isSceneSwitch ? null : prev.aoeTemplates?.selectedId,
+            showLabels: prev.aoeTemplates?.showLabels
+          }
         },
         data.bucketUrl
       );
@@ -470,7 +544,30 @@
     }
   };
 
+  // Asset library tiles drag onto the map as copies (see assetPlacement.ts)
+  const assetMutation = useAssetMutation();
+  let libraryQuantity = $state(1);
+  let catalogOpen = $state(false);
+  const isAssetDrag = (dataTransfer: DataTransfer | null) => !!dataTransfer?.types.includes(ASSET_DRAG_TYPE);
+  const getViewportCenter = (): PlacementPoint | null => stage?.markers.viewportCenter() ?? null;
+  const placeAssetAt = (assetId: string, quantity: number, at: PlacementPoint) =>
+    placeAsset({
+      assetId,
+      quantity,
+      at,
+      sceneId: selectedSceneId,
+      client: session.client,
+      mutate: (action) => assetMutation.mutateAsync(action),
+      snap: snapPlacement
+    });
+  const snapPlacement = (point: PlacementPoint) => stage?.markers.snapPosition(point) ?? point;
+
   const handleCanvasDragOver = (event: DragEvent) => {
+    if (isAssetDrag(event.dataTransfer)) {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      return;
+    }
     if (!hasFileDrop(event.dataTransfer) && !hasWebsiteImageDrop(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -481,6 +578,19 @@
   };
 
   const handleCanvasDrop = async (event: DragEvent) => {
+    if (isAssetDrag(event.dataTransfer)) {
+      event.preventDefault();
+      event.stopPropagation();
+      const assetId = event.dataTransfer?.getData(ASSET_DRAG_TYPE);
+      const at = stage?.markers.clientToPosition({ x: event.clientX, y: event.clientY }, true);
+      if (!assetId) return;
+      if (!at) {
+        addToast({ data: { title: 'Drop inside the map', type: 'info' } });
+        return;
+      }
+      void placeAssetAt(assetId, libraryQuantity, at);
+      return;
+    }
     if (!hasFileDrop(event.dataTransfer) && !hasWebsiteImageDrop(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -517,28 +627,32 @@
   let selectedMarkerId: string | undefined = $state();
   let selectedMarkerIds: string[] = $state([]);
   let selectionRectangle: { x: number; y: number; width: number; height: number } | null = $state(null);
-  const renderStageProps = $derived({
-    ...stageProps,
-    marker: { ...stageProps.marker, selectedIds: selectedMarkerIds, dropTargetId: artworkDropTargetId }
-  });
+  let statBlockQuickCardCollapsed = $state(getPreference('statBlockQuickCardCollapsed') ?? false);
+
+  // Identity-preserving: the stage re-renders selection only when the ids actually change
+  const setSelection = (ids: string[]) => {
+    if (ids.length === selectedMarkerIds.length && ids.every((id, i) => id === selectedMarkerIds[i])) return;
+    selectedMarkerIds = ids;
+  };
 
   $effect(() => {
     const sceneId = selectedSceneId;
     untrack(() => {
-      selectedMarkerIds = [];
+      setSelection([]);
       selectionRectangle = null;
       artworkDropTargetId = null;
     });
   });
 
   $effect(() => {
+    if (selectedMarkerIds.length === 0) return;
     const available = new Set(
       stageProps.marker.markers
         .filter((marker) => marker.visibility !== MarkerVisibility.Player)
         .map((marker) => marker.id)
     );
     untrack(() => {
-      selectedMarkerIds = selectedMarkerIds.filter((id) => available.has(id));
+      setSelection(selectedMarkerIds.filter((id) => available.has(id)));
     });
   });
   const selectedCopyRows = $derived.by(() => {
@@ -655,7 +769,7 @@
         result.markers.forEach((marker) => destinationClient.write.upsertMarker(destination, marker))
       );
       destinationClient.stopCapturing();
-      selectedMarkerIds = result.markers.map((marker) => marker.id);
+      setSelection(result.markers.map((marker) => marker.id));
       markersPane.expand();
       pasteHistory = { text, sceneId: destination, point: { ...point }, count: count + 1 };
     } catch (error) {
@@ -683,7 +797,13 @@
   const maxZoom = 10;
   const zoomSensitivity = 0.0005;
 
-  const pinnedMarkerIds = $derived(stageProps.marker.markers.filter((m) => m.pinnedTooltip).map((m) => m.id));
+  let pinnedCache: string[] = [];
+  const pinnedMarkerIds = $derived.by(() => {
+    const next = stageProps.marker.markers.filter((m) => m.pinnedTooltip).map((m) => m.id);
+    if (next.length === pinnedCache.length && next.every((id, i) => id === pinnedCache[i])) return pinnedCache;
+    pinnedCache = next;
+    return next;
+  });
   const activeAnnotation = $derived(
     stageProps?.annotations.layers.find((layer) => layer.id === stageProps.annotations.activeLayer)
   );
@@ -722,7 +842,7 @@
   let checklistCompletedItems = $state<string[]>(untrack(() => checklistState?.completedItems ?? []));
   let checklistDismissed = $state(untrack(() => checklistState?.isDismissed ?? false));
   let forceShowChecklist = $state(false);
-  const panelRequiringControls = ['annotation', 'light', 'marker'];
+  const panelRequiringControls = ['annotation', 'light', 'marker', 'aoe'];
   const showChecklist = $derived(
     !panelRequiringControls.includes(activeControl) &&
       !selectedMarkerId &&
@@ -756,6 +876,7 @@
 
   const handleShowChecklist = () => {
     forceShowChecklist = true;
+    sidePanelTab = 'tokens';
     activeControl = 'none';
     selectedMarkerId = undefined;
     queuePropertyUpdate(stageProps, ['activeLayer'], MapLayerType.None, 'control');
@@ -865,8 +986,9 @@
     }
 
     activeControl = control;
-    if (control === 'annotation' || control === 'light' || control === 'marker') {
+    if (['annotation', 'light', 'marker', 'aoe'].includes(control)) {
       forceShowChecklist = false;
+      sidePanelTab = 'tokens';
     }
 
     if (control === 'marker') {
@@ -882,6 +1004,10 @@
     } else if (control === 'annotation') {
       selectedAnnotationId = undefined;
       queuePropertyUpdate(stageProps, ['activeLayer'], MapLayerType.Annotation, 'control');
+    } else if (control === 'aoe') {
+      queuePropertyUpdate(stageProps, ['activeLayer'], MapLayerType.AoeTemplate, 'control');
+      queuePropertyUpdate(stageProps, ['annotations', 'activeLayer'], null, 'control');
+      markersPane?.expand();
     } else if (control === 'measurement') {
       queuePropertyUpdate(stageProps, ['activeLayer'], MapLayerType.Measurement, 'control');
       queuePropertyUpdate(stageProps, ['annotations', 'activeLayer'], null, 'control');
@@ -996,7 +1122,7 @@
   const onMarkerAdded = (marker: Marker) => {
     stageProps.marker.markers = [...stageProps.marker.markers, marker];
     selectedMarkerId = marker.id;
-    selectedMarkerIds = [marker.id];
+    setSelection([marker.id]);
     upsertMarkerRow(marker);
     trackChecklistItemLocal('place-marker');
   };
@@ -1008,7 +1134,7 @@
 
   const onMarkerMoved = (marker: Marker, position: { x: number; y: number }) => {
     const target = stageProps.marker.markers.find((m: Marker) => m.id === marker.id);
-    if (!target) return;
+    if (!target || (target.position.x === position.x && target.position.y === position.y)) return;
     // Mutate in place — replacing the marker object would retrigger every
     // effect that reads it (notably the token's canvas/texture redraw) on
     // each pointermove
@@ -1030,9 +1156,68 @@
     );
   };
 
+  // Group drag writes one transaction per throttle tick (the single-marker throttle keeps only
+  // the last call's arguments, which would drop the other members) and one undo step per gesture:
+  // the group opens on the first move and closes when the stage reports the gesture ended.
+  // Writes skip rows that no longer exist (deleted by another editor mid-drag) instead of recreating them.
+  let groupDragPending: Record<string, { x: number; y: number }> = {};
+  let groupDragFinal: Record<string, { x: number; y: number }> = {};
+  let groupDragSceneId: string | undefined;
+
+  const writeGroupMoves = (sceneId: string, moves: Record<string, { x: number; y: number }>) => {
+    const client = session.client;
+    if (!client) return;
+    client.write.transaction(() => {
+      for (const [id, p] of Object.entries(moves)) {
+        client.write.setExistingMarkerFields(sceneId, id, { positionX: p.x, positionY: p.y });
+      }
+    });
+  };
+
+  const writeGroupPositions = throttle(() => {
+    const batch = groupDragPending;
+    groupDragPending = {};
+    if (groupDragSceneId) writeGroupMoves(groupDragSceneId, batch);
+  }, 50);
+
+  const finishGroupDrag = ({ discard = false }: { discard?: boolean } = {}) => {
+    if (groupDragSceneId === undefined) return;
+    const ids = Object.keys(groupDragFinal);
+    writeGroupMoves(groupDragSceneId, groupDragFinal);
+    for (const id of ids) delete dragPositions[id];
+    groupDragFinal = {};
+    groupDragPending = {};
+    groupDragSceneId = undefined;
+    session.client?.endUndoGroup({ discard });
+  };
+
+  const onMarkersMoved = (moves: Array<{ marker: Marker; position: { x: number; y: number } }>) => {
+    if (groupDragSceneId === undefined) {
+      groupDragSceneId = selectedSceneId;
+      session.client?.beginUndoGroup();
+    }
+    for (const { marker, position } of moves) {
+      const target = stageProps.marker.markers.find((m: Marker) => m.id === marker.id);
+      if (!target) {
+        delete groupDragPending[marker.id];
+        delete groupDragFinal[marker.id];
+        continue;
+      }
+      target.position = { x: position.x, y: position.y };
+      dragPositions[marker.id] = position;
+      groupDragPending[marker.id] = position;
+      groupDragFinal[marker.id] = position;
+    }
+    writeGroupPositions();
+  };
+
+  // Escape-cancel already moved the members back, so the gesture's undo step is dropped
+  const onMarkersMoveEnd = ({ cancelled }: { ids: string[]; cancelled: boolean }) =>
+    finishGroupDrag({ discard: cancelled });
+
   const onMarkerSelected = (marker: Marker | null) => {
     selectedMarkerId = marker?.id || undefined;
-    selectedMarkerIds = marker ? [marker.id] : [];
+    setSelection(marker ? [marker.id] : []);
   };
 
   // Double-clicking a marker opens its editing panel even when collapsed
@@ -1043,17 +1228,16 @@
     }
   };
 
-  // Right-click quick menu on a marker; touch devices use the marker panel instead
-  let markerContextMenu = $state<ContextMenu>();
-  let contextMenuMarkerId = $state<string>();
-  const contextMenuMarker = $derived(stageProps.marker.markers.find((m) => m.id === contextMenuMarkerId));
+  // Right-click opens the token panel for the selection the token belongs to; touch devices use the marker panel
+  let tokenPanel = $state<{ markerId: string; x: number; y: number } | null>(null);
+  const tokenPanelMarker = $derived(stageProps.marker.markers.find((m) => m.id === tokenPanel?.markerId));
 
   const onMarkerContextMenu = (marker: Marker, event: MouseEvent | TouchEvent) => {
     if (!(event instanceof MouseEvent)) return;
     markerContextMenuOpenedAt = performance.now();
-    contextMenuMarkerId = marker.id;
+    if (!selectedMarkerIds.includes(marker.id)) setSelection([marker.id]);
     selectedMarkerId = marker.id;
-    markerContextMenu?.open(event);
+    tokenPanel = { markerId: marker.id, x: event.clientX, y: event.clientY };
   };
 
   const setMarkerVisibility = (markerId: string, visibility: MarkerVisibility) => {
@@ -1067,54 +1251,267 @@
     }
   };
 
-  const markerContextMenuItems = $derived.by((): ContextMenuItem[] => {
-    const marker = contextMenuMarker;
-    if (!marker) return [];
-    const items: ContextMenuItem[] = [
-      { type: 'label', label: 'Visibility' },
-      {
-        label: 'DM',
-        selected: marker.visibility === MarkerVisibility.DM,
-        onclick: () => setMarkerVisibility(marker.id, MarkerVisibility.DM)
-      },
-      {
-        label: 'Everyone',
-        selected: marker.visibility === MarkerVisibility.Always,
-        onclick: () => setMarkerVisibility(marker.id, MarkerVisibility.Always)
-      },
-      {
-        label: 'On hover',
-        selected: marker.visibility === MarkerVisibility.Hover,
-        onclick: () => setMarkerVisibility(marker.id, MarkerVisibility.Hover)
+  const markerRowFor = (markerId: string) =>
+    session.client?.scene(selectedSceneId)?.markers.find((row) => row.id === markerId);
+
+  const storedConditionsOf = (markerId: string): MarkerCondition[] => markerRowFor(markerId)?.conditions ?? [];
+
+  const customConditionSuggestions = $derived.by(() => {
+    const byId = new Map<string, MarkerCondition>();
+    for (const marker of stageProps.marker.markers) {
+      for (const condition of marker.conditions ?? []) {
+        if (condition.id.startsWith('custom:') && !byId.has(condition.id)) byId.set(condition.id, condition);
       }
-    ];
-    if (marker.visibility !== MarkerVisibility.DM) {
-      items.push(
-        { type: 'divider' },
-        {
-          label: 'Pin tooltip for players',
-          selected: pinnedMarkerIds.includes(marker.id),
-          onclick: () => onPinToggle(marker.id, !pinnedMarkerIds.includes(marker.id))
-        }
-      );
     }
-    items.push(
-      { type: 'divider' },
-      {
-        label: 'Delete marker',
-        variant: 'danger',
-        onclick: () => {
-          onMarkerDeleted(marker.id);
-          if (selectedMarkerId === marker.id) {
-            selectedMarkerId = undefined;
-          }
-        }
-      }
-    );
-    return items;
+    return [...byId.values()];
   });
 
+  const writeMarkerConditions = (targetIds: string[], update: (stored: MarkerCondition[]) => MarkerCondition[]) => {
+    const client = session.client;
+    if (!client) return;
+    const updates = targetIds.map((id) => ({ id, conditions: update(storedConditionsOf(id)) }));
+    for (const { id, conditions } of updates) {
+      const marker = stageProps.marker.markers.find((m) => m.id === id);
+      if (marker) marker.conditions = conditions;
+    }
+    client.stopCapturing();
+    client.write.transaction(() => {
+      for (const { id, conditions } of updates) client.write.setMarkerFields(selectedSceneId, id, { conditions });
+    });
+    client.stopCapturing();
+  };
+
+  const toggleConditionOn = (targetIds: string[], condition: MarkerCondition) => {
+    const allHave = targetIds.every((id) => storedConditionsOf(id).some((c) => c.id === condition.id));
+    const incoming: MarkerCondition =
+      condition.id === 'exhaustion' ? { id: condition.id, value: condition.value ?? 1 } : { ...condition };
+    writeMarkerConditions(targetIds, (stored) => {
+      const present = stored.some((c) => c.id === condition.id);
+      if (allHave) return sortConditions(stored.filter((c) => c.id !== condition.id));
+      return present ? stored : sortConditions([...stored, incoming]);
+    });
+  };
+
+  const stepConditionValueOn = (targetIds: string[], id: string, delta: number) =>
+    writeMarkerConditions(targetIds, (stored) => stepConditionValue(stored, id, delta));
+
+  const toggleConditionDmOnly = (targetIds: string[], id: string) =>
+    writeMarkerConditions(targetIds, (stored) =>
+      stored.map((c) => {
+        if (c.id !== id) return c;
+        const { dmOnly, ...rest } = c;
+        return dmOnly ? rest : { ...rest, dmOnly: true };
+      })
+    );
+
+  const clearConditions = (targetIds: string[]) => writeMarkerConditions(targetIds, () => []);
+
+  const conditionPickerFor = (targetIds: string[]): ComponentProps<typeof TokenContextPanel>['conditions'] => {
+    // Stored rows, not stageProps: stage markers carry the derived Bloodied, which is never written
+    const rows = targetIds.flatMap((id) => markerRowFor(id) ?? []);
+    return {
+      ...conditionPickerState(rows),
+      customSuggestions: customConditionSuggestions,
+      onToggle: (condition) => toggleConditionOn(targetIds, condition),
+      onStepValue: (id, delta) => stepConditionValueOn(targetIds, id, delta),
+      onToggleDmOnly: (id) => toggleConditionDmOnly(targetIds, id),
+      onClear: () => clearConditions(targetIds)
+    };
+  };
+
+  const writeHitPoints = (markerId: string, fields: { hitPoints?: number | null; tempHitPoints?: number | null }) =>
+    session.client?.write.setMarkerFields(selectedSceneId, markerId, fields);
+
+  const statBlockFor = (markerId: string) => {
+    const row = markerRowFor(markerId);
+    if (!row?.statBlock) return null;
+    return { statBlock: row.statBlock, hitPoints: row.hitPoints ?? null, tempHitPoints: row.tempHitPoints ?? null };
+  };
+
+  const quickCardRow = $derived.by(() => {
+    if (selectedMarkerIds.length !== 1) return undefined;
+    const row = markerRowFor(selectedMarkerIds[0]);
+    return row?.statBlock ? row : undefined;
+  });
+
+  const onStatRoll = (label: string, _formula: string, roll: StatBlockRoll) =>
+    addToast({ data: { title: `${label}: ${roll.total}`, body: roll.text, type: 'info' } });
+
+  const setQuickCardCollapsed = (collapsed: boolean) => {
+    statBlockQuickCardCollapsed = collapsed;
+    setPreference('statBlockQuickCardCollapsed', collapsed);
+  };
+
+  const deleteTokenPanelTargets = () => {
+    const ids = [...selectedMarkerIds];
+    ids.forEach((id) => onMarkerDeleted(id));
+    if (selectedMarkerId && ids.includes(selectedMarkerId)) selectedMarkerId = undefined;
+  };
+
+  const openFullStatBlock = (markerId: string) => {
+    selectedMarkerId = markerId;
+    markersPane?.expand();
+  };
+
+  // Combat -------------------------------------------------------------------------
+
+  const combatSnapshot = $derived(session.client?.scene(selectedSceneId) ?? null);
+  // Memoized so unrelated marker writes (drags) don't rebuild the tracker
+  let combatantsCache: MarkerRow[] = [];
+  const combatants = $derived.by(() => {
+    const next = (combatSnapshot?.markers ?? []).filter((m) => m.inCombat);
+    if (sameCombatantView(next, combatantsCache)) return combatantsCache;
+    combatantsCache = next;
+    return next;
+  });
+  const combatantIds = $derived(new Set(combatants.map((m) => m.id)));
+  const combatRunning = $derived(combatants.length > 0);
+  let turnPositionCache: TurnPosition = readTurnPosition({});
+  const turnPosition = $derived.by(() => {
+    const next = readTurnPosition(combatSnapshot?.settings ?? {});
+    if (isSameTurn(next, turnPositionCache)) return turnPositionCache;
+    turnPositionCache = next;
+    return next;
+  });
+  const activeTurnMarkerId = $derived(
+    !turnPosition.lairStep && turnPosition.activeId && combatantIds.has(turnPosition.activeId)
+      ? turnPosition.activeId
+      : null
+  );
+  const targetsInCombat = $derived(selectedMarkerIds.filter((id) => combatantIds.has(id)).length);
+
+  // The active combatant can vanish without removeCombatants (undo of its placement, a sync delete)
+  let previousCombat: { sceneId: string; combatants: MarkerRow[] } | null = null;
+  $effect(() => {
+    const sceneId = selectedSceneId;
+    const current = combatants;
+    void turnPosition;
+    untrack(() => {
+      const previous = previousCombat?.sceneId === sceneId ? previousCombat.combatants : [];
+      previousCombat = { sceneId, combatants: current };
+      const client = session.client;
+      const snapshot = client?.scene(sceneId);
+      if (client && snapshot) recoverActiveTurn(client.systemWrite, sceneId, snapshot, previous);
+    });
+  });
+
+  const reportRolls = (lines: string[]) => {
+    if (lines.length === 0) return;
+    if (lines.length <= 3) {
+      for (const line of lines) addToast({ data: { title: line, type: 'info' } });
+      return;
+    }
+    addToast({
+      data: { title: `Rolled initiative for ${lines.length} combatants`, body: lines.join('\n'), type: 'info' }
+    });
+  };
+
+  // Next turn selects the active token so the quick stat card follows it
+  const announceTurn = (turn: TurnPosition | null) => {
+    if (!turn) return;
+    const followIds = turn.lairStep || !turn.activeId ? [] : [turn.activeId];
+    selectedMarkerId = followIds[0];
+    setSelection(followIds);
+    if (sidePanelTab === 'combat') return;
+    const activeTitle = session.client?.scene(selectedSceneId)?.markers.find((m) => m.id === turn.activeId)?.title;
+    const body = turn.lairStep ? 'Lair action' : `${activeTitle || 'Next'}'s turn`;
+    addToast({ data: { title: `Round ${turn.round} · ${body}`, type: 'info' } });
+  };
+
+  const handleCombatAction = (action: CombatAction) => {
+    const client = session.client;
+    const snapshot = client?.scene(selectedSceneId);
+    if (!client || !snapshot) return;
+    const write = client.systemWrite;
+    const sceneId = selectedSceneId;
+    switch (action.type) {
+      case 'start':
+        startCombat(write, sceneId, snapshot, action.ids);
+        openSidePanelTab('combat');
+        break;
+      case 'add':
+        addCombatants(write, sceneId, snapshot, action.ids);
+        break;
+      case 'remove':
+        removeCombatants(write, sceneId, snapshot, action.ids);
+        break;
+      case 'setInitiative':
+        setInitiative(write, sceneId, snapshot, action.id, action.value);
+        break;
+      case 'rollEmpty':
+        reportRolls(rollEmpty(write, sceneId, snapshot));
+        break;
+      case 'rerollAll':
+        reportRolls(rerollAll(write, sceneId, snapshot));
+        break;
+      case 'rollOne':
+        reportRolls(rollOne(write, sceneId, snapshot, action.id));
+        break;
+      case 'nudgeTie':
+        nudgeTie(write, sceneId, snapshot, action.id, action.direction);
+        break;
+      case 'begin':
+        announceTurn(beginCombat(write, sceneId, snapshot));
+        break;
+      case 'next':
+        announceTurn(nextTurn(write, sceneId, snapshot));
+        break;
+      case 'previous':
+        announceTurn(previousTurn(write, sceneId, snapshot));
+        break;
+      case 'end':
+        endCombat(write, sceneId, snapshot);
+        break;
+    }
+  };
+
+  const handleTokenCombatAction = (action: 'start' | 'add' | 'remove') =>
+    handleCombatAction({ type: action, ids: [...selectedMarkerIds] });
+
+  const startOrAddCombat = () => {
+    if (selectedMarkerIds.length === 0) {
+      addToast({ data: { title: 'Select tokens to add to combat', type: 'info' } });
+      return;
+    }
+    handleCombatAction({ type: combatRunning ? 'add' : 'start', ids: [...selectedMarkerIds] });
+  };
+
+  const advanceCombat = () => {
+    if (!combatRunning) {
+      addToast({ data: { title: 'No combat running. Select tokens and press I', type: 'info' } });
+      return;
+    }
+    handleCombatAction({ type: turnPosition.round === 0 ? 'begin' : 'next' });
+  };
+
+  const rewindCombat = () => {
+    if (combatRunning && turnPosition.round > 0) handleCombatAction({ type: 'previous' });
+  };
+
+  const onInitiativeBonusChange = (markerId: string, bonus: number | null) => {
+    const client = session.client;
+    const snapshot = client?.scene(selectedSceneId);
+    if (!client || !snapshot) return;
+    setInitiativeBonus(client.systemWrite, selectedSceneId, markerId, bonus);
+    const assetId = snapshot.markers.find((m) => m.id === markerId)?.assetId;
+    if (!assetId) return;
+    assetMutation.mutateAsync({ action: 'save', fields: { id: assetId, initiativeBonus: bonus } }).catch((error) =>
+      addToast({
+        data: {
+          title: 'Initiative bonus not saved to the library',
+          body: error instanceof Error ? error.message : 'Save failed',
+          type: 'danger'
+        }
+      })
+    );
+  };
+
   const onMarkerDeleted = (markerId: string) => {
+    const client = session.client;
+    const snapshot = client?.scene(selectedSceneId);
+    if (client && snapshot && combatantIds.has(markerId)) {
+      removeCombatants(client.systemWrite, selectedSceneId, snapshot, [markerId]);
+    }
     stageProps.marker.markers = stageProps.marker.markers.filter((m) => m.id !== markerId);
     session.client?.write.deleteMarker(selectedSceneId, markerId);
   };
@@ -1202,6 +1599,91 @@
   };
 
   // Annotations ------------------------------------------------------------------
+
+  // AoE templates ------------------------------------------------------------------
+
+  const AOE_SHAPE_CYCLE = [AoeShape.Circle, AoeShape.Square, AoeShape.Cone, AoeShape.Line];
+
+  const aoeRowFromTemplate = (template: AoeTemplate): AoeTemplateRow => ({
+    id: template.id,
+    sceneId: selectedSceneId,
+    shape: template.shape as AoeTemplateRow['shape'],
+    positionX: template.position.x,
+    positionY: template.position.y,
+    angle: template.angle,
+    size: template.size,
+    width: template.width,
+    effect: template.effect,
+    color: template.color,
+    opacity: template.opacity,
+    visibility: template.visibility,
+    label: template.label ?? null,
+    anchorMarkerId: null,
+    createdAt: Math.floor(Date.now() / 1000)
+  });
+
+  const aoeFieldsFromPatch = (patch: Partial<Omit<AoeTemplate, 'id'>>): Partial<AoeTemplateRow> => {
+    const { position, shape, ...rest } = patch;
+    return {
+      ...rest,
+      ...(position && { positionX: position.x, positionY: position.y }),
+      ...(shape && { shape: shape as AoeTemplateRow['shape'] })
+    };
+  };
+
+  const updateAoeTemplate = (id: string, patch: Partial<Omit<AoeTemplate, 'id'>>) => {
+    const layer = stageProps.aoeTemplates;
+    if (!layer?.templates.some((template) => template.id === id)) return;
+    layer.templates = layer.templates.map((template) => (template.id === id ? { ...template, ...patch } : template));
+    session.client?.write.setAoeTemplateFields(selectedSceneId, id, aoeFieldsFromPatch(patch));
+  };
+
+  const removeAoeTemplate = (id: string) => {
+    const layer = stageProps.aoeTemplates;
+    if (!layer) return;
+    layer.templates = layer.templates.filter((template) => template.id !== id);
+    if (layer.selectedId === id) layer.selectedId = null;
+    session.client?.write.deleteAoeTemplate(selectedSceneId, id);
+  };
+
+  const selectAoeTemplate = (id: string | null) => {
+    if (stageProps.aoeTemplates) stageProps.aoeTemplates.selectedId = id;
+  };
+
+  const changeAoeTool = (patch: Partial<AoeToolSettings>) => {
+    const layer = stageProps.aoeTemplates;
+    if (!layer) return;
+    layer.tool = { ...layer.tool, ...patch };
+    setPreference('aoeTool', layer.tool);
+  };
+
+  const onAoeTemplateAdded = (template: AoeTemplate) => {
+    const layer = stageProps.aoeTemplates;
+    if (!layer) return;
+    layer.templates = [...layer.templates, template];
+    layer.selectedId = template.id;
+    session.client?.write.upsertAoeTemplate(selectedSceneId, aoeRowFromTemplate(template));
+  };
+
+  const aoeKeyCommands = {
+    hasDraft: () => stage?.aoeTemplates?.hasDraft() ?? false,
+    cancelDraft: () => stage?.aoeTemplates?.cancelDraft(),
+    deselect: () => selectAoeTemplate(null),
+    deleteSelected: () => {
+      const id = stageProps.aoeTemplates?.selectedId;
+      if (id) removeAoeTemplate(id);
+    },
+    rotateSelected: (delta: number) => {
+      const layer = stageProps.aoeTemplates;
+      const target = layer?.templates.find((template) => template.id === layer.selectedId);
+      if (target) updateAoeTemplate(target.id, { angle: rotateTemplateAngle(target.shape, target.angle, delta) });
+    },
+    cycleShape: () => {
+      const tool = stageProps.aoeTemplates?.tool;
+      if (!tool) return;
+      changeAoeTool({ shape: AOE_SHAPE_CYCLE[(AOE_SHAPE_CYCLE.indexOf(tool.shape) + 1) % AOE_SHAPE_CYCLE.length] });
+    }
+  };
 
   const annotationColors = [
     '#d73e2e',
@@ -1414,6 +1896,7 @@
   $effect(() => {
     void selectedSceneId;
     stage?.fogOfWar?.cancelPolygon();
+    stage?.aoeTemplates?.cancelDraft();
   });
 
   // Measurements (broadcast only when editing the active scene) -------------------
@@ -1576,6 +2059,7 @@
   // Keyboard -------------------------------------------------------------------
 
   const handleKeydown = (event: KeyboardEvent) => {
+    if (catalogOpen) return;
     const activeElement = document.activeElement as HTMLElement | null;
     if (
       activeElement &&
@@ -1587,8 +2071,27 @@
       return;
     }
 
+    if (event.key === 'Escape' && !event.defaultPrevented && !stage?.markers?.isDraggingMarker) {
+      if (stageProps.activeLayer === MapLayerType.None) setSelection([]);
+    }
+
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && !catalogOpen) {
+      const key = event.key.toLowerCase();
+      if ((key === 'i' || key === 'n') && event.repeat) return;
+      if (key === 'i') return startOrAddCombat();
+      if (key === 'n') return event.shiftKey ? rewindCombat() : advanceCombat();
+    }
+
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
       const key = event.key.toLowerCase();
+      if (key === 'a' && !event.shiftKey) {
+        if (![MapLayerType.None, MapLayerType.Marker].includes(stageProps.activeLayer)) return;
+        event.preventDefault();
+        setSelection(
+          stageProps.marker.markers.filter((m) => m.visibility !== MarkerVisibility.Player).map((m) => m.id)
+        );
+        return;
+      }
       if (key === 'z' || key === 'y') {
         event.preventDefault();
         if (!session.client) return;
@@ -1596,8 +2099,9 @@
         const isRedo = key === 'y' || event.shiftKey;
         // Debounced mask commits and throttled property writes (fog rooms) must
         // land on the undo stack before we pop it, or ctrl-z right after an
-        // edit reverts the wrong step
+        // edit reverts the wrong step. An open group drag is closed first so its step is complete
         flushQueuedPropertyUpdates();
+        finishGroupDrag();
         Promise.all([flushPendingAnnotationCommits(), flushPendingFogCommit()]).then(() => {
           if (isRedo) {
             if (client.canRedo) client.redo();
@@ -1617,7 +2121,8 @@
       activeControl,
       stage,
       handleSelectActiveControl,
-      clearFogAndRooms
+      clearFogAndRooms,
+      aoeKeyCommands
     );
   };
 
@@ -1634,6 +2139,7 @@
   const commitPendingGestureWrites = () => {
     if (document.visibilityState !== 'hidden') return;
     flushQueuedPropertyUpdates();
+    finishGroupDrag();
     for (const [markerId, timer] of dragClearTimers) {
       clearTimeout(timer);
       const position = dragPositions[markerId];
@@ -1704,11 +2210,13 @@
         if (Math.hypot(end.x - gesture.start.x, end.y - gesture.start.y) < 5) {
           const id = stage?.markers.hitTest(end);
           if (id)
-            selectedMarkerIds = gesture.initialIds.includes(id)
-              ? gesture.initialIds.filter((selected) => selected !== id)
-              : [...gesture.initialIds, id];
+            setSelection(
+              gesture.initialIds.includes(id)
+                ? gesture.initialIds.filter((selected) => selected !== id)
+                : [...gesture.initialIds, id]
+            );
         } else {
-          selectedMarkerIds = [...new Set([...gesture.initialIds, ...stage.markers.inRectangle(gesture.start, end)])];
+          setSelection([...new Set([...gesture.initialIds, ...stage.markers.inRectangle(gesture.start, end)])]);
         }
       }
       cancel();
@@ -1878,7 +2386,10 @@
           />
           <Stage
             bind:this={stage}
-            props={renderStageProps}
+            props={stageProps}
+            {selectedMarkerIds}
+            dropTargetMarkerId={artworkDropTargetId}
+            {activeTurnMarkerId}
             callbacks={{
               onAnnotationUpdate,
               onFogUpdate,
@@ -1891,6 +2402,8 @@
               onStageLoading,
               onMarkerAdded,
               onMarkerMoved,
+              onMarkersMoved,
+              onMarkersMoveEnd,
               onMarkerSelected,
               onMarkerDoubleClick,
               onMarkerContextMenu,
@@ -1901,6 +2414,10 @@
               onMeasurementStart,
               onMeasurementUpdate,
               onMeasurementEnd,
+              onAoeTemplateAdded,
+              onAoeTemplateUpdated: updateAoeTemplate,
+              onAoeTemplateSelected: selectAoeTemplate,
+              onAoeTemplateDeleted: removeAoeTemplate,
               onCursorMove: handleCursorMove
             }}
             trackLocalCursor={true}
@@ -1929,7 +2446,32 @@
               : null}
           />
           <PerformanceDebugger />
-          <ContextMenu bind:this={markerContextMenu} items={markerContextMenuItems} />
+          {#if tokenPanel && tokenPanelMarker}
+            <TokenContextPanel
+              name={tokenPanelMarker.title || tokenPanelMarker.label || 'Token'}
+              targetCount={selectedMarkerIds.length}
+              position={{ x: tokenPanel.x, y: tokenPanel.y }}
+              conditions={conditionPickerFor(selectedMarkerIds)}
+              visibility={selectedMarkerIds.length === 1 ? tokenPanelMarker.visibility : undefined}
+              onVisibilityChange={(visibility) =>
+                selectedMarkerIds.forEach((id) => setMarkerVisibility(id, visibility))}
+              pinned={pinnedMarkerIds.includes(tokenPanelMarker.id)}
+              onPinToggle={tokenPanelMarker.visibility === MarkerVisibility.DM
+                ? undefined
+                : (pinned) => onPinToggle(tokenPanelMarker.id, pinned)}
+              onShowAsHandout={canPresentHandouts && selectedMarkerIds.length === 1
+                ? () => previewTokenHandout(tokenPanelMarker.id)
+                : undefined}
+              onSaveToLibrary={canEditAssets && selectedMarkerIds.length === 1
+                ? () => saveTokenToLibrary(tokenPanelMarker.id)
+                : undefined}
+              combatState={combatRunning ? 'running' : 'none'}
+              {targetsInCombat}
+              onCombatAction={handleTokenCombatAction}
+              onDelete={deleteTokenPanelTargets}
+              onClose={() => (tokenPanel = null)}
+            />
+          {/if}
         </div>
         <SceneControls
           {stageProps}
@@ -1945,11 +2487,32 @@
           client={session.client}
           isCompact={isMobile}
           onFogClear={clearFogAndRooms}
+          aoeTool={stageProps.aoeTemplates?.tool}
+          onAoeToolChange={changeAoeTool}
         />
         <SceneZoom {stage} {handleSceneFit} {handleMapFill} {stageProps} />
         <Shortcuts />
         <ChecklistHelpButton onclick={handleShowChecklist} />
+        <HandoutLivePill partyId={party.id} client={session.client} onOpen={() => openSidePanelTab('handout')} />
+        {#if catalogOpen}
+          <AssetCatalogOverlay
+            onClose={() => (catalogOpen = false)}
+            onPlace={(assetId) => placeAssetAt(assetId, 1, getViewportCenter() ?? { x: 0, y: 0 })}
+          />
+        {/if}
         <Hints {stageProps} />
+        {#if quickCardRow?.statBlock}
+          <StatBlockQuickCard
+            statBlock={quickCardRow.statBlock}
+            hitPoints={quickCardRow.hitPoints ?? null}
+            tempHitPoints={quickCardRow.tempHitPoints ?? null}
+            collapsed={statBlockQuickCardCollapsed}
+            onCollapsedChange={setQuickCardCollapsed}
+            onHitPointsChange={(fields) => writeHitPoints(quickCardRow.id, fields)}
+            onRoll={onStatRoll}
+            onOpenFullStatBlock={() => openFullStatBlock(quickCardRow.id)}
+          />
+        {/if}
       </div>
     </Pane>
     <PaneResizer class="resizer">
@@ -1985,15 +2548,32 @@
       }}
     >
       <div class="editor-tools">
-        {#if canPresentHandouts}<HandoutControls
-            partyId={party.id}
-            client={session.client}
-            bucketUrl={data.bucketUrl}
-            preview={handoutPreview}
-            onPreviewChange={(preview) => (handoutPreview = preview)}
-          />{/if}
-        <div class="editor-tools__content">
-          {#if activeControl === 'annotation'}
+        <SidePanelTabs
+          selected={sidePanelTab}
+          onSelect={(tab) => (sidePanelTab = tab)}
+          handoutLive={!!liveHandout}
+          combatLive={combatRunning}
+          showLibrary={canEditAssets}
+          showHandout={canPresentHandouts}
+        />
+        <div
+          class="editor-tools__content"
+          id="sidePanel-tokens"
+          role="tabpanel"
+          aria-labelledby="sidePanelTab-tokens"
+          hidden={sidePanelTab !== 'tokens'}
+        >
+          {#if activeControl === 'aoe' && stageProps.aoeTemplates}
+            <AoeTemplateManager
+              templates={stageProps.aoeTemplates.templates}
+              selectedId={stageProps.aoeTemplates.selectedId}
+              onSelect={selectAoeTemplate}
+              onUpdate={updateAoeTemplate}
+              onDelete={removeAoeTemplate}
+              onActivateTool={() => handleSelectActiveControl('aoe', { toggle: false })}
+              isToolActive={activeControl === 'aoe'}
+            />
+          {:else if activeControl === 'annotation'}
             {#key selectedAnnotationId}
               <AnnotationManager
                 {stageProps}
@@ -2031,33 +2611,88 @@
               onComplete={handleChecklistItemComplete}
               onDismiss={handleChecklistDismiss}
             />
-          {:else}
-            <AssetLibrary
-              client={session.client}
+          {:else if !isMarkersCollapsed}
+            <MarkerManager
+              partyId={party.id}
+              {stageProps}
+              bind:selectedMarkerId
+              {selectedMarkerIds}
+              onSelectionChange={setSelection}
+              {handleSelectActiveControl}
+              {updateMarkerAndSave}
+              onArtworkFile={replaceTokenArtwork}
+              onHandoutPreview={canPresentHandouts ? previewTokenHandout : undefined}
+              {onMarkerDeleted}
+              {pinnedMarkerIds}
+              {onPinToggle}
+              conditionPickerFor={(markerId) => conditionPickerFor([markerId])}
+              {statBlockFor}
+              onHitPointsChange={writeHitPoints}
+              {onStatRoll}
               sceneId={selectedSceneId}
-              {selectedMarkerId}
-              bucketUrl={data.bucketUrl}
-              onPreviewArtwork={canPresentHandouts ? previewAssetHandout : undefined}
+              onNoteSave={(sceneId, markerId, note) =>
+                session.client?.write.setExistingMarkerFields(sceneId, markerId, { note })}
             />
-            {#key selectedMarkerId}
-              <MarkerManager
-                partyId={party.id}
-                {stageProps}
-                bind:selectedMarkerId
-                {selectedMarkerIds}
-                onSelectionChange={(ids) => {
-                  selectedMarkerIds = ids;
-                }}
-                {handleSelectActiveControl}
-                {updateMarkerAndSave}
-                onArtworkFile={replaceTokenArtwork}
-                onHandoutPreview={canPresentHandouts ? previewTokenHandout : undefined}
-                {onMarkerDeleted}
-                {pinnedMarkerIds}
-                {onPinToggle}
-              />
-            {/key}
           {/if}
+        </div>
+        <div
+          class="editor-tools__content"
+          id="sidePanel-library"
+          role="tabpanel"
+          aria-labelledby="sidePanelTab-library"
+          hidden={sidePanelTab !== 'library'}
+        >
+          <AssetLibrary
+            client={session.client}
+            sceneId={selectedSceneId}
+            {selectedMarkerId}
+            bucketUrl={data.bucketUrl}
+            onPreviewArtwork={canPresentHandouts ? previewAssetHandout : undefined}
+            onOpenCatalog={() => (catalogOpen = true)}
+            bind:quantity={libraryQuantity}
+            {getViewportCenter}
+            snapPosition={snapPlacement}
+          />
+        </div>
+        <div
+          class="editor-tools__content"
+          id="sidePanel-handout"
+          role="tabpanel"
+          aria-labelledby="sidePanelTab-handout"
+          hidden={sidePanelTab !== 'handout'}
+        >
+          {#if canPresentHandouts}
+            <HandoutPanel
+              partyId={party.id}
+              client={session.client}
+              bucketUrl={data.bucketUrl}
+              preview={handoutPreview}
+              onPreviewChange={(preview) => (handoutPreview = preview)}
+            />
+          {/if}
+        </div>
+        <div
+          class="editor-tools__content"
+          id="sidePanel-combat"
+          role="tabpanel"
+          aria-labelledby="sidePanelTab-combat"
+          hidden={sidePanelTab !== 'combat'}
+        >
+          <InitiativeTracker
+            {combatants}
+            position={turnPosition}
+            lairActions={combatSnapshot?.settings.combatLairActions ?? false}
+            showOnTv={combatSnapshot?.settings.combatShowOnTv ?? true}
+            {selectedMarkerIds}
+            bucketUrl={data.bucketUrl}
+            onAction={handleCombatAction}
+            onSelectMarker={(id) => {
+              selectedMarkerId = id;
+              setSelection([id]);
+            }}
+            onBonusChange={onInitiativeBonusChange}
+            onSettingsChange={(fields) => session.client?.systemWrite.setSceneSettings(selectedSceneId, fields)}
+          />
         </div>
       </div>
     </Pane>
@@ -2075,6 +2710,11 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .editor-tools__content[hidden] {
+    display: none;
   }
   .tokenSelection__rectangle {
     position: absolute;

@@ -1,4 +1,5 @@
 import { assetsTable, markerTable } from '$lib/db/app/schema';
+import type { StatBlock } from '$lib/utils/statBlock/types';
 import type { SQL } from 'drizzle-orm';
 import { getTableConfig, SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,17 +9,19 @@ import {
   assetPlacements,
   deleteAsset,
   getOwnedAsset,
-  pruneUnavailableAssetLinks
+  pruneUnavailableAssetLinks,
+  saveAsset
 } from './assets';
 
-const { get, where, insert, remove, select } = vi.hoisted(() => ({
+const { get, where, insert, remove, select, update } = vi.hoisted(() => ({
   get: vi.fn(),
   where: vi.fn(),
   insert: vi.fn(),
   remove: vi.fn(),
-  select: vi.fn()
+  select: vi.fn(),
+  update: vi.fn()
 }));
-vi.mock('$lib/db/app', () => ({ db: { select, insert, delete: remove } }));
+vi.mock('$lib/db/app', () => ({ db: { select, insert, delete: remove, update } }));
 
 const asset = {
   id: 'asset',
@@ -66,7 +69,7 @@ describe('personal asset ownership and placement', () => {
     expect(params).toEqual(['scene', 'viewer', 'admin', 'editor']);
   });
 
-  it('places unique independent snapshots with private visibility and no statblocks', async () => {
+  it('places unique independent snapshots with private visibility', async () => {
     get.mockResolvedValueOnce({ partyId: 'party' }).mockResolvedValueOnce(asset);
     const first = await assetPlacements('owner', 'asset', 'scene', 2, 10, 20);
     expect(first[0].id).not.toBe(first[1].id);
@@ -91,6 +94,42 @@ describe('personal asset ownership and placement', () => {
     expect(first[0].imageLocation).toBe('originals/token.png');
   });
 
+  it('places the asset stat block with hit points and initiative bonus', async () => {
+    const statBlock = { hp: { average: 7 } } as unknown as StatBlock;
+    get.mockResolvedValueOnce({ partyId: 'party' }).mockResolvedValueOnce({ ...asset, statBlock, initiativeBonus: 3 });
+    const [marker] = await assetPlacements('owner', 'asset', 'scene', 1, 10, 20);
+    expect(marker).toMatchObject({ statBlock, hitPoints: 7, tempHitPoints: null, initiativeBonus: 3 });
+  });
+
+  it('copies the stat block and initiative bonus from a saved marker', async () => {
+    const statBlock = { hp: { average: 9 } } as unknown as StatBlock;
+    get.mockResolvedValueOnce({ partyId: 'party' }).mockResolvedValueOnce({
+      title: 'Goblin',
+      imageLocation: null,
+      shape: 1,
+      shapeColor: '#ffffff',
+      size: 1,
+      imageScale: 1,
+      statBlock,
+      initiativeBonus: 2
+    });
+    const values = vi.fn().mockReturnValue({ returning: () => ({ get: async () => ({ id: 'new-asset' }) }) });
+    insert.mockReturnValue({ values });
+    await assetFromMarker('owner', 'scene', 'token');
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ statBlock, initiativeBonus: 2 }));
+  });
+
+  it('saves only the supplied fields of an existing asset and requires a name for new ones', async () => {
+    get.mockResolvedValue(asset);
+    const set = vi.fn().mockReturnValue({
+      where: () => ({ returning: () => ({ get: async () => ({ ...asset, initiativeBonus: 2 }) }) })
+    });
+    update.mockReturnValue({ set });
+    await saveAsset('owner', { id: 'asset', initiativeBonus: 2 });
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ initiativeBonus: 2 }));
+    await expect(saveAsset('owner', { initiativeBonus: 2 })).rejects.toThrow('Name is required');
+  });
+
   it('saves current token values before the scene persistence debounce completes', async () => {
     get
       .mockResolvedValueOnce({ partyId: 'party' })
@@ -112,8 +151,35 @@ describe('personal asset ownership and placement', () => {
       shape: 2,
       shapeColor: '#ffffff',
       size: 2,
-      imageScale: 1.75
+      imageScale: 1.75,
+      statBlock: null,
+      initiativeBonus: null
     });
+  });
+
+  it('keeps snapshot stat data and falls back to the persisted marker for omitted stat fields', async () => {
+    const live = { hp: { average: 11 } } as unknown as StatBlock;
+    const persisted = { hp: { average: 5 } } as unknown as StatBlock;
+    const snapshot = {
+      name: 'Goblin',
+      artworkLocation: null,
+      shape: 1,
+      shapeColor: '#ffffff',
+      size: 1,
+      imageScale: 1
+    };
+    const values = vi.fn().mockReturnValue({ returning: () => ({ get: async () => ({ id: 'new-asset' }) }) });
+    insert.mockReturnValue({ values });
+    get
+      .mockResolvedValueOnce({ partyId: 'party' })
+      .mockResolvedValueOnce({ imageLocation: null, statBlock: persisted, initiativeBonus: 1 });
+    await assetFromMarker('owner', 'scene', 'token', { ...snapshot, statBlock: live, initiativeBonus: 4 });
+    expect(values).toHaveBeenLastCalledWith(expect.objectContaining({ statBlock: live, initiativeBonus: 4 }));
+    get
+      .mockResolvedValueOnce({ partyId: 'party' })
+      .mockResolvedValueOnce({ imageLocation: null, statBlock: persisted, initiativeBonus: 1 });
+    await assetFromMarker('owner', 'scene', 'token', snapshot);
+    expect(values).toHaveBeenLastCalledWith(expect.objectContaining({ statBlock: persisted, initiativeBonus: 1 }));
   });
 
   it('deletes library metadata without deleting artwork or token rows', async () => {

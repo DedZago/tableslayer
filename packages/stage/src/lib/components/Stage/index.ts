@@ -8,6 +8,8 @@ export {
   type AnnotationsLayerProps
 } from './components/AnnotationLayer/types';
 export {
+  AOE_EFFECT_DEFAULT_COLORS,
+  AOE_EFFECT_LABELS,
   AoeEffect,
   AoeShape,
   type AoeTemplate,
@@ -63,6 +65,21 @@ export {
   type WeatherLayerPreset,
   type WeatherLayerProps
 } from './components/WeatherLayer/types';
+export {
+  angleFromCursor,
+  formatTemplateLabel,
+  getTemplateHandlePoints,
+  getTemplateLocalBounds,
+  getTemplateOutline,
+  normalizeTemplateAngle,
+  rotateTemplateAngle,
+  sizeFromCursor,
+  templateLocalToLayer,
+  templateSdf,
+  worldToTemplateLocal,
+  type TemplateBounds,
+  type TemplatePoint
+} from './helpers/aoeTemplates';
 export { debugState, isDebugEnabled, setDebugEnabled } from './helpers/debugState.svelte';
 export { parseFogRooms, pointInPolygon, polygonArea, smallestRoomContaining, type FogRoom } from './helpers/fogRooms';
 export { getGridCellSize, snapToGrid } from './helpers/grid';
@@ -78,6 +95,17 @@ export {
   type MapTransform,
   type Point2
 } from './helpers/mapSpace';
+export {
+  MARKER_CONDITIONS,
+  MARKER_CONDITION_ORDER,
+  conditionsKey,
+  resolveCondition,
+  sortConditions,
+  toggleCondition,
+  type ConditionDefinition,
+  type ConditionGroup,
+  type ResolvedCondition
+} from './helpers/markerConditions';
 export {
   get1PercentLowFps,
   getAverageFps,

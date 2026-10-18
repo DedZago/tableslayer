@@ -3,6 +3,7 @@ import { base64ToUint8, uint8ToBase64 } from './binary';
 import { getAnnotationMask, getFogMask, getSceneSnapshot } from './docSchema';
 import type {
   AnnotationRow,
+  AoeTemplateRow,
   GameSessionHydrationData,
   HandoutDescriptor,
   LightRow,
@@ -19,6 +20,7 @@ export interface SceneWire {
   settings: SceneSettings;
   markers: MarkerRow[];
   lights: LightRow[];
+  aoeTemplates: AoeTemplateRow[];
   annotations: Array<AnnotationRow & { mask?: string | null }>;
   fogMask?: string | null;
 }
@@ -45,6 +47,7 @@ export const hydrationDataFromWire = (wire: SessionSnapshotWire): GameSessionHyd
     settings: scene.settings,
     markers: scene.markers,
     lights: scene.lights,
+    aoeTemplates: scene.aoeTemplates,
     annotations: scene.annotations.map(({ mask, ...row }) => ({
       ...row,
       mask: mask ? base64ToUint8(mask) : null
@@ -68,6 +71,7 @@ export const sceneWireFromDoc = (
     settings: snapshot.settings,
     markers: parts.includes('markers') ? snapshot.markers : [],
     lights: parts.includes('lights') ? snapshot.lights : [],
+    aoeTemplates: parts.includes('aoeTemplates') ? snapshot.aoeTemplates : [],
     annotations: parts.includes('annotations')
       ? snapshot.annotations.map((row) => {
           const mask = getAnnotationMask(doc, sceneId, row.id);

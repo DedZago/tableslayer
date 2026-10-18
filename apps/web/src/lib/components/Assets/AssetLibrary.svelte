@@ -1,39 +1,44 @@
 <script lang="ts">
-  import { createAssetsQuery, useAssetMutation } from '$lib/queries/assets';
-  import { useUploadFileMutation } from '$lib/queries/file';
+  import { Button, ContextMenu, type ContextMenuItem, Icon, IconButton, Input, ToolTip } from '@tableslayer/ui';
+  import {
+    IconBookmarkPlus,
+    IconDots,
+    IconDownload,
+    IconPlus,
+    IconPresentation,
+    IconSearch
+  } from '@tabler/icons-svelte';
   import { handleMutation } from '$lib/factories';
-  import { validateMediaUpload } from '$lib/utils/mediaUpload';
+  import { createAssetsQuery, useAssetMutation } from '$lib/queries/assets';
   import { generateR2Url } from '$lib/utils/generateR2Url';
   import type { SelectAsset } from '$lib/db/app/schema';
+  import type { AssetListItem } from '$lib/queries/assets';
+  import { ASSET_DRAG_TYPE, markerAssetSnapshot, placeAsset, MAX_PLACEMENT_QUANTITY } from './assetPlacement';
+  import AssetEditor from './AssetEditor.svelte';
   import type { AssetLibraryProps } from './types';
-  import AssetImport from './AssetImport.svelte';
 
-  let { client, sceneId, selectedMarkerId, bucketUrl, onPreviewArtwork }: AssetLibraryProps = $props();
+  let {
+    client,
+    sceneId,
+    selectedMarkerId,
+    bucketUrl,
+    onPreviewArtwork,
+    onOpenCatalog,
+    quantity = $bindable(1),
+    getViewportCenter,
+    snapPosition
+  }: AssetLibraryProps = $props();
+
   let search = $state('');
-  let name = $state('');
-  let artworkLocation = $state<string | null>(null);
-  let tokenArtworkLocation = $state<string | null>(null);
-  let editingId = $state<string | undefined>();
-  let shape = $state(1);
-  let shapeColor = $state('#ffffff');
-  let size = $state(1);
-  let imageScale = $state(1);
-  let quantity = $state(1);
+  let view = $state<'grid' | 'edit'>('grid');
+  let editing = $state<AssetListItem | null>(null);
   let loading = $state(false);
+  let menuAsset = $state<AssetListItem | null>(null);
+  let armedDeleteId = $state<string | null>(null);
+  let contextMenu = $state<{ open: (event: MouseEvent) => Promise<void> } | undefined>();
   const query = createAssetsQuery(() => search);
   const mutation = useAssetMutation();
-  const upload = useUploadFileMutation();
-
-  const editAsset = (asset?: SelectAsset) => {
-    editingId = asset?.id;
-    name = asset?.name ?? '';
-    artworkLocation = asset?.artworkLocation ?? null;
-    tokenArtworkLocation = asset?.tokenArtworkLocation ?? null;
-    shape = asset?.shape ?? 1;
-    shapeColor = asset?.shapeColor ?? '#ffffff';
-    size = asset?.size ?? 1;
-    imageScale = asset?.imageScale ?? 1;
-  };
+  const assets = $derived(query.data?.assets ?? []);
 
   const runAction = (action: Parameters<typeof mutation.mutateAsync>[0]) =>
     handleMutation({
@@ -42,6 +47,32 @@
       toastMessages: { error: { title: 'Asset action failed', body: (error) => error.message } }
     });
 
+  const artworkOf = (asset: AssetListItem) => asset.artworkLocation || asset.tokenArtworkLocation;
+  const canShowHandout = (asset: AssetListItem) => !!onPreviewArtwork && !!artworkOf(asset);
+  const badgeOf = ({ statSummary }: AssetListItem) =>
+    statSummary ? (statSummary.cr ? `CR ${statSummary.cr}` : 'Stats') : null;
+
+  const place = (assetId: string) => {
+    if (loading) return;
+    return placeAsset({
+      assetId,
+      quantity: quantity ?? 1,
+      at: getViewportCenter?.() ?? { x: 0, y: 0 },
+      sceneId,
+      client,
+      mutate: (action) => mutation.mutateAsync(action),
+      snap: snapPosition,
+      onLoadingChange: (value) => (loading = value)
+    });
+  };
+
+  const placeFromKeyboard = (event: KeyboardEvent, assetId: string) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    void place(assetId);
+  };
+
   const saveSelectedMarker = async () => {
     const marker = client?.scene(sceneId)?.markers.find((row) => row.id === selectedMarkerId);
     if (!marker) return;
@@ -49,224 +80,387 @@
       action: 'saveMarker',
       sceneId,
       markerId: marker.id,
-      snapshot: {
-        name: marker.title,
-        artworkLocation: marker.imageLocation,
-        shape: marker.shape,
-        shapeColor: marker.shapeColor,
-        size: marker.size,
-        imageScale: marker.imageScale
-      }
+      snapshot: markerAssetSnapshot(marker)
     });
   };
 
-  const save = async () => {
-    const result = await runAction({
-      action: 'save',
-      fields: { id: editingId, name, artworkLocation, tokenArtworkLocation, shape, shapeColor, size, imageScale }
-    });
-    if (result?.asset) editAsset(result.asset);
+  const openEditor = (asset: AssetListItem | null) => {
+    editing = asset;
+    view = 'edit';
   };
 
-  const pickArtwork = async (event: Event) => {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    const result = await handleMutation({
-      mutation: () => {
-        validateMediaUpload(file, true);
-        return upload.mutateAsync({ file, folder: 'asset' });
-      },
-      formLoadingState: (value) => (loading = value),
-      toastMessages: { error: { title: 'Artwork upload failed', body: (error) => error.message } }
-    });
-    if (result) {
-      artworkLocation = result.location;
-      tokenArtworkLocation = null;
-    }
+  const showSaved = ({ statBlock, ...saved }: SelectAsset) => {
+    editing = {
+      ...saved,
+      statSummary: statBlock
+        ? { cr: statBlock.cr.display, type: statBlock.type, size: statBlock.size[0] ?? null }
+        : null
+    };
   };
 
-  const place = async (id: string) => {
-    const destination = sceneId;
-    const destinationClient = client;
-    if (!destinationClient?.scene(destination)) return;
-    const result = await runAction({ action: 'place', id, sceneId: destination, quantity, x: 0, y: 0 });
-    if (!result?.markers || !destinationClient.scene(destination)) return;
-    const settings = destinationClient.scene(destination)!.settings;
-    const columns = Math.ceil(Math.sqrt(result.markers.length));
-    const displayCell = (settings.gridSpacing * settings.displayResolutionX) / settings.displaySizeX;
-    const spacing = settings.gridMode === 1 && settings.mapZoom > 0 ? displayCell / settings.mapZoom : displayCell;
-    destinationClient.stopCapturing();
-    destinationClient.write.transaction(() => {
-      result.markers!.forEach((marker, index) =>
-        destinationClient.write.upsertMarker(destination, {
-          ...marker,
-          positionX: (index % columns) * spacing,
-          positionY: -Math.floor(index / columns) * spacing
-        })
-      );
-    });
-    destinationClient.stopCapturing();
+  const closeEditor = () => {
+    editing = null;
+    view = 'grid';
+  };
+
+  const confirmDelete = async (asset: AssetListItem) => {
+    const result = await runAction({ action: 'delete', id: asset.id });
+    if (result) armedDeleteId = null;
+  };
+
+  const assetMenuItems = (asset: AssetListItem): ContextMenuItem[] => [
+    { label: 'Edit', onclick: () => openEditor(asset) },
+    ...(canShowHandout(asset) ? [{ label: 'Show as handout', onclick: () => onPreviewArtwork?.(asset) }] : []),
+    { type: 'divider' },
+    { label: 'Delete', variant: 'danger', onclick: () => (armedDeleteId = asset.id) }
+  ];
+  const menuItems = $derived(menuAsset ? assetMenuItems(menuAsset) : []);
+
+  const openMenu = (event: MouseEvent, asset: AssetListItem) => {
+    menuAsset = asset;
+    void contextMenu?.open(event);
+  };
+
+  const startDrag = (event: DragEvent, asset: AssetListItem) => {
+    const transfer = event.dataTransfer;
+    if (!transfer) return;
+    transfer.setData(ASSET_DRAG_TYPE, asset.id);
+    transfer.effectAllowed = 'copy';
+    const image = (event.currentTarget as HTMLElement).querySelector('img');
+    if (image) transfer.setDragImage(image, 32, 32);
   };
 </script>
 
-<details class="assets">
-  <summary class="assets__heading">Personal asset library</summary>
-  <div class="assets__body">
-    <AssetImport />
-    <label class="assets__field">
-      Search assets <input class="assets__input" type="search" bind:value={search} />
-    </label>
-    {#if query.error}<p class="assets__error" role="alert">{query.error.message}</p>{/if}
-    <label class="assets__field">
-      Quantity <input class="assets__input" type="number" min="1" max="100" bind:value={quantity} />
-    </label>
-    {#if selectedMarkerId}
-      <button class="assets__button" disabled={loading} onclick={saveSelectedMarker}>
-        Save selected token as asset
-      </button>
-    {/if}
-    {#each query.data?.assets ?? [] as asset (asset.id)}
-      <div class="assets__item">
-        {#if asset.artworkLocation || asset.tokenArtworkLocation}
-          <img
-            class="assets__thumbnail"
-            src={generateR2Url(asset.artworkLocation || asset.tokenArtworkLocation, {
-              width: 64,
-              height: 64,
-              fit: 'contain',
-              bucketUrl
-            })}
-            alt={asset.name}
-          />
-        {/if}
-        <span>{asset.name}</span>
-        {#if onPreviewArtwork && (asset.artworkLocation || asset.tokenArtworkLocation)}<button
-            class="assets__button"
-            onclick={() => onPreviewArtwork?.(asset)}
-          >
-            Preview handout
-          </button>{/if}
-        <button class="assets__button" disabled={loading} onclick={() => place(asset.id)}>Place</button>
-        <button class="assets__button" disabled={loading} onclick={() => editAsset(asset)}>Edit</button>
-        <button
-          class="assets__button assets__button--danger"
-          disabled={loading}
-          onclick={() => runAction({ action: 'delete', id: asset.id })}
-        >
-          Delete
-        </button>
+<div class="assetLibrary">
+  {#if view === 'edit'}
+    {#key editing?.id ?? 'new'}
+      <AssetEditor asset={editing} {bucketUrl} onClose={closeEditor} onSaved={showSaved} />
+    {/key}
+  {:else}
+    <div class="assetLibrary__toolbar">
+      <div class="assetLibrary__search">
+        <span class="assetLibrary__searchIcon" aria-hidden="true">
+          <Icon Icon={IconSearch} size="1rem" />
+        </span>
+        <Input type="search" aria-label="Search assets" placeholder="Search assets…" bind:value={search} />
       </div>
-    {/each}
-    <button class="assets__button" disabled={loading} onclick={() => editAsset()}>New asset</button>
-    <form
-      class="assets__form"
-      onsubmit={(event) => {
-        event.preventDefault();
-        save();
-      }}
-    >
-      <label class="assets__field">
-        Asset name <input class="assets__input" required maxlength="200" bind:value={name} />
+      <label class="assetLibrary__quantity">
+        <span aria-hidden="true">×</span>
+        <Input type="number" aria-label="Quantity" min={1} max={MAX_PLACEMENT_QUANTITY} bind:value={quantity} />
       </label>
-      <label class="assets__field">
-        Artwork <input
-          class="assets__input"
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/avif,image/gif,image/tiff"
-          disabled={loading}
-          onchange={pickArtwork}
-        />
-      </label>
-      {#if artworkLocation}<img
-          class="assets__preview"
-          src={generateR2Url(artworkLocation, { width: 300, fit: 'contain', bucketUrl })}
-          alt={name || 'Asset artwork'}
-        />{/if}
-      <label class="assets__field">
-        Shape <select class="assets__input" bind:value={shape}>
-          <option value={0}>None</option>
-          <option value={1}>Circle</option>
-          <option value={2}>Square</option>
-          <option value={3}>Triangle</option>
-          <option value={4}>Pin</option>
-        </select>
-      </label>
-      <label class="assets__field">
-        Shape color <input class="assets__input" type="color" bind:value={shapeColor} />
-      </label>
-      <label class="assets__field">
-        Size <select class="assets__input" bind:value={size}>
-          <option value={1}>Small</option>
-          <option value={2}>Medium</option>
-          <option value={3}>Large</option>
-        </select>
-      </label>
-      <label class="assets__field">
-        Image scale <input class="assets__input" type="number" min="0.1" max="10" step="0.1" bind:value={imageScale} />
-      </label>
-      <button class="assets__button" type="submit" disabled={loading}>
-        {editingId ? 'Save asset' : 'Create asset'}
-      </button>
-    </form>
-  </div>
-</details>
+      <ToolTip positioning={{ placement: 'bottom' }} openDelay={500} closeOnPointerDown disableHoverableContent>
+        {#snippet children()}
+          <IconButton variant="ghost" aria-label="New asset" onclick={() => openEditor(null)}>
+            <Icon Icon={IconPlus} size="1.125rem" />
+          </IconButton>
+        {/snippet}
+        {#snippet toolTipContent()}New asset{/snippet}
+      </ToolTip>
+      {#if onOpenCatalog}
+        <ToolTip positioning={{ placement: 'bottom' }} openDelay={500} closeOnPointerDown disableHoverableContent>
+          {#snippet children()}
+            <IconButton variant="ghost" aria-label="Add from 5etools" onclick={onOpenCatalog}>
+              <Icon Icon={IconDownload} size="1.125rem" />
+            </IconButton>
+          {/snippet}
+          {#snippet toolTipContent()}Add from 5etools{/snippet}
+        </ToolTip>
+      {/if}
+      {#if selectedMarkerId}
+        <ToolTip positioning={{ placement: 'bottom' }} openDelay={500} closeOnPointerDown disableHoverableContent>
+          {#snippet children()}
+            <IconButton
+              variant="ghost"
+              aria-label="Save selected token"
+              disabled={loading}
+              onclick={saveSelectedMarker}
+            >
+              <Icon Icon={IconBookmarkPlus} size="1.125rem" />
+            </IconButton>
+          {/snippet}
+          {#snippet toolTipContent()}Save selected token to library{/snippet}
+        </ToolTip>
+      {/if}
+    </div>
+
+    {#if query.error}<p class="assetLibrary__error" role="alert">{query.error.message}</p>{/if}
+
+    {#if query.isPending}
+      <p class="assetLibrary__status">Loading assets…</p>
+    {:else if assets.length === 0}
+      <div class="assetLibrary__empty">
+        {#if search.trim()}
+          <p>No assets match "{search.trim()}".</p>
+        {:else}
+          <p>No assets yet. Add one from 5etools or save a token from the map.</p>
+          <div class="assetLibrary__emptyActions">
+            {#if onOpenCatalog}
+              <Button variant="ghost" size="sm" onclick={onOpenCatalog}>Add from 5etools</Button>
+            {/if}
+            <Button variant="ghost" size="sm" onclick={() => openEditor(null)}>New asset</Button>
+          </div>
+        {/if}
+      </div>
+    {:else}
+      <div class="assetLibrary__list">
+        {#each assets as asset (asset.id)}
+          {@const artwork = artworkOf(asset)}
+          {@const badge = badgeOf(asset)}
+          <div class="assetLibrary__item">
+            <div class="assetLibrary__tileWrap">
+              <div
+                role="button"
+                tabindex="0"
+                class="assetLibrary__tile"
+                draggable="true"
+                aria-label="Place {asset.name}"
+                aria-disabled={loading}
+                onclick={() => place(asset.id)}
+                onkeydown={(event) => placeFromKeyboard(event, asset.id)}
+                oncontextmenu={(event) => openMenu(event, asset)}
+                ondragstart={(event) => startDrag(event, asset)}
+              >
+                {#if artwork}
+                  <img
+                    class="assetLibrary__tileImage"
+                    src={generateR2Url(artwork, { width: 128, height: 128, fit: 'contain', bucketUrl })}
+                    alt=""
+                    loading="lazy"
+                    draggable="false"
+                  />
+                {:else}
+                  <span class="assetLibrary__tilePlaceholder" aria-hidden="true">{asset.name.slice(0, 2)}</span>
+                {/if}
+                {#if badge}<span class="assetLibrary__badge">{badge}</span>{/if}
+              </div>
+              <div class="assetLibrary__tileActions">
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Place"
+                  title="Place"
+                  disabled={loading}
+                  onclick={() => place(asset.id)}
+                >
+                  <Icon Icon={IconPlus} size="1rem" />
+                </IconButton>
+                {#if canShowHandout(asset)}
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Show as handout"
+                    title="Show as handout"
+                    onclick={() => onPreviewArtwork?.(asset)}
+                  >
+                    <Icon Icon={IconPresentation} size="1rem" />
+                  </IconButton>
+                {/if}
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  aria-label="More actions for {asset.name}"
+                  title="More"
+                  onclick={(event: MouseEvent) => openMenu(event, asset)}
+                >
+                  <Icon Icon={IconDots} size="1rem" />
+                </IconButton>
+              </div>
+            </div>
+            {#if armedDeleteId === asset.id}
+              <div class="assetLibrary__confirm">
+                <span>Delete {asset.name}?</span>
+                <div class="assetLibrary__confirmActions">
+                  <Button variant="danger" size="sm" isDisabled={loading} onclick={() => confirmDelete(asset)}>
+                    Delete
+                  </Button>
+                  <Button variant="ghost" size="sm" onclick={() => (armedDeleteId = null)}>Cancel</Button>
+                </div>
+              </div>
+            {:else}
+              <span class="assetLibrary__tileName">{asset.name}</span>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    <p class="assetLibrary__hint">Click to place · drag onto the map · right-click for more</p>
+  {/if}
+
+  <ContextMenu bind:this={contextMenu} items={menuItems} />
+</div>
 
 <style>
-  .assets {
-    padding: 1rem;
-    border-bottom: 1px solid var(--fgMuted);
-    color: var(--fg);
-  }
-  .assets__heading {
-    cursor: pointer;
-  }
-  .assets__body,
-  .assets__form {
+  .assetLibrary {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    margin-top: 0.75rem;
+    flex: 1;
+    min-height: 0;
+    color: var(--fg);
   }
-  .assets__field {
+  .assetLibrary__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    padding: 0.75rem 1rem;
+    border-bottom: var(--borderThin);
+  }
+  .assetLibrary__search {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .assetLibrary__search :global(.input) {
+    padding-left: 2rem;
+  }
+  .assetLibrary__searchIcon {
+    position: absolute;
+    top: 50%;
+    left: 0.6rem;
+    transform: translateY(-50%);
+    display: flex;
+    color: var(--fgMuted);
+    pointer-events: none;
+  }
+  .assetLibrary__quantity {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    width: 5rem;
+    color: var(--fgMuted);
+  }
+  .assetLibrary__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+    align-content: start;
+    gap: 0.75rem;
+    flex: 1;
+    min-height: 0;
+    padding: 1rem;
+    overflow-y: auto;
+  }
+  .assetLibrary__item {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-width: 0;
   }
-  .assets__input,
-  .assets__button {
-    padding: 0.5rem;
-    background: var(--bg);
+  .assetLibrary__tileWrap {
+    position: relative;
+    aspect-ratio: 1;
+  }
+  .assetLibrary__tile {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    overflow: hidden;
+    border: var(--borderThin);
+    border-radius: var(--radius-2);
+    background: var(--contrastLow);
+    cursor: grab;
+  }
+  .assetLibrary__tile:hover,
+  .assetLibrary__tile:focus-visible {
+    border-color: var(--fgPrimary);
+    outline: none;
+  }
+  .assetLibrary__tileImage {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .assetLibrary__tilePlaceholder {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--fgMuted);
+  }
+  .assetLibrary__badge {
+    position: absolute;
+    top: 0.25rem;
+    left: 0.25rem;
+    padding: 0.0625rem 0.375rem;
+    border-radius: 999px;
+    font-size: 0.625rem;
     color: var(--fg);
-    border: 1px solid var(--fgMuted);
-    border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
   }
-  .assets__button {
-    cursor: pointer;
+  .assetLibrary__tileActions {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    opacity: 0;
+    transition: opacity 120ms ease;
   }
-  .assets__button:disabled {
-    opacity: 0.5;
-    cursor: wait;
+  .assetLibrary__tileWrap:hover .assetLibrary__tileActions,
+  .assetLibrary__tileWrap:focus-within .assetLibrary__tileActions {
+    opacity: 1;
   }
-  .assets__item {
+  @media (hover: none) {
+    .assetLibrary__tileActions {
+      opacity: 1;
+    }
+  }
+  .assetLibrary__tileName {
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.75rem;
+    color: var(--fgMuted);
+  }
+  .assetLibrary__confirm {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    text-align: center;
+  }
+  .assetLibrary__confirmActions {
+    display: flex;
+    gap: 0.25rem;
+  }
+  .assetLibrary__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.5rem 1rem;
+    font-size: 0.875rem;
+    color: var(--fgMuted);
+  }
+  .assetLibrary__emptyActions {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
     gap: 0.5rem;
   }
-  .assets__thumbnail {
-    width: 3rem;
-    height: 3rem;
-    object-fit: contain;
+  .assetLibrary__status {
+    padding: 1rem;
+    font-size: 0.875rem;
+    color: var(--fgMuted);
   }
-  .assets__preview {
-    width: 100%;
-    max-height: 15rem;
-    object-fit: contain;
-  }
-  .assets__error,
-  .assets__button--danger {
+  .assetLibrary__error {
+    padding: 0.5rem 1rem 0;
+    font-size: 0.875rem;
     color: var(--fgDanger);
+  }
+  .assetLibrary__hint {
+    flex-shrink: 0;
+    padding: 0.5rem 1rem;
+    border-top: var(--borderThin);
+    font-size: 0.75rem;
+    color: var(--fgMuted);
   }
 </style>

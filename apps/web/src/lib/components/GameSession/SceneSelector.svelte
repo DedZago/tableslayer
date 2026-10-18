@@ -244,8 +244,8 @@
     renamingScenes[sceneId] = null;
   };
 
-  // Duplicate copies settings, markers, lights, annotations, and masks with
-  // fresh ids. Like scene creation, the row is persisted server-side first so
+  // Duplicate copies settings, markers, lights, AoE templates, annotations, and
+  // masks with fresh ids; combat state is reset on the copied markers. Like scene creation, the row is persisted server-side first so
   // the navigation below can resolve it immediately (doc persistence is
   // debounced); the doc write is then the live source of truth.
   const handleDuplicateScene = async (sceneId: string) => {
@@ -262,23 +262,38 @@
       id: newId,
       name: `${snapshot.settings.name} (copy)`,
       order,
-      mapThumbLocation: null
+      mapThumbLocation: null,
+      combatRound: 0,
+      combatActiveMarkerId: null,
+      combatLairStep: false
     };
 
     await handleMutation({
       mutation: () => createNewScene.mutateAsync({ partyId: party.id, sceneData: settings }),
       formLoadingState: (loading) => (formIsLoading = loading),
       onSuccess: () => {
-        client!.write.createScene(settings, {
-          markers: snapshot.markers.map((marker) => ({ ...marker, id: uuidv4(), sceneId: newId })),
-          lights: snapshot.lights.map((light) => ({ ...light, id: uuidv4(), sceneId: newId })),
-          annotations: snapshot.annotations.map((annotation) => ({
-            ...annotation,
-            id: uuidv4(),
-            sceneId: newId,
-            mask: client!.annotationMask(sceneId, annotation.id)
-          })),
-          fogMask: client!.fogMask(sceneId)
+        client!.write.transaction(() => {
+          client!.write.createScene(settings, {
+            markers: snapshot.markers.map((marker) => ({
+              ...marker,
+              id: uuidv4(),
+              sceneId: newId,
+              inCombat: false,
+              initiative: null,
+              initiativeTiebreak: 0
+            })),
+            lights: snapshot.lights.map((light) => ({ ...light, id: uuidv4(), sceneId: newId })),
+            annotations: snapshot.annotations.map((annotation) => ({
+              ...annotation,
+              id: uuidv4(),
+              sceneId: newId,
+              mask: client!.annotationMask(sceneId, annotation.id)
+            })),
+            fogMask: client!.fogMask(sceneId)
+          });
+          for (const template of snapshot.aoeTemplates) {
+            client!.write.upsertAoeTemplate(newId, { ...template, id: uuidv4(), sceneId: newId });
+          }
         });
         devLog('scene', `Duplicated scene ${sceneId} -> ${newId}`);
         goto(`/${party.slug}/${gameSession.slug}/${newId}`);

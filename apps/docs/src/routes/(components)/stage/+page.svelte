@@ -9,6 +9,8 @@
     MapLayerType,
     type Marker,
     type Light,
+    type AoeTemplate,
+    AoeShape,
     PointerInputManager,
     PerformanceDebugger,
     StageMode
@@ -17,6 +19,7 @@
   import { onMount } from 'svelte';
   import {
     AnnotationsControls,
+    AoeTemplateControls,
     DisplayControls,
     EdgeOverlayControls,
     FogControls,
@@ -35,6 +38,7 @@
   let stageElement: HTMLDivElement | undefined = $state();
   let selectedMarker: Marker | undefined = $state();
   let selectedLight: Light | undefined = $state();
+  let selectedAoeId: string | null = $state(null);
 
   const minZoom = 0.1;
   const maxZoom = 10;
@@ -78,6 +82,12 @@
         case 'l':
           stageProps.activeLayer = MapLayerType.Light;
           break;
+        case 'b':
+          stageProps.activeLayer = MapLayerType.AoeTemplate;
+          break;
+        case 'B':
+          cycleAoeShape();
+          break;
         case 'm':
           stageProps.activeLayer = MapLayerType.Marker;
           break;
@@ -115,6 +125,10 @@
           break;
         case 'Delete':
         case 'Backspace':
+          if (selectedAoeId && stageProps.activeLayer === MapLayerType.AoeTemplate) {
+            onAoeTemplateDeleted(selectedAoeId);
+            break;
+          }
           if (stage && stage.fogOfWar.polygonPointCount() === 0) {
             stage.fogOfWar.deleteRoomAtCursor();
           }
@@ -122,6 +136,14 @@
         case 'Escape':
           if (stage && stage.fogOfWar.polygonPointCount() > 0) {
             stage.fogOfWar.cancelPolygon();
+            break;
+          }
+          if (stage?.aoeTemplates.hasDraft()) {
+            stage.aoeTemplates.cancelDraft();
+            break;
+          }
+          if (selectedAoeId) {
+            selectedAoeId = null;
             break;
           }
           stageProps.activeLayer = MapLayerType.None;
@@ -230,6 +252,38 @@
     selectedLight = light ?? undefined;
   }
 
+  function cycleAoeShape() {
+    const shapes = [AoeShape.Circle, AoeShape.Square, AoeShape.Cone, AoeShape.Line];
+    const current = shapes.indexOf(stageProps.aoeTemplates?.tool.shape ?? AoeShape.Circle);
+    if (stageProps.aoeTemplates) {
+      stageProps.aoeTemplates.tool.shape = shapes[(current + 1) % shapes.length];
+    }
+  }
+
+  function onAoeTemplateAdded(template: AoeTemplate) {
+    if (!stageProps.aoeTemplates) return;
+    stageProps.aoeTemplates.templates = [...stageProps.aoeTemplates.templates, template];
+    selectedAoeId = template.id;
+  }
+
+  function onAoeTemplateUpdated(id: string, patch: Partial<Omit<AoeTemplate, 'id'>>) {
+    if (!stageProps.aoeTemplates) return;
+    stageProps.aoeTemplates.templates = stageProps.aoeTemplates.templates.map((template) =>
+      template.id === id ? { ...template, ...patch } : template
+    );
+  }
+
+  function onAoeTemplateSelected(id: string | null) {
+    selectedAoeId = id;
+    if (stageProps.aoeTemplates) stageProps.aoeTemplates.selectedId = id;
+  }
+
+  function onAoeTemplateDeleted(id: string) {
+    if (!stageProps.aoeTemplates) return;
+    stageProps.aoeTemplates.templates = stageProps.aoeTemplates.templates.filter((template) => template.id !== id);
+    if (selectedAoeId === id) onAoeTemplateSelected(null);
+  }
+
   function onMapPan(dx: number, dy: number) {
     stageProps.map.offset.x += dx;
     stageProps.map.offset.y += dy;
@@ -314,7 +368,11 @@
       onMarkerContextMenu,
       onLightAdded,
       onLightMoved,
-      onLightSelected
+      onLightSelected,
+      onAoeTemplateAdded,
+      onAoeTemplateUpdated,
+      onAoeTemplateSelected,
+      onAoeTemplateDeleted
     }}
   />
   <div>
@@ -334,6 +392,10 @@
       <li>f - Clear Fog</li>
       <li>F - Reset Fog</li>
       <li>l - Place Lights</li>
+      <li>
+        b - Place area templates (click origin, move, click or release to commit; Shift+B cycles shape; Escape cancels;
+        Delete removes the selected template)
+      </li>
       <li>m - Edit Markers</li>
       <li>M - Edit Measurements</li>
       <li>SHIFT + Wheel - Zoom Map</li>
@@ -354,6 +416,7 @@
   <FogOfWarControls bind:props={stageProps} {stage} />
   <GridControls bind:props={stageProps} />
   <LightControls bind:props={stageProps} bind:selectedLight />
+  <AoeTemplateControls bind:props={stageProps} />
   <MapControls bind:props={stageProps} {stage} />
   <MarkerControls bind:props={stageProps} bind:selectedMarker />
   <MeasurementControls bind:props={stageProps} />

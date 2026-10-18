@@ -49,6 +49,34 @@ function getRotatedPanAxis(key: ArrowKey, rotation: number): { axis: 'x' | 'y'; 
   return byRotation[normalized][key];
 }
 
+// Template edits write to the session doc, so the page supplies them; the keys stay here
+export interface AoeKeyCommands {
+  hasDraft: () => boolean;
+  cancelDraft: () => void;
+  deselect: () => void;
+  deleteSelected: () => void;
+  rotateSelected: (deltaDegrees: number) => void;
+  cycleShape: () => void;
+}
+
+const hasSelectedAoeTemplate = (stageProps: StageProps): boolean =>
+  stageProps.activeLayer === MapLayerType.AoeTemplate && stageProps.aoeTemplates?.selectedId != null;
+
+// [ turns counter-clockwise, ] clockwise; Shift turns in 45 degree steps. Shift+[ types '{' on US layouts
+const rotationStepFor = (event: KeyboardEvent): number => {
+  const step = event.shiftKey ? 45 : 15;
+  return event.key === '[' || event.key === '{' ? step : -step;
+};
+
+const ROTATION_KEYS = new Set(['[', ']', '{', '}']);
+
+// Many layouts (Italian, German, ...) type brackets with AltGr, which Windows reports as
+// Ctrl+Alt, or with Option on macOS. Those still rotate; plain Ctrl+[ and Cmd+[ do not.
+export const isLayoutSymbolKey = (event: KeyboardEvent): boolean =>
+  ROTATION_KEYS.has(event.key) &&
+  !event.metaKey &&
+  (event.getModifierState?.('AltGraph') || event.altKey || !event.ctrlKey);
+
 export function handleKeyCommands(
   event: KeyboardEvent,
   stageProps: StageProps,
@@ -64,13 +92,14 @@ export function handleKeyCommands(
     };
   },
   handleSelectActiveControl: (control: string) => void,
-  clearFog?: () => void
+  clearFog?: () => void,
+  aoe?: AoeKeyCommands
 ): string {
   const { activeLayer, fogOfWar } = stageProps;
 
   // Skip single-key shortcuts if Ctrl/Alt/Meta is pressed (unless it's a capital letter with Shift)
   // This prevents conflicts with browser shortcuts like Ctrl+R for refresh
-  if (event.ctrlKey || event.altKey || event.metaKey) {
+  if ((event.ctrlKey || event.altKey || event.metaKey) && !isLayoutSymbolKey(event)) {
     return activeControl;
   }
 
@@ -190,6 +219,29 @@ export function handleKeyCommands(
       handleSelectActiveControl('none'); // Deactivate all
       return 'none';
 
+    case 'a':
+      if (activeLayer === MapLayerType.AoeTemplate) {
+        handleSelectActiveControl('aoe'); // Toggle off
+        return 'none';
+      } else {
+        handleSelectActiveControl('aoe'); // Activate
+        return 'aoe';
+      }
+      break;
+
+    case 'A':
+      if (activeLayer === MapLayerType.AoeTemplate) aoe?.cycleShape();
+      break;
+
+    case '[':
+    case '{':
+    case ']':
+    case '}':
+      if (hasSelectedAoeTemplate(stageProps)) {
+        aoe?.rotateSelected(rotationStepFor(event));
+      }
+      break;
+
     case 'd':
       if (activeLayer === MapLayerType.Annotation) {
         handleSelectActiveControl('annotation'); // Toggle off
@@ -284,6 +336,7 @@ export function handleKeyCommands(
     // shows its native menu on Shift+right-click regardless of preventDefault
     case 'Delete':
     case 'Backspace':
+      if (hasSelectedAoeTemplate(stageProps)) aoe?.deleteSelected();
       if (
         activeLayer === MapLayerType.FogOfWar &&
         fogOfWar.tool.type === ToolType.Polygon &&
@@ -309,6 +362,16 @@ export function handleKeyCommands(
       }
       break;
     case 'Escape':
+      if (activeLayer === MapLayerType.AoeTemplate && aoe) {
+        if (aoe.hasDraft()) {
+          aoe.cancelDraft();
+          return activeControl;
+        }
+        if (stageProps.aoeTemplates?.selectedId != null) {
+          aoe.deselect();
+          return activeControl;
+        }
+      }
       // Cancel an in-progress polygon room first; a second Escape deselects
       if (activeLayer === MapLayerType.FogOfWar && stage.fogOfWar.polygonPointCount() > 0) {
         stage.fogOfWar.cancelPolygon();

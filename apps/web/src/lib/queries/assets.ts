@@ -1,7 +1,9 @@
 import type { SelectAsset } from '$lib/db/app/schema';
 import { mutationFactory } from '$lib/factories';
 import type { MarkerRow } from '$lib/realtime';
+import type { AssetStatSummary } from '$lib/server/assets/assets';
 import { validateMediaUpload } from '$lib/utils/mediaUpload';
+import type { StatBlock } from '$lib/utils/statBlock/types';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { uploadMediaFile } from './file';
 
@@ -11,13 +13,14 @@ type AssetAction =
       action: 'save';
       fields: {
         id?: string;
-        name: string;
+        name?: string;
         artworkLocation?: string | null;
         tokenArtworkLocation?: string | null;
         shape?: number;
         shapeColor?: string;
         size?: number;
         imageScale?: number;
+        initiativeBonus?: number | null;
       };
     }
   | { action: 'delete'; id: string }
@@ -32,12 +35,16 @@ type AssetAction =
         shapeColor: string;
         size: number;
         imageScale: number;
+        statBlock?: StatBlock | null;
+        initiativeBonus?: number | null;
       };
     }
   | { action: 'place'; id: string; sceneId: string; quantity: number; x: number; y: number };
 
+export type AssetListItem = Omit<SelectAsset, 'statBlock'> & { statSummary: AssetStatSummary | null };
+
 export const createAssetsQuery = (search: () => string) =>
-  createQuery<{ assets: SelectAsset[] }>(() => ({
+  createQuery<{ assets: AssetListItem[] }>(() => ({
     queryKey: ['assets', search()],
     queryFn: async () => {
       const response = await fetch('/api/assets/manage', {

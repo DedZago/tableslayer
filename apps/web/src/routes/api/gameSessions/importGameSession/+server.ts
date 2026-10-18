@@ -1,7 +1,9 @@
 import { db } from '$lib/db/app';
 import {
   annotationsTable,
+  aoeTemplateTable,
   insertAnnotationSchema,
+  insertAoeTemplateSchema,
   insertLightSchema,
   insertMarkerSchema,
   insertSceneSchema,
@@ -75,6 +77,10 @@ export const POST = async ({ request, locals }: RequestEvent) => {
           insertSceneSchema.omit({ gameSessionId: true }).extend({
             markers: z.array(insertMarkerSchema.omit({ sceneId: true })).optional(),
             lights: z.array(insertLightSchema.omit({ sceneId: true })).optional(),
+            // Exports carry createdAt as an ISO string; keeping it preserves the templates' stacking order
+            aoeTemplates: z
+              .array(insertAoeTemplateSchema.omit({ sceneId: true }).extend({ createdAt: z.coerce.date().optional() }))
+              .optional(),
             annotations: z.array(insertAnnotationSchema.omit({ sceneId: true })).optional(),
             fogOfWarMask: z.string().nullable().optional()
           })
@@ -144,7 +150,10 @@ export const POST = async ({ request, locals }: RequestEvent) => {
         mapLocation: mapLocation || null,
         mapThumbLocation: mapThumbLocation || null,
         fogOfWarUrl: null, // Reset fog of war URL for imported scenes
-        fogOfWarMask: sceneData.fogOfWarMask || null // Preserve the RLE mask data
+        fogOfWarMask: sceneData.fogOfWarMask || null, // Preserve the RLE mask data
+        combatRound: 0, // Combat state never survives an import
+        combatActiveMarkerId: null,
+        combatLairStep: false
       };
 
       const typedSceneToCreate = sceneToCreate as Partial<InsertScene> & Record<string, unknown>;
@@ -154,8 +163,13 @@ export const POST = async ({ request, locals }: RequestEvent) => {
         if (
           ![
             'markers',
+            'lights',
+            'aoeTemplates',
             'annotations',
             'fogOfWarUrl',
+            'combatRound',
+            'combatActiveMarkerId',
+            'combatLairStep',
             'fogOfWarMask',
             'id',
             'mapLocation',
@@ -194,6 +208,9 @@ export const POST = async ({ request, locals }: RequestEvent) => {
           markerToCreate.id = newMarkerId;
 
           markerToCreate.sceneId = newSceneId;
+          markerToCreate.inCombat = false;
+          markerToCreate.initiative = null;
+          markerToCreate.initiativeTiebreak = 0;
 
           await db
             .insert(markerTable)
@@ -224,6 +241,13 @@ export const POST = async ({ request, locals }: RequestEvent) => {
             .values(lightToCreate as InsertLight)
             .execute();
         }
+      }
+
+      for (const templateData of sceneData.aoeTemplates ?? []) {
+        await db
+          .insert(aoeTemplateTable)
+          .values({ ...templateData, id: uuidv4(), sceneId: newSceneId })
+          .execute();
       }
 
       // Create all annotations for this scene

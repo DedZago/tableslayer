@@ -10,9 +10,33 @@ import {
 } from '$lib/db/app/schema';
 import type { MarkerRow } from '$lib/realtime';
 import { validateMediaUpload } from '$lib/utils/mediaUpload';
+import type { StatBlock } from '$lib/utils/statBlock/types';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import mime from 'mime';
 import { randomUUID } from 'node:crypto';
+
+export type AssetStatSummary = { cr: string | null; type: string | null; size: string | null };
+const parseStatSummary = (value: string | null) => (value ? (JSON.parse(value) as AssetStatSummary) : null);
+const assetListColumns = {
+  id: assetsTable.id,
+  ownerId: assetsTable.ownerId,
+  name: assetsTable.name,
+  artworkLocation: assetsTable.artworkLocation,
+  tokenArtworkLocation: assetsTable.tokenArtworkLocation,
+  shape: assetsTable.shape,
+  shapeColor: assetsTable.shapeColor,
+  size: assetsTable.size,
+  imageScale: assetsTable.imageScale,
+  provider: assetsTable.provider,
+  originalName: assetsTable.originalName,
+  sourceIdentity: assetsTable.sourceIdentity,
+  sourceUrl: assetsTable.sourceUrl,
+  adapterVersion: assetsTable.adapterVersion,
+  importRequestId: assetsTable.importRequestId,
+  initiativeBonus: assetsTable.initiativeBonus,
+  createdAt: assetsTable.createdAt,
+  updatedAt: assetsTable.updatedAt
+};
 
 export const assertSceneEditor = async (userId: string, sceneId: string) => {
   const result = await db
@@ -46,7 +70,13 @@ export const assertOwnedMedia = async (userId: string, location?: string | null)
 
 export const listAssets = (ownerId: string, search: string) =>
   db
-    .select()
+    .select({
+      ...assetListColumns,
+      statSummary:
+        sql<AssetStatSummary | null>`CASE WHEN ${assetsTable.statBlock} IS NULL THEN NULL ELSE json_object('cr', json_extract(${assetsTable.statBlock}, '$.cr.display'), 'type', json_extract(${assetsTable.statBlock}, '$.type'), 'size', json_extract(${assetsTable.statBlock}, '$.size[0]')) END`.mapWith(
+          parseStatSummary
+        )
+    })
     .from(assetsTable)
     .where(and(eq(assetsTable.ownerId, ownerId), sql`instr(lower(${assetsTable.name}), lower(${search})) > 0`))
     .orderBy(assetsTable.name)
@@ -66,13 +96,15 @@ export const saveAsset = async (
   ownerId: string,
   fields: {
     id?: string;
-    name: string;
+    name?: string;
     artworkLocation?: string | null;
     tokenArtworkLocation?: string | null;
     shape?: number;
     shapeColor?: string;
     size?: number;
     imageScale?: number;
+    statBlock?: StatBlock | null;
+    initiativeBonus?: number | null;
   }
 ) => {
   const previous = fields.id ? await getOwnedAsset(ownerId, fields.id) : null;
@@ -88,9 +120,10 @@ export const saveAsset = async (
       .returning()
       .get();
   }
+  if (!values.name) throw new Error('Name is required');
   return db
     .insert(assetsTable)
-    .values({ ...values, ownerId })
+    .values({ ...values, name: values.name, ownerId })
     .returning()
     .get();
 };
@@ -112,6 +145,8 @@ export const assetFromMarker = async (
     shapeColor?: string;
     size?: number;
     imageScale?: number;
+    statBlock?: StatBlock | null;
+    initiativeBonus?: number | null;
   }
 ) => {
   await assertSceneEditor(ownerId, sceneId);
@@ -121,14 +156,23 @@ export const assetFromMarker = async (
     .where(and(eq(markerTable.id, markerId), eq(markerTable.sceneId, sceneId)))
     .get();
   if (!marker && !snapshot) throw new Error('Token has not been saved yet; try again after synchronization');
-  const values = snapshot ?? {
-    name: marker!.title,
-    artworkLocation: marker!.imageLocation,
-    shape: marker!.shape,
-    shapeColor: marker!.shapeColor,
-    size: marker!.size,
-    imageScale: marker!.imageScale
-  };
+  const values = snapshot
+    ? {
+        ...snapshot,
+        statBlock: snapshot.statBlock !== undefined ? snapshot.statBlock : (marker?.statBlock ?? null),
+        initiativeBonus:
+          snapshot.initiativeBonus !== undefined ? snapshot.initiativeBonus : (marker?.initiativeBonus ?? null)
+      }
+    : {
+        name: marker!.title,
+        artworkLocation: marker!.imageLocation,
+        shape: marker!.shape,
+        shapeColor: marker!.shapeColor,
+        size: marker!.size,
+        imageScale: marker!.imageScale,
+        statBlock: marker!.statBlock,
+        initiativeBonus: marker!.initiativeBonus
+      };
   if (values.artworkLocation !== marker?.imageLocation) await assertOwnedMedia(ownerId, values.artworkLocation);
   return db
     .insert(assetsTable)
@@ -162,7 +206,11 @@ export const assetPlacements = async (
     size: asset.size,
     visibility: 1,
     note: null,
-    pinnedTooltip: false
+    pinnedTooltip: false,
+    statBlock: asset.statBlock ?? null,
+    hitPoints: asset.statBlock?.hp.average ?? null,
+    tempHitPoints: null,
+    initiativeBonus: asset.initiativeBonus ?? null
   }));
 };
 

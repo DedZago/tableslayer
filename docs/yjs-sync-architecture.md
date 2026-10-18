@@ -61,6 +61,11 @@ Key properties:
   provider so local tabs cannot bypass server authorization. This affects party-wide pause,
   active-scene, and active handout state. Game-session connections and player token movement
   retain their existing behavior. UI capability flags are not authorization checks.
+- **"GM-only" is visual, not secret**: the whole game-session doc reaches every connection.
+  Hidden tokens, GM-only AoE templates (`visibility = 0`) and `dmOnly` conditions are dropped
+  when player stage props are built (`buildSceneProps` client mode), so they never render on
+  the TV, but a player who inspects the doc can read them. Hiding them for real needs
+  per-connection doc filtering on the server.
 - **Hydrate**: on first use a room fetches `/api/internal/sessionSnapshot` (or `partySnapshot`)
   and builds the doc. `meta.schemaVersion` makes hydration idempotent; y-partykit snapshot
   persistence covers room eviction between DB writes.

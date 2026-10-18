@@ -1,8 +1,9 @@
 <script lang="ts">
   import { Head } from '$lib/components';
+  import { InitiativeStrip } from '$lib/components/Combat';
   import { HandoutOverlay } from '$lib/components/Handouts';
   import { createPartyLiveStateQuery } from '$lib/queries';
-  import { PLAY_IDLE_POLICY, SleepController, buildRenderProps, reuseUnchanged } from '$lib/realtime';
+  import { PLAY_IDLE_POLICY, SleepController, buildRenderProps, reuseUnchanged, type MarkerRow } from '$lib/realtime';
   import { buildSceneProps, throttle } from '$lib/utils';
   import { transformCursorsToArray } from '$lib/utils/cursors';
   import { StageDefaultProps } from '$lib/utils/defaultMapState';
@@ -10,9 +11,11 @@
   import { extractMeasurementProps, getLatestMeasurement } from '$lib/utils/measurements';
   import { createConditionalActivityTimer } from '$lib/utils/activityTimer';
   import { devLog } from '$lib/utils/debug';
+  import { isSameTurn, readTurnPosition, sameCombatantView, type TurnPosition } from '$lib/utils/initiative';
   import { stagePerformance } from '$lib/stores';
   import {
     MapLayerType,
+    MarkerVisibility,
     parseFogRooms,
     PerformanceDebugger,
     RadialMenu,
@@ -256,6 +259,31 @@
   const latestMeasurement = $derived(getLatestMeasurement(session.presence?.measurements ?? {}));
   const pinnedMarkerIds = $derived(renderedProps.marker.markers.filter((m) => m.pinnedTooltip).map((m) => m.id));
 
+  const combatSettings = $derived(session.activeScene?.settings);
+  // Memoized so remote marker drags don't rebuild the turn strip
+  let combatantsCache: MarkerRow[] = [];
+  const combatants = $derived.by(() => {
+    const next = (session.activeScene?.markers ?? []).filter((m) => m.inCombat);
+    if (sameCombatantView(next, combatantsCache)) return combatantsCache;
+    combatantsCache = next;
+    return next;
+  });
+  let turnPositionCache: TurnPosition = readTurnPosition({});
+  const turnPosition = $derived.by(() => {
+    const next = readTurnPosition(combatSettings ?? {});
+    if (isSameTurn(next, turnPositionCache)) return turnPositionCache;
+    turnPositionCache = next;
+    return next;
+  });
+  const showCombatStrip = $derived((combatSettings?.combatShowOnTv ?? true) && combatants.length > 0);
+  const activeTurnMarkerId = $derived.by(() => {
+    if (turnPosition.lairStep || !turnPosition.activeId) return null;
+    const active = combatants.find((m) => m.id === turnPosition.activeId);
+    return active && active.visibility !== MarkerVisibility.DM && active.visibility !== MarkerVisibility.Hover
+      ? active.id
+      : null;
+  });
+
   // Apply masks + refit when the rendered scene changes. Gated on session.ready
   // so it re-runs once the doc is hydrated — applying before that finds no masks.
   let lastPreparedSceneId: string | null = null;
@@ -481,6 +509,7 @@
     props={renderedProps}
     {hoveredMarkerId}
     {pinnedMarkerIds}
+    {activeTurnMarkerId}
     receivedMeasurement={latestMeasurement
       ? {
           startPoint: latestMeasurement.startPoint,
@@ -521,6 +550,15 @@
     cursors={cursorArray}
     trackLocalCursor={false}
   />
+
+  {#if showCombatStrip}
+    <InitiativeStrip
+      {combatants}
+      position={turnPosition}
+      bucketUrl={data.bucketUrl}
+      lairActions={combatSettings?.combatLairActions ?? false}
+    />
+  {/if}
 
   <PerformanceDebugger />
 </div>

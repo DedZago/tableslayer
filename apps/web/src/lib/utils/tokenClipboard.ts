@@ -70,6 +70,11 @@ export const createTokenClipboard = (
       visibility: marker.visibility,
       note: JSON.parse(JSON.stringify(marker.note)),
       assetId: marker.assetId ?? null,
+      conditions: marker.conditions ?? [],
+      statBlock: marker.statBlock ?? null,
+      hitPoints: marker.hitPoints ?? null,
+      tempHitPoints: marker.tempHitPoints ?? null,
+      initiativeBonus: marker.initiativeBonus ?? null,
       offset: geometry.cell ? { x: local.x / geometry.cell, y: local.y / geometry.cell } : local,
       displayOffset: { x: local.x * geometry.displayScale, y: local.y * geometry.displayScale }
     };

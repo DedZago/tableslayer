@@ -5,7 +5,7 @@ description: Data-layer patterns for apps/web — apiFactory error semantics, mu
 
 # apps/web data & server patterns
 
-> **Freshness**: last verified 2026-10-06.
+> **Freshness**: last verified 2026-10-18.
 > Authoritative deep-dives (verified current): `docs/yjs-sync-architecture.md`, `docs/undo-redo-architecture.md`, `docs/grid-system-architecture.md`, `docs/playwright-testing-guide.md`. Prefer them over re-deriving.
 > Anchor files at the bottom — if one is missing/renamed, the code wins; update this skill.
 
@@ -53,7 +53,9 @@ PartyKit + Y.js. Two Y docs per session (`game_session` = scene content, `party`
 - After any **direct DB write** to scene data (import, admin tooling), trigger a room `resync` (`requestGameSessionRoomResync` in `src/lib/server/realtime/`), or the live doc won't see it.
 - **Write cadence is handled for you.** `queuePropertyUpdate` applies locally at once and flushes to the doc event-driven (`$lib/utils/propertyUpdateBroadcaster.ts`: 8ms leading-edge gate + trailing timer), and `SessionDocClient` coalesces remote rev bumps via `setTimeout(0)` so message backlogs drain into one rebuild. Do not bypass the broadcaster with per-event `client.write.*` calls in a gesture loop, and never schedule realtime send/receive work on `requestAnimationFrame` — rAF cadence is per-window (focus/occlusion/GPU contention) and makes sync smoothness depend on which window has scheduler priority.
 - **Never write settings fields you didn't change.** The broadcaster writes field-level diffs (only fields mapped from queued paths — `sceneSettingsFieldsForPropPaths`). Writing a full settings object from local stageProps pushes stale copies of other clients' in-flight fields into the doc and rubber-bands their gestures. Same rule for any new direct `write.setSceneSettings` call: pass only the fields you actually changed.
-- System writes that must not pollute user undo (e.g. thumbnails) go through `systemWrite`.
+- System writes that must not pollute user undo (e.g. thumbnails, and all combat/initiative writes) go through `systemWrite`.
+- **New doc fields are optional.** Rooms persisted before a field existed won't have it, so `MarkerRow`/`SceneSettings` additions are typed optional and read with defaults (`m.conditions ?? []`, `s.combatRound ?? 0`, `s.combatShowOnTv ?? true`). A new field must be threaded through `fromDb.ts`, `wire.ts`, the persist schema in `api/internal/persistSession`, `server/realtime` load, game-session export/import, scene duplicate (`SceneSelector`) and the token clipboard — check each one. `DOC_SCHEMA_VERSION` is 3 (adds the `aoeTemplates` collection; rows carry `createdAt` as Unix seconds).
+- **Multi-step gestures as one undo step**: wrap the writes in `client.beginUndoGroup()` / `client.endUndoGroup()` (group token drag uses this, closing the group on the stage's `onMarkersMoveEnd`). A cancelled gesture that restored the doc passes `endUndoGroup({ discard: true })` to drop its no-op step. Flush any open group before `undo()`/`redo()`.
 
 **Idle sleep** (Durable Objects bill while a room holds any socket — see spec/realtime-idle-sleep-and-usage.md):
 
@@ -97,7 +99,9 @@ Custom session-token auth (oslojs), not a library. `src/lib/server/auth.ts`: tok
 - `apps/web/src/lib/realtime/idlePolicy.ts` / `SleepController.svelte.ts`
 - `apps/web/partykit/gameSession.ts` / `roomActivity.ts`
 - `apps/web/src/lib/server/realtime/activity.ts` / `activityRollup.ts` / `usage.ts`
-- `apps/web/src/lib/server/assets/assets.ts`
+- `apps/web/src/lib/server/assets/assets.ts` — placement copies `statBlock`/`initiativeBonus`; `listAssets` returns `statSummary`, not the full block
+- `apps/web/src/lib/server/assets/fivetools/statblock/` — 5etools → `StatBlock` (`utils/statBlock/types.ts`, client-safe)
+- `apps/web/src/lib/realtime/fromDb.ts` / `wire.ts` / `apps/web/src/routes/api/internal/persistSession/+server.ts` — field plumbing
 - `apps/web/src/lib/server/file/files.ts` / `validateImage.ts`
 - `apps/web/src/lib/server/realtime/partyConnectionToken.ts`
 - `apps/web/partykit/party.ts`

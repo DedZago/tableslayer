@@ -24,7 +24,8 @@
     MarkerVisibility,
     MarkerShape,
     MarkerSize,
-    MapLayerType
+    MapLayerType,
+    resolveCondition
   } from '@tableslayer/stage';
   import {
     IconTriangle,
@@ -38,7 +39,8 @@
     IconX,
     IconPokerChip,
     IconHandFinger,
-    IconLocationPin
+    IconLocationPin,
+    IconPresentation
   } from '@tabler/icons-svelte';
   import {
     hasFileDrop,
@@ -48,8 +50,12 @@
   } from '$lib/utils/imageDrop';
   import { addToast } from '@tableslayer/ui';
   import type { Snippet } from 'svelte';
-  import { queuePropertyUpdate, throttle, trackChecklistItem } from '$lib/utils';
+  import { queuePropertyUpdate, trackChecklistItem } from '$lib/utils';
   import { setPreference } from '$lib/utils/gameSessionPreferences';
+  import ConditionPicker from './ConditionPicker.svelte';
+  import { StatBlockPanel, type HitPointsFields, type StatBlockRollHandler } from '$lib/components/StatBlock';
+  import type { StatBlock } from '$lib/utils/statBlock';
+  import type { ComponentProps } from 'svelte';
 
   let {
     stageProps,
@@ -63,7 +69,13 @@
     pinnedMarkerIds = [],
     onPinToggle,
     onArtworkFile,
-    onHandoutPreview
+    onHandoutPreview,
+    conditionPickerFor,
+    statBlockFor,
+    onHitPointsChange,
+    onStatRoll,
+    sceneId,
+    onNoteSave
   }: {
     stageProps: StageProps;
     selectedMarkerId: string | undefined;
@@ -80,6 +92,16 @@
     onPinToggle?: (markerId: string, pinned: boolean) => void;
     onArtworkFile: (file: File, markerId: string) => Promise<void>;
     onHandoutPreview?: (markerId: string) => void;
+    conditionPickerFor?: (markerId: string) => ComponentProps<typeof ConditionPicker>;
+    statBlockFor?: (
+      markerId: string
+    ) => { statBlock: StatBlock; hitPoints: number | null; tempHitPoints: number | null } | null;
+    onHitPointsChange?: (markerId: string, fields: HitPointsFields) => void;
+    onStatRoll?: StatBlockRollHandler;
+    /** Scene the panel edits; captured with each pending note save */
+    sceneId?: string;
+    /** Writes a note straight to the doc, so a save flushed after a scene switch still lands on its scene */
+    onNoteSave?: (sceneId: string, markerId: string, note: Marker['note']) => void;
   } = $props();
 
   let dropMarkerId = $state<string | null>(null);
@@ -87,12 +109,49 @@
   let activeMarkerId = $state<string | null>(null);
   let formIsLoading = $state(false);
   let editingMarkerId = $derived(selectedMarkerId);
+  const editingMarker = $derived(stageProps.marker.markers.find((m) => m.id === editingMarkerId));
 
-  // Create throttled update function for editor changes
-  const throttledNoteUpdate = throttle((markerId: string) => {
-    updateMarkerAndSave(markerId, () => {});
+  // Note edits are written per token after a short pause. The pending save is keyed by
+  // marker id and carries its scene and note, so a save started on token A can never be
+  // written onto token B, and one flushed after a scene switch still reaches its scene.
+  const NOTE_SAVE_DELAY_MS = 500;
+  type PendingNoteSave = { timer: ReturnType<typeof setTimeout>; sceneId?: string; note: Marker['note'] };
+  const pendingNoteSaves = new Map<string, PendingNoteSave>();
+
+  const flushNoteSave = (markerId: string) => {
+    const pending = pendingNoteSaves.get(markerId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingNoteSaves.delete(markerId);
+    if (onNoteSave && pending.sceneId) {
+      onNoteSave(pending.sceneId, markerId, pending.note);
+    } else {
+      updateMarkerAndSave(markerId, () => {});
+    }
     socketUpdate();
-  }, 500);
+  };
+
+  const saveNote = (markerId: string, note: Marker['note']) => {
+    const target = stageProps.marker.markers.find((m) => m.id === markerId);
+    if (target) target.note = note;
+    const pending = pendingNoteSaves.get(markerId);
+    if (pending) {
+      pending.note = note;
+      return;
+    }
+    pendingNoteSaves.set(markerId, {
+      timer: setTimeout(() => flushNoteSave(markerId), NOTE_SAVE_DELAY_MS),
+      sceneId,
+      note
+    });
+  };
+
+  $effect(() => {
+    void editingMarkerId;
+    return () => {
+      for (const markerId of [...pendingNoteSaves.keys()]) flushNoteSave(markerId);
+    };
+  });
 
   const openMarkerImageDialog = (markerId: string) => {
     activeMarkerId = markerId;
@@ -193,13 +252,6 @@
         <Icon Icon={IconPhotoCirclePlus} size="1.5rem" />
       </div>
     </button>
-    {#if onHandoutPreview && marker.imageUrl}<button
-        class="markerManager__handoutButton"
-        type="button"
-        onclick={() => onHandoutPreview?.(marker.id)}
-      >
-        Preview handout
-      </button>{/if}
     {#if formIsLoading}
       <Loader />
     {:else if marker.imageUrl !== null}
@@ -263,9 +315,21 @@
       </Link>
       <div class="markerManager__editView" data-testid="markerEditView">
         <div class="markerManager__marker">
-          {#if stageProps.marker.markers}
-            {#each stageProps.marker.markers.filter((m) => m.id === editingMarkerId) as marker (marker.id)}
-              <!-- Forces rerender if ID changes -->
+          {#if editingMarker}
+            {@const marker = editingMarker}
+            {@const stat = statBlockFor?.(marker.id) ?? null}
+            {#if stat}
+              <StatBlockPanel
+                statBlock={stat.statBlock}
+                hitPoints={stat.hitPoints}
+                tempHitPoints={stat.tempHitPoints}
+                onHitPointsChange={(fields) => onHitPointsChange?.(marker.id, fields)}
+                onRoll={onStatRoll}
+              />
+              <Spacer />
+            {/if}
+            <details class="markerManager__appearance" open={!stat}>
+              <summary>Appearance</summary>
               <Spacer />
               <div class="markerManager__formGrid">
                 <FormControl label="Change image" name="imageLocation">
@@ -273,6 +337,18 @@
                     {@render imagePreview(marker, inputProps)}
                   {/snippet}
                 </FormControl>
+
+                {#if onHandoutPreview}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    isDisabled={!marker.imageUrl}
+                    onclick={() => onHandoutPreview?.(marker.id)}
+                  >
+                    <Icon Icon={IconPresentation} size="1rem" />
+                    Show as handout
+                  </Button>
+                {/if}
 
                 <div class="markerManager__colorPicker">
                   <FormControl label="Background color" name="shapeColor">
@@ -406,38 +482,37 @@
                 </FormControl>
               </div>
               <Spacer />
-              <div
-                onblur={() => {
-                  // Save when editor loses focus
-                  updateMarkerAndSave(marker.id, () => {});
-                }}
-              >
-                <Editor
-                  debug={false}
-                  bind:content={marker.note}
-                  editable={true}
-                  onChange={() => throttledNoteUpdate(marker.id)}
-                />
-              </div>
-              <Spacer />
+            </details>
 
-              <ConfirmActionButton action={() => handleMarkerDelete(marker.id)} actionButtonText="Confirm delete">
-                {#snippet trigger({ triggerProps })}
-                  <Button
-                    as="div"
-                    variant="danger"
-                    disabled={formIsLoading}
-                    isLoading={formIsLoading}
-                    {...triggerProps}
-                  >
-                    Delete marker
-                  </Button>
-                {/snippet}
-                {#snippet actionMessage()}
-                  Delete marker?
-                {/snippet}
-              </ConfirmActionButton>
-            {/each}
+            {#if conditionPickerFor}
+              <section class="markerManager__conditions" aria-label="Conditions">
+                <Text weight={700}>Conditions</Text>
+                <Spacer size="0.5rem" />
+                <ConditionPicker {...conditionPickerFor(marker.id)} />
+              </section>
+              <Spacer />
+            {/if}
+
+            <div onblur={() => flushNoteSave(marker.id)}>
+              <Editor
+                debug={false}
+                content={marker.note}
+                editable={true}
+                onChange={(json) => saveNote(marker.id, json)}
+              />
+            </div>
+            <Spacer />
+
+            <ConfirmActionButton action={() => handleMarkerDelete(marker.id)} actionButtonText="Confirm delete">
+              {#snippet trigger({ triggerProps })}
+                <Button as="div" variant="danger" disabled={formIsLoading} isLoading={formIsLoading} {...triggerProps}>
+                  Delete marker
+                </Button>
+              {/snippet}
+              {#snippet actionMessage()}
+                Delete marker?
+              {/snippet}
+            </ConfirmActionButton>
           {/if}
         </div>
       </div>
@@ -498,6 +573,17 @@
               <button class="markerManager__title" onclick={() => selectMarkerForEdit(marker.id)}>
                 {marker.title}
               </button>
+              {#if marker.conditions?.length}
+                <span class="markerManager__listConditions" aria-label="{marker.conditions.length} conditions">
+                  {#each marker.conditions.slice(0, 4) as condition (condition.id)}
+                    {@const info = resolveCondition(condition)}
+                    <span class="markerManager__listDot" style:background={info.color} title={info.label}></span>
+                  {/each}
+                  {#if marker.conditions.length > 4}
+                    <span class="markerManager__listMore">+{marker.conditions.length - 4}</span>
+                  {/if}
+                </span>
+              {/if}
               <div class="markerManager__editIcon" data-testid="markerEditIcon">
                 <ConfirmActionButton action={() => handleMarkerDelete(marker.id)} actionButtonText="Confirm delete">
                   {#snippet trigger({ triggerProps })}
@@ -556,13 +642,6 @@
 <svelte:window ondragend={() => (dropMarkerId = null)} onblur={() => (dropMarkerId = null)} />
 
 <style>
-  .markerManager__handoutButton {
-    padding: 0.5rem;
-    background: var(--bg);
-    color: var(--fg);
-    border: 1px solid var(--fgMuted);
-    border-radius: 0.25rem;
-  }
   .markerManager__image--dropTarget {
     outline: 2px solid var(--fgPrimary);
     outline-offset: 4px;
@@ -710,6 +789,29 @@
   .markerManager__title {
     font-size: 0.875rem;
     cursor: pointer;
+  }
+  .markerManager__listConditions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .markerManager__listDot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    border: var(--borderThin);
+  }
+  .markerManager__listMore {
+    font-size: 0.75rem;
+    color: var(--fgMuted);
+  }
+  .markerManager__appearance summary {
+    cursor: pointer;
+    font-weight: var(--font-weight-6);
+    padding: 0.5rem 0;
+  }
+  .markerManager__conditions {
+    padding: 0 0.25rem;
   }
   .markerManager__title:hover {
     text-decoration: underline;

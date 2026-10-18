@@ -6,7 +6,8 @@ export enum MapLayerType {
   Marker = 2,
   Annotation = 3,
   Measurement = 4,
-  Light = 5
+  Light = 5,
+  AoeTemplate = 6
 }
 
 /**

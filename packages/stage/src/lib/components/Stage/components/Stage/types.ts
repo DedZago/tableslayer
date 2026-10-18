@@ -26,6 +26,11 @@ export interface Callbacks {
   onMarkerMoved: (marker: Marker, position: { x: number; y: number }) => void;
   /** Group drag: called once per pointer move with every moved marker. Optional — falls back to onMarkerMoved per marker. */
   onMarkersMoved?: (moves: Array<{ marker: Marker; position: { x: number; y: number } }>) => void;
+  /**
+   * Group drag ended (pointer released, window blurred, layer reset) or was cancelled with Escape,
+   * in which case the members were already moved back to their start positions.
+   */
+  onMarkersMoveEnd?: (result: { ids: string[]; cancelled: boolean }) => void;
   onMarkerSelected: (marker: Marker | null) => void;
   onMarkerDoubleClick?: (marker: Marker) => void;
   onMarkerContextMenu: (marker: Marker, event: MouseEvent | TouchEvent) => void;

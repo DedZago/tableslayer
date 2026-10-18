@@ -5,7 +5,7 @@ description: Conventions for building/editing components in packages/ui (@tables
 
 # @tableslayer/ui component conventions
 
-> **Freshness**: last verified 2026-07-04 against `@tableslayer/ui` v0.2.2, Svelte 5.56.
+> **Freshness**: last verified 2026-10-18 against `@tableslayer/ui` v0.2.2, Svelte 5.56.
 > Anchor files are listed at the bottom — if one is missing or looks different, the code wins; update this skill (see "Keeping this skill current").
 
 ## Component anatomy (canonical skeleton)
@@ -112,7 +112,7 @@ Rules baked into the above:
 - **Popover**: `@floating-ui/dom`; `trigger`/`content` snippets; `portal` prop is **opt-in** (`'body'` or selector) to escape `overflow:hidden` clipping — default renders inline. Outside-click closing is a `<svelte:window onclick>`.
 - **Icon**: pass a Tabler component as a prop — `<Icon Icon={IconCheck} size="1.25rem" />` (`@tabler/icons-svelte`). No provider.
 - **ColorMode**: wrapper that applies `.light`/`.dark` to a subtree (`<svelte:element this={as} class={mode}>`) — used by docs to render both themes side by side.
-- **Editor**: TipTap 3, `content` is `$bindable` JSONContent; it's a single-file exception (props typed inline, no types.ts).
+- **Editor**: TipTap 3, `content` is `$bindable` JSONContent; it's a single-file exception (props typed inline, no types.ts). Content set from outside is applied with `setContent(..., { emitUpdate: false })`, so it never echoes back through `onChange`; `onChange(content)` fires only for user edits and receives the new JSON.
 - **Form inputs**: `FormControl` is the label/error wrapper around `Input` et al.; theme via `--inputBg`/`--inputFocusBg`/`--inputBorderColor`.
 
 ## Verifying a change visually

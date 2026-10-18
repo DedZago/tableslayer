@@ -29,15 +29,17 @@ test('JSON import stores upstream artwork, preserves edits and retries without d
     const dismiss = page.getByTestId('checklistDismissButton');
     if (await dismiss.isVisible()) await dismiss.click();
     await page.keyboard.press('m');
-    await page.getByText('Personal asset library', { exact: true }).click();
-    await page.getByText('Import 5etools assets', { exact: true }).click();
-    const importer = page.locator('.asset-import');
+    await page.getByRole('tab', { name: 'Library', exact: true }).click();
+    await page.getByRole('button', { name: 'Add from 5etools', exact: true }).click();
+    const importer = page.getByRole('dialog', { name: 'Add creatures from 5etools', exact: true });
     await importer.getByLabel('Bestiary JSON').setInputFiles({
       name: 'bestiary.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(bestiary))
     });
-    await expect(importer.getByText('2 selected.', { exact: false })).toBeVisible();
+    const uploaded = importer.getByRole('list', { name: 'Uploaded creatures', exact: true });
+    await expect(uploaded.getByTestId('asset-catalog-row')).toHaveCount(2);
+    await expect(importer.locator('.assetCatalog__footerStatus')).toContainText('2 selected');
     const importResponses: { results: { requestId: string; identity: string; status: string; assetId?: string }[] }[] =
       [];
     page.on('response', async (response) => {
@@ -48,10 +50,13 @@ test('JSON import stores upstream artwork, preserves edits and retries without d
           if (result.assetId && result.status === 'created') assetIds.add(result.assetId);
       }
     });
-    await importer.getByRole('button', { name: 'Import selected', exact: true }).click();
-    await expect(importer.getByText('created: Goblin', { exact: true })).toBeVisible({ timeout: 55_000 });
+    await importer.getByRole('button', { name: 'Add 2 to library', exact: true }).click();
+    await expect(uploaded.getByRole('img', { name: 'created: Goblin', exact: true })).toBeVisible({ timeout: 55_000 });
     await expect(
-      importer.getByText('created: Imported without artwork; use Edit to upload an image', { exact: true })
+      uploaded.getByRole('img', {
+        name: 'created: Imported without artwork; use Edit to upload an image',
+        exact: true
+      })
     ).toBeVisible();
     expect(importResponses).toHaveLength(1);
     const goblinResult = importResponses[0].results.find((result) => result.identity === '["mm","goblin"]')!;
@@ -97,12 +102,14 @@ test('JSON import stores upstream artwork, preserves edits and retries without d
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify({ monster: [{ name: 'Goblin', source: 'MM' }] }))
     });
-    await expect(importer.getByText('Already imported: Edited goblin verification', { exact: true })).toBeVisible();
-    await importer.getByLabel('Duplicate action').selectOption('update');
-    await importer.getByRole('button', { name: 'Import selected', exact: true }).click();
+    const reuploaded = uploaded.getByTestId('asset-catalog-row').filter({ hasText: 'Goblin' });
+    await expect(reuploaded).toContainText('In library');
+    await importer.getByRole('button', { name: 'If already in library', exact: true }).click();
+    await importer.getByRole('option', { name: 'Update artwork', exact: true }).click();
+    await importer.getByRole('button', { name: /^Add \d+ to library$/ }).click();
     await expect(
-      importer.getByText('updated: No replacement artwork; existing artwork preserved', { exact: true })
-    ).toBeVisible();
+      reuploaded.getByRole('img', { name: 'updated: No replacement artwork; existing artwork preserved', exact: true })
+    ).toBeVisible({ timeout: 55_000 });
     const editedList = await context.request.post('/api/assets/manage', {
       data: { action: 'list', search: 'Edited goblin verification' }
     });

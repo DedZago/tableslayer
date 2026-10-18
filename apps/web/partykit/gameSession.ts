@@ -12,7 +12,7 @@ import {
 import { appRequest } from './appApi';
 import { createRoomActivityReporter } from './roomActivity';
 
-const ALL_PARTS: ScenePart[] = ['settings', 'markers', 'lights', 'annotations', 'fogMask'];
+const ALL_PARTS: ScenePart[] = ['settings', 'markers', 'lights', 'aoeTemplates', 'annotations', 'fogMask'];
 const HYDRATION_ORIGIN = 'server-hydration';
 const PERSIST_RETRY_MS = 15000;
 

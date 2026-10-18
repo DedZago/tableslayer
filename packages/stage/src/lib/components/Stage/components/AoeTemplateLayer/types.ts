@@ -71,3 +71,45 @@ export interface AoeTemplateLayerExports {
   cancelDraft(): void;
   hasDraft(): boolean;
 }
+
+export const AOE_EFFECT_DEFAULT_COLORS: Record<AoeEffect, string> = {
+  [AoeEffect.None]: '#ffffff',
+  [AoeEffect.Fire]: '#ff6a1a',
+  [AoeEffect.Lightning]: '#5aa8ff',
+  [AoeEffect.Frost]: '#9ee8ff',
+  [AoeEffect.PoisonGas]: '#7fd13b',
+  [AoeEffect.Thorns]: '#5b8a2e',
+  [AoeEffect.Mud]: '#7a5230',
+  [AoeEffect.Darkness]: '#4b2a6b',
+  [AoeEffect.FogCloud]: '#d4d8de',
+  [AoeEffect.Web]: '#e8e8e8',
+  [AoeEffect.Grease]: '#6b7280',
+  [AoeEffect.Radiant]: '#ffd166',
+  [AoeEffect.Necrotic]: '#3f7a3a',
+  [AoeEffect.Force]: '#a78bfa',
+  [AoeEffect.Water]: '#2dd4bf',
+  [AoeEffect.SleetStorm]: '#cfe6f2',
+  [AoeEffect.InsectSwarm]: '#6b4a1e',
+  [AoeEffect.Acid]: '#c8e62a'
+};
+
+export const AOE_EFFECT_LABELS: Record<AoeEffect, string> = {
+  [AoeEffect.None]: 'None',
+  [AoeEffect.Fire]: 'Fire',
+  [AoeEffect.Lightning]: 'Lightning',
+  [AoeEffect.Frost]: 'Frost',
+  [AoeEffect.PoisonGas]: 'Poison gas',
+  [AoeEffect.Thorns]: 'Thorns',
+  [AoeEffect.Mud]: 'Mud',
+  [AoeEffect.Darkness]: 'Darkness',
+  [AoeEffect.FogCloud]: 'Fog cloud',
+  [AoeEffect.Web]: 'Web',
+  [AoeEffect.Grease]: 'Grease',
+  [AoeEffect.Radiant]: 'Radiant',
+  [AoeEffect.Necrotic]: 'Necrotic',
+  [AoeEffect.Force]: 'Force',
+  [AoeEffect.Water]: 'Water',
+  [AoeEffect.SleetStorm]: 'Sleet storm',
+  [AoeEffect.InsectSwarm]: 'Insect swarm',
+  [AoeEffect.Acid]: 'Acid'
+};

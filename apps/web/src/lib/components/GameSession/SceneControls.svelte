@@ -1,7 +1,15 @@
 <script lang="ts">
   import { ColorMode, Icon, Popover, SelectorMenu, ToolTip } from '@tableslayer/ui';
-  import { DrawMode, ToolType, type StageProps, MapLayerType, type StageExports } from '@tableslayer/stage';
   import {
+    DrawMode,
+    ToolType,
+    type StageProps,
+    MapLayerType,
+    type StageExports,
+    type AoeToolSettings
+  } from '@tableslayer/stage';
+  import {
+    IconCone2,
     IconGrid4x4,
     IconPaint,
     IconPaintFilled,
@@ -37,6 +45,7 @@
     PlayControls,
     MeasurementControls
   } from './';
+  import AoeTemplateControls from './AoeTemplateControls.svelte';
   import type { SessionDocClient } from '$lib/realtime';
   import { queuePropertyUpdate } from '$lib/utils';
 
@@ -54,7 +63,9 @@
     errors = undefined,
     client,
     isCompact = false,
-    onFogClear
+    onFogClear,
+    aoeTool = undefined,
+    onAoeToolChange = undefined
   }: {
     handleSelectActiveControl: (control: string, opts?: { toggle?: boolean }) => void;
     activeControl: string;
@@ -70,6 +81,8 @@
     client: SessionDocClient | null;
     isCompact?: boolean;
     onFogClear?: () => void;
+    aoeTool?: AoeToolSettings;
+    onAoeToolChange?: (patch: Partial<AoeToolSettings>) => void;
   } = $props();
 
   type SceneControl = {
@@ -140,7 +153,8 @@
   const drawingOverflowItems = [
     { id: 'marker', icon: IconPokerChip, text: 'Marker', testId: 'markerToolButton' },
     { id: 'annotation', icon: IconPencil, text: 'Draw', testId: undefined },
-    { id: 'light', icon: IconFlame, text: 'Light', testId: 'lightToolButton' }
+    { id: 'light', icon: IconFlame, text: 'Light', testId: 'lightToolButton' },
+    { id: 'aoe', icon: IconCone2, text: 'AoE', testId: 'aoeToolButton' }
   ];
 
   const eraseOptions = [
@@ -427,6 +441,17 @@
           {/snippet}
         </ToolTip>
       </div>
+      {#if aoeTool && onAoeToolChange}
+        <div class="sceneControls__item sceneControls__item--aoe">
+          <AoeTemplateControls
+            tool={aoeTool}
+            isActive={activeControl === 'aoe'}
+            onToggle={() => handleSelectActiveControl('aoe')}
+            onActivate={() => handleSelectActiveControl('aoe', { toggle: false })}
+            onToolChange={onAoeToolChange}
+          />
+        </div>
+      {/if}
       {#each popoverControls as scene}
         <div class="sceneControls__item">
           <Popover

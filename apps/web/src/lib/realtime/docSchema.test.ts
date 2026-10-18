@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 import { base64ToUint8, uint8ToBase64 } from './binary';
 import {
   classifySceneEvents,
+  closeUndoCaptureGroup,
   createPartyWriter,
   createSessionWriter,
   getAnnotationMask,
@@ -12,9 +13,10 @@ import {
   hydrateGameSessionDoc,
   isDocHydrated,
   listScenes,
+  openUndoCaptureGroup,
   orderBetween
 } from './docSchema';
-import type { AnnotationRow, LightRow, MarkerRow, SceneChange, SceneSettings } from './types';
+import type { AnnotationRow, AoeTemplateRow, LightRow, MarkerRow, SceneChange, SceneSettings } from './types';
 
 const makeSettings = (id: string, overrides: Partial<SceneSettings> = {}): SceneSettings => ({
   id,
@@ -554,4 +556,177 @@ it('keeps handouts in party state across scene switches and pause without changi
     activeHandout: null
   });
   party.destroy();
+});
+
+const makeAoeTemplate = (id: string, overrides: Partial<AoeTemplateRow> = {}): AoeTemplateRow => ({
+  id,
+  sceneId: 's1',
+  shape: 'circle',
+  positionX: 0,
+  positionY: 0,
+  angle: 0,
+  size: 20,
+  width: 5,
+  effect: 1,
+  color: '#ff6a00',
+  opacity: 0.6,
+  visibility: 1,
+  label: null,
+  anchorMarkerId: null,
+  createdAt: 1700000000,
+  ...overrides
+});
+
+describe('undo groups', () => {
+  // Short capture timeout so a real pause exceeds it (lib0 captures Date.now, so fake timers cannot drive it)
+  const sceneUndoManager = (doc: Y.Doc, sceneId: string, origin: unknown) =>
+    new Y.UndoManager(doc.getMap('scenes').get(sceneId) as Y.Map<unknown>, {
+      trackedOrigins: new Set([origin]),
+      captureTimeout: 40
+    });
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 80));
+
+  // Five writes with a pause after the second: a gesture a user would hold
+  const dragWithPause = async (doc: Y.Doc) => {
+    const writer = createSessionWriter(doc, 'me');
+    for (let step = 1; step <= 5; step++) {
+      if (step === 3) await pause();
+      writer.setMarkerFields('s1', 'm1', { positionX: step });
+    }
+  };
+
+  it('splits a gesture with a pause into several undo steps by default', async () => {
+    const doc = hydratedDoc();
+    const undoManager = sceneUndoManager(doc, 's1', 'me');
+    await dragWithPause(doc);
+    expect(undoManager.undoStack.length).toBeGreaterThan(1);
+  });
+
+  it('restores the start position of a group drag with one undo, pauses included', async () => {
+    const doc = hydratedDoc();
+    const undoManager = sceneUndoManager(doc, 's1', 'me');
+    openUndoCaptureGroup(undoManager);
+    await dragWithPause(doc);
+    closeUndoCaptureGroup(undoManager);
+
+    expect(undoManager.undoStack).toHaveLength(1);
+    expect(getSceneSnapshot(doc, 's1')!.markers.find((m) => m.id === 'm1')!.positionX).toBe(5);
+    undoManager.undo();
+    expect(getSceneSnapshot(doc, 's1')!.markers.find((m) => m.id === 'm1')!.positionX).toBe(0);
+  });
+
+  it('drops the step of a cancelled group and keeps earlier history', () => {
+    const doc = hydratedDoc();
+    const undoManager = sceneUndoManager(doc, 's1', 'me');
+    const writer = createSessionWriter(doc, 'me');
+    writer.setMarkerFields('s1', 'm1', { title: 'Earlier edit' });
+    const mark = openUndoCaptureGroup(undoManager);
+    writer.setMarkerFields('s1', 'm1', { positionX: 7 });
+    writer.setMarkerFields('s1', 'm1', { positionX: 0 });
+    closeUndoCaptureGroup(undoManager, mark);
+
+    const marker = () => getSceneSnapshot(doc, 's1')!.markers.find((m) => m.id === 'm1')!;
+    expect(undoManager.undoStack).toHaveLength(1);
+    expect(undoManager.redoStack).toHaveLength(0);
+    expect(marker()).toMatchObject({ positionX: 0, title: 'Earlier edit' });
+  });
+
+  it('keeps earlier history when a cancelled group recorded nothing', () => {
+    const doc = hydratedDoc();
+    const undoManager = sceneUndoManager(doc, 's1', 'me');
+    createSessionWriter(doc, 'me').setMarkerFields('s1', 'm1', { title: 'Earlier edit' });
+    closeUndoCaptureGroup(undoManager, openUndoCaptureGroup(undoManager));
+
+    expect(undoManager.undoStack).toHaveLength(1);
+    expect(getSceneSnapshot(doc, 's1')!.markers.find((m) => m.id === 'm1')!.title).toBe('Earlier edit');
+  });
+});
+
+describe('aoe templates', () => {
+  it('reads templates in creation order, ties broken by id', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t-b', { createdAt: 20 }));
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t-a', { createdAt: 20 }));
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t-c', { createdAt: 10 }));
+
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates.map((t) => t.id)).toEqual(['t-c', 't-a', 't-b']);
+  });
+
+  it('updates single fields and deletes whole templates', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t1'));
+    writer.setAoeTemplateFields('s1', 't1', { angle: 90, label: 'Fireball' });
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates[0]).toMatchObject({ angle: 90, label: 'Fireball', size: 20 });
+
+    writer.deleteAoeTemplate('s1', 't1');
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates).toEqual([]);
+  });
+
+  it('hydrates templates and classifies their field changes as the aoeTemplates part', () => {
+    const doc = new Y.Doc();
+    hydrateGameSessionDoc(
+      doc,
+      {
+        scenes: [
+          {
+            settings: makeSettings('s1', { order: 1 }),
+            markers: [],
+            lights: [],
+            aoeTemplates: [makeAoeTemplate('t1')],
+            annotations: []
+          }
+        ]
+      },
+      'hydration'
+    );
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates.map((t) => t.id)).toEqual(['t1']);
+
+    const changes: SceneChange[] = [];
+    doc.getMap('scenes').observeDeep((events, txn) => {
+      changes.push(...classifySceneEvents(events as Y.YEvent<Y.Map<unknown>>[], txn));
+    });
+    createSessionWriter(doc, 'me').setAoeTemplateFields('s1', 't1', { opacity: 0.2 });
+
+    expect(changes).toEqual([
+      { sceneId: 's1', part: 'aoeTemplates', keys: ['opacity'], childId: 't1', remote: false, undoRedo: false }
+    ]);
+  });
+
+  it('restores a deleted template with all of its fields on undo', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t1', { shape: 'cone', angle: 30, label: 'Burning Hands' }));
+    const undoManager = new Y.UndoManager(doc.getMap('scenes').get('s1') as Y.Map<unknown>, {
+      trackedOrigins: new Set(['me'])
+    });
+    writer.deleteAoeTemplate('s1', 't1');
+    undoManager.stopCapturing();
+    undoManager.undo();
+
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates[0]).toMatchObject({
+      shape: 'cone',
+      angle: 30,
+      label: 'Burning Hands'
+    });
+  });
+});
+
+describe('combat fields', () => {
+  it('keeps scene and marker combat state in the doc', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.setSceneSettings('s1', { combatRound: 2, combatActiveMarkerId: 'm1', combatLairStep: true });
+    writer.setMarkerFields('s1', 'm1', { inCombat: true, initiative: 14, initiativeTiebreak: 1 });
+
+    const snapshot = getSceneSnapshot(doc, 's1')!;
+    expect(snapshot.settings).toMatchObject({ combatRound: 2, combatActiveMarkerId: 'm1', combatLairStep: true });
+    expect(snapshot.markers.find((m) => m.id === 'm1')).toMatchObject({
+      inCombat: true,
+      initiative: 14,
+      initiativeTiebreak: 1,
+      positionX: 0
+    });
+  });
 });

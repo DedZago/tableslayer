@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { statBlockSchema } from './statBlock/schema';
 
 export const TOKEN_CLIPBOARD_FORMAT = 'tableslayer.tokens';
 export const TOKEN_CLIPBOARD_LIMIT = 1024 * 1024;
@@ -29,6 +30,19 @@ const validNote = (note: unknown) => {
   return true;
 };
 
+const conditionSchema = z
+  .object({
+    id: z.string().max(64),
+    label: z.string().max(24).optional(),
+    color: z
+      .string()
+      .regex(/^#[\da-f]{6}$/i)
+      .optional(),
+    value: z.number().int().min(1).max(6).optional(),
+    dmOnly: z.boolean().optional()
+  })
+  .strict();
+
 export const clipboardTokenSchema = z
   .object({
     title: z.string().max(1000),
@@ -42,7 +56,12 @@ export const clipboardTokenSchema = z
     note: z.unknown().refine(validNote, 'Invalid token note'),
     assetId: z.string().min(1).max(100).nullable(),
     offset: clipboardPointSchema,
-    displayOffset: clipboardPointSchema
+    displayOffset: clipboardPointSchema,
+    conditions: z.array(conditionSchema).max(32).optional(),
+    statBlock: statBlockSchema.nullable().optional(),
+    hitPoints: z.number().int().min(0).max(100_000).nullable().optional(),
+    tempHitPoints: z.number().int().min(0).max(100_000).nullable().optional(),
+    initiativeBonus: z.number().int().min(-20).max(30).nullable().optional()
   })
   .strict();
 

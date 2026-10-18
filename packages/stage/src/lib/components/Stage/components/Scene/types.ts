@@ -26,6 +26,7 @@ export enum SceneLayerOrder {
   Fog = 20,
   Weather = 30,
   EffectAnnotation = 35, // Effect annotations render under fog of war
+  AoeTemplate = 35.5, // Spell area fills render above painted effects and below tokens
   Light = 36, // Lights render under markers and fog of war
   Marker = 37, // Markers render above effect annotations but below fog of war
   FogOfWar = 40,

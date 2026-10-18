@@ -1,7 +1,8 @@
 import type { SelectLight, SelectMarker, SelectScene } from '$lib/db/app/schema';
-import { GridMode } from '@tableslayer/stage';
+import type { AoeTemplateRow } from '$lib/realtime/types';
+import { GridMode, StageMode } from '@tableslayer/stage';
 import { describe, expect, it } from 'vitest';
-import { buildSceneProps } from './buildSceneProps';
+import { buildSceneProps, withAutoConditions } from './buildSceneProps';
 
 const baseScene = {
   id: 'scene-1',
@@ -152,5 +153,107 @@ describe('buildSceneProps fog rooms', () => {
     expect(buildSceneProps(baseScene, [], 'editor').fogOfWar.rooms).toEqual([]);
     const corrupt = { ...baseScene, fogOfWarRooms: '{not json' } as SelectScene;
     expect(buildSceneProps(corrupt, [], 'editor').fogOfWar.rooms).toEqual([]);
+  });
+});
+
+const aoeRow = (overrides: Partial<AoeTemplateRow> = {}): AoeTemplateRow => ({
+  id: 'aoe-1',
+  sceneId: 'scene-1',
+  shape: 'cone',
+  positionX: 300,
+  positionY: 150,
+  angle: 30,
+  size: 15,
+  width: 5,
+  effect: 1,
+  color: '#ff6a00',
+  opacity: 0.6,
+  visibility: StageMode.Player,
+  label: 'Burning Hands',
+  anchorMarkerId: null,
+  createdAt: 1700000000,
+  ...overrides
+});
+
+const markerWithHp = (average: number, hitPoints: number | null) =>
+  ({
+    ...marker,
+    statBlock: { hp: { average } },
+    hitPoints
+  }) as unknown as SelectMarker;
+
+describe('buildSceneProps conditions', () => {
+  it('derives bloodied at or below half of the stat block max HP', () => {
+    expect(buildSceneProps(baseScene, [markerWithHp(20, 10)], 'editor').marker.markers[0].conditions).toEqual([
+      { id: 'bloodied' }
+    ]);
+  });
+
+  it('does not derive bloodied above half, at zero, or without HP tracking', () => {
+    expect(buildSceneProps(baseScene, [markerWithHp(20, 11)], 'editor').marker.markers[0].conditions).toEqual([]);
+    expect(buildSceneProps(baseScene, [markerWithHp(20, 0)], 'editor').marker.markers[0].conditions).toEqual([]);
+    expect(buildSceneProps(baseScene, [markerWithHp(20, null)], 'editor').marker.markers[0].conditions).toEqual([]);
+  });
+
+  it('keeps stored conditions and never duplicates bloodied', () => {
+    const stored = [{ id: 'prone' }, { id: 'bloodied' }];
+    expect(withAutoConditions(stored, { statBlock: { hp: { average: 20 } } as never, hitPoints: 5 })).toBe(stored);
+    expect(
+      withAutoConditions([{ id: 'prone' }], { statBlock: { hp: { average: 20 } } as never, hitPoints: 5 })
+    ).toEqual([{ id: 'prone' }, { id: 'bloodied' }]);
+  });
+
+  it('defaults rows without a conditions value to none', () => {
+    expect(buildSceneProps(baseScene, [marker], 'editor').marker.markers[0].conditions).toEqual([]);
+  });
+
+  it('drops GM-only conditions from player props but keeps them for the GM', () => {
+    const conditions = [
+      { id: 'prone' },
+      { id: 'dead', dmOnly: true },
+      { id: 'custom:1', label: 'Hexed', dmOnly: true }
+    ];
+    const row = { ...marker, conditions } as unknown as SelectMarker;
+    expect(buildSceneProps(baseScene, [row], 'client').marker.markers[0].conditions).toEqual([{ id: 'prone' }]);
+    expect(buildSceneProps(baseScene, [row], 'editor').marker.markers[0].conditions).toEqual(conditions);
+  });
+});
+
+describe('buildSceneProps aoe templates', () => {
+  it('maps rows to stage templates with the same v0 coordinate conversion as lights', () => {
+    const props = buildSceneProps(baseScene, [], 'editor', [], [], undefined, [aoeRow()]);
+    expect(props.aoeTemplates?.templates[0]).toMatchObject({
+      id: 'aoe-1',
+      shape: 'cone',
+      position: { x: 100, y: 100 },
+      angle: 30,
+      size: 15,
+      width: 5,
+      effect: 1,
+      label: 'Burning Hands'
+    });
+  });
+
+  it('rotates angles of legacy display-space templates into map space', () => {
+    const scene = { ...baseScene, mapRotation: 90 } as SelectScene;
+    const props = buildSceneProps(scene, [], 'editor', [], [], undefined, [aoeRow()]);
+    expect(props.aoeTemplates?.templates[0].angle).toBe(-60);
+  });
+
+  it('hides DM-only templates from player clients only', () => {
+    const rows = [aoeRow({ id: 'gm', visibility: StageMode.DM }), aoeRow({ id: 'pl' })];
+    expect(
+      buildSceneProps(baseScene, [], 'client', [], [], undefined, rows).aoeTemplates?.templates.map((t) => t.id)
+    ).toEqual(['pl']);
+    expect(
+      buildSceneProps(baseScene, [], 'editor', [], [], undefined, rows).aoeTemplates?.templates.map((t) => t.id)
+    ).toEqual(['gm', 'pl']);
+  });
+
+  it('starts with no selection and a fresh default tool each call', () => {
+    const first = buildSceneProps(baseScene, [], 'editor');
+    const second = buildSceneProps(baseScene, [], 'editor');
+    expect(first.aoeTemplates).toMatchObject({ templates: [], selectedId: null, showLabels: true });
+    expect(first.aoeTemplates?.tool).not.toBe(second.aoeTemplates?.tool);
   });
 });

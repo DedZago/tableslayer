@@ -1,41 +1,48 @@
+import { applyCopy, buildStatBlock, type CopyOptions } from '$lib/server/assets/fivetools/statblock';
+import type { StatBlock } from '$lib/utils/statBlock/types';
 import { z } from 'zod';
 import type { FiveToolsPreview } from './types';
 
-export const FIVETOOLS_ADAPTER_VERSION = 'bestiary-art-v1';
+export const FIVETOOLS_ADAPTER_VERSION = 'bestiary-stats-v1';
 export const MAX_IMPORT_JSON_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_PREVIEW_RECORDS = 2000;
+export const MAX_UPLOAD_STAT_BLOCK_BYTES = 8 * 1024 * 1024;
 const identitySchema = z.object({ name: z.string().trim().min(1).max(200), source: z.string().trim().min(1).max(100) });
 const hrefSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('internal'), path: z.string().min(1).max(2048) }),
   z.object({ type: z.literal('external'), url: z.string().min(1).max(2048) })
 ]);
-const recordSchema = identitySchema.extend({
-  tokenUrl: z.string().min(1).max(2048).optional(),
-  token: identitySchema.optional(),
-  tokenHref: hrefSchema.optional(),
-  hasToken: z.boolean().optional(),
-  _copy: identitySchema
-    .extend({
-      _mod: z.record(z.string(), z.unknown()).optional(),
-      _preserve: z.record(z.string(), z.unknown()).optional()
-    })
-    .optional(),
-  _appendCopy: z.unknown().optional(),
-  fluff: z
-    .object({
-      _monsterFluff: identitySchema.optional(),
-      images: z
-        .array(z.object({ href: hrefSchema }))
-        .max(100)
-        .nullable()
-        .optional()
-    })
-    .optional(),
-  images: z
-    .array(z.object({ href: hrefSchema }))
-    .max(100)
-    .nullable()
-    .optional()
-});
+const recordSchema = identitySchema
+  .extend({
+    tokenUrl: z.string().min(1).max(2048).optional(),
+    token: identitySchema.optional(),
+    tokenHref: hrefSchema.optional(),
+    hasToken: z.boolean().optional(),
+    _copy: identitySchema
+      .extend({
+        _mod: z.record(z.string(), z.unknown()).optional(),
+        _preserve: z.record(z.string(), z.unknown()).optional()
+      })
+      .loose()
+      .optional(),
+    _appendCopy: z.unknown().optional(),
+    fluff: z
+      .object({
+        _monsterFluff: identitySchema.optional(),
+        images: z
+          .array(z.object({ href: hrefSchema }))
+          .max(100)
+          .nullable()
+          .optional()
+      })
+      .optional(),
+    images: z
+      .array(z.object({ href: hrefSchema }))
+      .max(100)
+      .nullable()
+      .optional()
+  })
+  .loose();
 const documentSchema = z.object({
   monster: z.array(recordSchema).max(10000).default([]),
   monsterFluff: z.array(recordSchema).max(10000).default([])
@@ -52,6 +59,51 @@ export const fiveToolsTokenName = (name: string) =>
     .replace(/Æ/g, 'AE')
     .replace(/æ/g, 'ae')
     .replace(/"/g, '');
+
+export const statBlockKey = (record: { name: string; source: string }) =>
+  `${record.name.toLowerCase()}|${record.source.toLowerCase()}`;
+
+const sizeNames: Record<string, string> = {
+  T: 'Tiny',
+  S: 'Small',
+  M: 'Medium',
+  L: 'Large',
+  H: 'Huge',
+  G: 'Gargantuan'
+};
+const crBadge = (cr: unknown) => {
+  const value = typeof cr === 'object' && cr !== null ? (cr as { cr?: unknown }).cr : cr;
+  return typeof value === 'string' ? value : undefined;
+};
+const typeBadge = (type: unknown) => {
+  const value = typeof type === 'object' && type !== null ? (type as { type?: unknown }).type : type;
+  return typeof value === 'string' ? value.charAt(0).toUpperCase() + value.slice(1) : undefined;
+};
+const sizeBadge = (size: unknown) => {
+  const code = Array.isArray(size) ? size[0] : undefined;
+  return typeof code === 'string' ? (sizeNames[code] ?? code) : undefined;
+};
+const badges = (record: RecordData) => ({
+  cr: crBadge(record.cr),
+  creatureType: typeBadge(record.type),
+  size: sizeBadge(record.size)
+});
+
+export const buildFiveToolsStatBlock = (
+  record: RecordData,
+  index: Map<string, RecordData>,
+  options: CopyOptions = {}
+): { statBlock: StatBlock | null; warnings: string[] } => {
+  try {
+    const copied = applyCopy(record, index, options);
+    return { statBlock: buildStatBlock(copied.record, FIVETOOLS_ADAPTER_VERSION), warnings: copied.warnings };
+  } catch (error) {
+    return {
+      statBlock: null,
+      warnings: [`Stat block unavailable: ${error instanceof Error ? error.message : 'Unknown error'}`]
+    };
+  }
+};
 
 const imageUrl = (path: string, imageBase: string) => {
   if (path.startsWith('/') || path.includes('\\') || path.split('/').some((part) => part === '..')) {
@@ -147,7 +199,8 @@ export const normalizeFiveToolsDocuments = (
       source: original.source,
       tokenUrl,
       artworkUrl,
-      warnings
+      warnings,
+      ...badges(record)
     };
   });
 };
@@ -155,5 +208,18 @@ export const normalizeFiveToolsDocuments = (
 export const previewFiveToolsJson = (json: string, imageBase: string): FiveToolsPreview[] => {
   const document = parseFiveToolsDocument(json);
   if (!document.monster.length) throw new Error('Choose bestiary JSON containing a monster array');
-  return normalizeFiveToolsDocuments([document], imageBase);
+  if (document.monster.length > MAX_UPLOAD_PREVIEW_RECORDS)
+    throw new Error(
+      `This file has ${document.monster.length} creatures; upload at most ${MAX_UPLOAD_PREVIEW_RECORDS} at a time`
+    );
+  const index = new Map(document.monster.map((record) => [statBlockKey(record), record]));
+  const rawByIdentity = new Map(document.monster.map((record) => [fiveToolsIdentity(record), record]));
+  let statBlockBytes = 0;
+  return normalizeFiveToolsDocuments([document], imageBase).map((record) => {
+    const built = buildFiveToolsStatBlock(rawByIdentity.get(record.identity)!, index, { literalReplaceTxt: true });
+    statBlockBytes += built.statBlock ? JSON.stringify(built.statBlock).length : 0;
+    if (statBlockBytes > MAX_UPLOAD_STAT_BLOCK_BYTES)
+      throw new Error('The stat blocks in this file are too large to preview; split it into smaller files');
+    return { ...record, statBlock: built.statBlock, warnings: [...record.warnings, ...built.warnings] };
+  });
 };

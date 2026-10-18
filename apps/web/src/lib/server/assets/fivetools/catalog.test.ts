@@ -49,7 +49,10 @@ describe('persisted all-source catalog', () => {
   it('searches all sources and resolves cross-source dependencies and portraits', async () => {
     const result = await ready('wolf');
     expect(result.status.state).toBe('ready');
-    expect(result.sources).toEqual(['HB', 'MM']);
+    expect(result.sources).toEqual([
+      { source: 'HB', count: 1 },
+      { source: 'MM', count: 1 }
+    ]);
     expect(result.records).toHaveLength(2);
     expect(result.records[0].tokenUrl).toBe(result.records[1].tokenUrl);
     expect(result.records.find((record) => record.source === 'MM')?.artworkUrl).toBe(

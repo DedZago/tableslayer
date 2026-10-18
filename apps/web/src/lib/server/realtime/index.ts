@@ -2,6 +2,7 @@ import { dev } from '$app/environment';
 import { db } from '$lib/db/app';
 import {
   annotationsTable,
+  aoeTemplateTable,
   gameSessionTable,
   lightTable,
   markerTable,
@@ -9,6 +10,7 @@ import {
   sceneTable,
   type SelectScene
 } from '$lib/db/app/schema';
+import { aoeTemplateRowFromDb, aoeTemplateRowToDb } from '$lib/realtime/fromDb';
 import type { PartyStateWire, PersistSessionWire, SceneWire, SessionSnapshotWire } from '$lib/realtime/wire';
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import { pruneUnavailableAssetLinks } from '../assets/assets';
@@ -27,23 +29,25 @@ const sceneRowToWire = (
   scene: SelectScene,
   markers: SceneWire['markers'],
   lights: SceneWire['lights'],
+  aoeTemplates: SceneWire['aoeTemplates'],
   annotations: SceneWire['annotations']
 ): SceneWire => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { fogOfWarMask, annotationLayers, lastUpdated, ...settings } = scene;
-  return { settings, markers, lights, annotations, fogMask: fogOfWarMask };
+  return { settings, markers, lights, aoeTemplates, annotations, fogMask: fogOfWarMask };
 };
 
 export const buildSessionSnapshot = async (gameSessionId: string): Promise<SessionSnapshotWire> => {
   const scenes = await db.select().from(sceneTable).where(eq(sceneTable.gameSessionId, gameSessionId)).all();
   const sceneIds = scenes.map((scene) => scene.id);
 
-  const [markers, lights, annotations] =
+  const [markers, lights, aoeTemplates, annotations] =
     sceneIds.length === 0
-      ? [[], [], []]
+      ? [[], [], [], []]
       : await Promise.all([
           db.select().from(markerTable).where(inArray(markerTable.sceneId, sceneIds)).all(),
           db.select().from(lightTable).where(inArray(lightTable.sceneId, sceneIds)).all(),
+          db.select().from(aoeTemplateTable).where(inArray(aoeTemplateTable.sceneId, sceneIds)).all(),
           db.select().from(annotationsTable).where(inArray(annotationsTable.sceneId, sceneIds)).all()
         ]);
 
@@ -54,6 +58,7 @@ export const buildSessionSnapshot = async (gameSessionId: string): Promise<Sessi
         scene,
         markers.filter((m) => m.sceneId === scene.id),
         lights.filter((l) => l.sceneId === scene.id),
+        aoeTemplates.filter((t) => t.sceneId === scene.id).map(aoeTemplateRowFromDb),
         annotations.filter((a) => a.sceneId === scene.id)
       )
     )
@@ -61,7 +66,7 @@ export const buildSessionSnapshot = async (gameSessionId: string): Promise<Sessi
 };
 
 const replaceRows = async <T extends { id: string; sceneId: string }>(
-  table: typeof markerTable | typeof lightTable | typeof annotationsTable,
+  table: typeof markerTable | typeof lightTable | typeof aoeTemplateTable | typeof annotationsTable,
   sceneId: string,
   rows: T[]
 ) => {
@@ -97,6 +102,8 @@ export const applySessionPersist = async (payload: PersistSessionWire) => {
     if (scene.parts.includes('markers'))
       await replaceRows(markerTable, scene.settings.id, await pruneUnavailableAssetLinks(scene.markers));
     if (scene.parts.includes('lights')) await replaceRows(lightTable, scene.settings.id, scene.lights);
+    if (scene.parts.includes('aoeTemplates'))
+      await replaceRows(aoeTemplateTable, scene.settings.id, scene.aoeTemplates.map(aoeTemplateRowToDb));
     if (scene.parts.includes('annotations')) await replaceRows(annotationsTable, scene.settings.id, scene.annotations);
   }
 

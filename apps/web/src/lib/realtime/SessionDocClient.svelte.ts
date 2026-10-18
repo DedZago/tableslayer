@@ -3,6 +3,7 @@ import YPartyKitProvider from 'y-partykit/provider';
 import * as Y from 'yjs';
 import {
   classifySceneEvents,
+  closeUndoCaptureGroup,
   createPartyWriter,
   createSessionWriter,
   getAnnotationMask,
@@ -12,8 +13,11 @@ import {
   getSceneSnapshot,
   isDocHydrated,
   listScenes,
+  openUndoCaptureGroup,
   type PartyWriter,
-  type SessionWriter
+  type SessionWriter,
+  UNDO_CAPTURE_TIMEOUT_MS,
+  type UndoGroupMark
 } from './docSchema';
 import { PresenceChannel } from './presence.svelte';
 import type { PartyState, SceneChange, SceneListEntry, SceneSnapshot } from './types';
@@ -85,6 +89,7 @@ export class SessionDocClient {
   #remoteActivityListeners = new Set<(at: number) => void>();
 
   #undoManager: Y.UndoManager | null = null;
+  #undoGroupMark: UndoGroupMark | null = null;
   #gameSessionProvider: YPartyKitProvider;
   #partyProvider: YPartyKitProvider;
   #gameSessionSynced = false;
@@ -337,6 +342,7 @@ export class SessionDocClient {
   setUndoScope(sceneId: string | null) {
     this.#undoManager?.destroy();
     this.#undoManager = null;
+    this.#undoGroupMark = null;
     this.canUndo = false;
     this.canRedo = false;
     if (!sceneId) return;
@@ -348,7 +354,8 @@ export class SessionDocClient {
     }
 
     const undoManager = new Y.UndoManager(scene, {
-      trackedOrigins: new Set([this.origin])
+      trackedOrigins: new Set([this.origin]),
+      captureTimeout: UNDO_CAPTURE_TIMEOUT_MS
     });
     const refresh = () => {
       if (undoManager.undoStack.length > SessionDocClient.#UNDO_STACK_LIMIT) {
@@ -374,6 +381,18 @@ export class SessionDocClient {
   /** Close the current capture group so the next edit starts a new undo step. */
   stopCapturing() {
     this.#undoManager?.stopCapturing();
+  }
+
+  /** Everything written until endUndoGroup() becomes one undo step, however long it takes. */
+  beginUndoGroup() {
+    if (this.#undoManager) this.#undoGroupMark = openUndoCaptureGroup(this.#undoManager);
+  }
+
+  /** `discard`: the gesture was cancelled and left the doc unchanged, so drop its undo step. */
+  endUndoGroup({ discard = false }: { discard?: boolean } = {}) {
+    const mark = this.#undoGroupMark;
+    this.#undoGroupMark = null;
+    if (this.#undoManager) closeUndoCaptureGroup(this.#undoManager, discard && mark ? mark : undefined);
   }
 
   // -------------------------------------------------------------------------

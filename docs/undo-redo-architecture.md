@@ -39,6 +39,8 @@ Owns the `Y.UndoManager` and exposes the whole surface:
   `captureTimeout` merges throttled drag/slider transactions into one undo step. Warns and
   leaves undo disabled if the scene is not in the doc (matches the writer convention).
 - `undo()` / `redo()` / `stopCapturing()` — thin delegates.
+- `beginUndoGroup()` / `endUndoGroup({ discard })` — undo groups (see below). Thin wrappers over
+  `openUndoCaptureGroup` / `closeUndoCaptureGroup` in `docSchema.ts`, which hold the logic.
 - `canUndo` / `canRedo` — reactive `$state`, refreshed from the manager's
   `stack-item-added` / `stack-item-popped` / `stack-cleared` events. Available for toolbar
   buttons (currently keyboard-only).
@@ -74,6 +76,36 @@ changes are local, which schedules the idle capture).
 - A capture-phase `pointerdown` on the document calls `stopCapturing()` — every new pointer
   gesture starts a new undo step, so quick consecutive actions don't merge into one.
 
+### Undo groups (group token drag)
+
+The 500ms `captureTimeout` splits a gesture whenever the user pauses, and a snapped group drag
+writes nothing while the cursor stays inside one cell. An undo group makes one gesture one
+step regardless of timing:
+
+- `openUndoCaptureGroup` calls `stopCapturing()` (the group never merges into the previous
+  step) and sets `captureTimeout = Infinity`; it returns a mark holding the current undo-stack
+  top.
+- `closeUndoCaptureGroup` restores the 500ms timeout and calls `stopCapturing()`. With
+  `discard` (a cancelled gesture that left the doc unchanged) it undoes and drops the group's
+  step if the stack top moved since the mark, then clears the redo stack, so Ctrl+Z never lands
+  on a step that changes nothing. A group that recorded nothing leaves history untouched.
+- `setUndoScope` drops an open mark, so a group can't discard an item on a new scene's manager.
+
+Group drag flow:
+
+```
+stage MarkerLayer: press a token in a ≥2 selection, move past the drag threshold
+  → onMarkersMoved(moves) per pointer move (page: first call → beginUndoGroup())
+      → optimistic position + dragPositions overlay; one Y transaction per 50ms throttle tick
+        (setExistingMarkerFields — a member deleted mid-drag is skipped, never recreated)
+  → mouseup / window blur / layer reset / unmount → onMarkersMoveEnd({ cancelled: false })
+  → Escape mid-drag → members moved back, onMarkersMoveEnd({ cancelled: true })
+page finishGroupDrag: final positions in one transaction, clear overlay, endUndoGroup({ discard: cancelled })
+```
+
+Ctrl+Z / Ctrl+Y and hiding the tab call `finishGroupDrag()` first, so an open group is closed
+before the stack is popped. The group is closed by the gesture end, never by an idle timer.
+
 ## Data flow of an undo
 
 ```
@@ -102,5 +134,6 @@ Ctrl+Z → client.undo() → UndoManager applies inverse transaction (origin = t
 `docSchema.test.ts` (`undo/redo (Y.UndoManager semantics)`) covers: undo/redo convergence
 across live clients, untracked remote/system origins, full marker restoration after delete,
 fog mask byte restoration, capture merging vs `stopCapturing` splitting, and the same-field
-remote-overwrite race. If a yjs upgrade changes any reconciliation behavior, these tests are
+remote-overwrite race. The `undo groups` suite covers one step across pauses and discarding a
+cancelled group. If a yjs upgrade changes any reconciliation behavior, these tests are
 the tripwire.

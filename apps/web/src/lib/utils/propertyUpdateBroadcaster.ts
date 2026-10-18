@@ -36,6 +36,9 @@ const LOCAL_ONLY_PREFIXES = [
   'light.snapToGrid', // per-user preference, stored in a cookie
   'fogOfWar.tool', // brush size/mode/type are per-user tools
   'measurement', // measurement tool config is ephemeral
+  'aoeTemplates.tool',
+  'aoeTemplates.selectedId',
+  'aoeTemplates.showLabels',
   'debug'
 ];
 
@@ -57,7 +60,7 @@ let binding: DocBinding | null = null;
 let latestProps: StageProps | null = null;
 let pendingRawSettings: Partial<SceneSettings> | null = null;
 const dirtySettingsPaths = new Set<string>();
-const dirty = { markers: false, lights: false, annotations: false };
+const dirty = { markers: false, lights: false, annotations: false, aoeTemplates: false };
 
 // Leading-edge gate. Deliberately BELOW typical input-event spacing (60Hz ≈
 // 16.7ms, 125Hz mice ≈ 8ms): during a gesture nearly every input event flushes
@@ -133,6 +136,9 @@ export function queuePropertyUpdate(
     case 'annotations':
       dirty.annotations = true;
       break;
+    case 'aoeTemplates':
+      dirty.aoeTemplates = true;
+      break;
   }
   // Independent of the collection buckets: some collection-prefixed paths (e.g.
   // marker.shape.*) are global style stored in scene settings
@@ -172,6 +178,7 @@ function flushToDoc() {
       if (dirty.markers) syncMarkers(client, sceneId, props);
       if (dirty.lights) syncLights(client, sceneId, props);
       if (dirty.annotations) syncAnnotations(client, sceneId, props);
+      if (dirty.aoeTemplates) syncAoeTemplates(client, sceneId, props);
     }
     if (pendingRawSettings) {
       client.write.setSceneSettings(sceneId, pendingRawSettings);
@@ -180,7 +187,7 @@ function flushToDoc() {
   }, client.origin);
 
   dirtySettingsPaths.clear();
-  dirty.markers = dirty.lights = dirty.annotations = false;
+  dirty.markers = dirty.lights = dirty.annotations = dirty.aoeTemplates = false;
 }
 
 function syncMarkers(client: SessionDocClient, sceneId: string, props: StageProps) {
@@ -225,6 +232,20 @@ function syncAnnotations(client: SessionDocClient, sceneId: string, props: Stage
   layers.forEach((layer, index) => {
     client.write.setAnnotationFields(sceneId, layer.id, convertAnnotationToDbFormat(layer, sceneId, index));
   });
+}
+
+// Templates are created and deleted through explicit writers; this only rewrites
+// placement for existing rows (e.g. a grid-mode coordinate conversion).
+function syncAoeTemplates(client: SessionDocClient, sceneId: string, props: StageProps) {
+  const existingIds = new Set((client.scene(sceneId)?.aoeTemplates ?? []).map((template) => template.id));
+  for (const template of props.aoeTemplates?.templates ?? []) {
+    if (!existingIds.has(template.id)) continue;
+    client.write.setAoeTemplateFields(sceneId, template.id, {
+      positionX: template.position.x,
+      positionY: template.position.y,
+      angle: template.angle
+    });
+  }
 }
 
 // Helper to apply update at specific path

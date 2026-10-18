@@ -1,5 +1,6 @@
 import { type SelectAnnotation, type SelectLight, type SelectMarker, type SelectScene } from '$lib/db/app/schema';
 import { base64ToUint8 } from '$lib/realtime/binary';
+import type { AoeTemplateRow } from '$lib/realtime/types';
 import type { Thumb } from '$lib/server';
 import { generateGradientColors } from '$lib/utils';
 import {
@@ -12,6 +13,10 @@ import {
 import {
   AnnotationEffect,
   type AnnotationLayerData,
+  AoeEffect,
+  AoeShape,
+  type AoeTemplate,
+  type AoeToolSettings,
   displayToMapSpace,
   DrawMode,
   getDefaultEffectProps,
@@ -22,6 +27,7 @@ import {
   LightStyle,
   MapLayerType,
   type Marker,
+  type MarkerCondition,
   MeasurementType,
   parseFogRooms,
   RainPreset,
@@ -31,6 +37,44 @@ import {
   ToolType
 } from '@tableslayer/stage';
 
+const BLOODIED_CONDITION: MarkerCondition = { id: 'bloodied' };
+
+const DEFAULT_AOE_TOOL: AoeToolSettings = {
+  shape: AoeShape.Circle,
+  effect: AoeEffect.Fire,
+  color: '#ff6a00',
+  opacity: 0.6,
+  lineWidth: 5,
+  snapToGrid: true,
+  snapAngle: true,
+  visibility: StageMode.DM
+};
+
+// Bloodied is derived, never stored: at or below half of the stat block's max HP
+export const isAutoBloodied = (marker: {
+  statBlock?: SelectMarker['statBlock'];
+  hitPoints?: SelectMarker['hitPoints'];
+}): boolean => {
+  const maxHp = marker.statBlock?.hp?.average;
+  const hp = marker.hitPoints;
+  return !!maxHp && hp != null && hp > 0 && hp <= Math.floor(maxHp / 2);
+};
+
+export const withAutoConditions = (
+  conditions: MarkerCondition[],
+  marker: Pick<SelectMarker, 'statBlock' | 'hitPoints'>
+): MarkerCondition[] => {
+  if (!isAutoBloodied(marker) || conditions.some((condition) => condition.id === BLOODIED_CONDITION.id))
+    return conditions;
+  return [...conditions, BLOODIED_CONDITION];
+};
+
+// GM-only conditions never reach player clients
+const conditionsForMode = (conditions: unknown, mode: 'client' | 'editor'): MarkerCondition[] => {
+  const list = Array.isArray(conditions) ? (conditions as MarkerCondition[]) : [];
+  return mode === 'client' ? list.filter((condition) => !condition.dmOnly) : list;
+};
+
 // Map activeScene properties to StageProps
 export const buildSceneProps = (
   activeScene: SelectScene | (SelectScene & Thumb),
@@ -38,7 +82,8 @@ export const buildSceneProps = (
   mode: 'client' | 'editor',
   activeSceneAnnotations: SelectAnnotation[] = [],
   activeSceneLights: SelectLight[] = [],
-  bucketUrl?: string
+  bucketUrl?: string,
+  activeSceneAoeTemplates: AoeTemplateRow[] = []
 ): StageProps => {
   const fogColors = generateGradientColors(activeScene.fogOfWarColor || '#000000');
 
@@ -55,6 +100,7 @@ export const buildSceneProps = (
   };
   const toStagePosition = (x: number, y: number) =>
     needsCoordConversion ? displayToMapSpace({ x, y }, legacyMapTransform) : { x, y };
+  const toStageAngle = (angle: number) => (needsCoordConversion ? angle - legacyMapTransform.rotation : angle);
 
   const thumbUrl =
     !isDefaultMap(activeScene.mapLocation) && activeScene.mapLocation
@@ -78,7 +124,8 @@ export const buildSceneProps = (
         imageScale: marker.imageScale ?? 1,
         visibility: marker.visibility,
         note: marker.note || null,
-        pinnedTooltip: marker.pinnedTooltip ?? false
+        pinnedTooltip: marker.pinnedTooltip ?? false,
+        conditions: withAutoConditions(conditionsForMode(marker.conditions, mode), marker)
       }));
   }
 
@@ -117,6 +164,23 @@ export const buildSceneProps = (
       opacity: light.opacity
     }));
   }
+
+  // DM-only templates never reach player clients
+  const aoeTemplates: AoeTemplate[] = activeSceneAoeTemplates
+    .filter((template) => mode === 'editor' || template.visibility === StageMode.Player)
+    .map((template) => ({
+      id: template.id,
+      shape: template.shape as AoeShape,
+      position: toStagePosition(template.positionX, template.positionY),
+      angle: toStageAngle(template.angle),
+      size: template.size,
+      width: template.width,
+      effect: template.effect as AoeEffect,
+      color: template.color,
+      opacity: template.opacity,
+      visibility: template.visibility as StageMode,
+      label: template.label
+    }));
 
   return {
     mode: mode === 'client' ? StageMode.Player : StageMode.DM,
@@ -262,6 +326,12 @@ export const buildSceneProps = (
       visible: true,
       snapToGrid: false,
       lights: lights
+    },
+    aoeTemplates: {
+      templates: aoeTemplates,
+      selectedId: null,
+      showLabels: true,
+      tool: { ...DEFAULT_AOE_TOOL }
     },
     measurement: {
       type: MeasurementType.Line,

@@ -35,6 +35,7 @@ export const applyGridModeTransition = (stageProps: StageProps, newMode: GridMod
   };
 
   const convert = newMode === GridMode.MapDefined ? displayToMapSpace : mapToDisplaySpace;
+  const angleDelta = newMode === GridMode.MapDefined ? -map.rotation : map.rotation;
   const markers = stageProps.marker.markers.map((marker) => ({
     ...marker,
     position: convert(marker.position, map)
@@ -43,10 +44,16 @@ export const applyGridModeTransition = (stageProps: StageProps, newMode: GridMod
     ...light,
     position: convert(light.position, map)
   }));
+  const aoeTemplates = stageProps.aoeTemplates?.templates.map((template) => ({
+    ...template,
+    position: convert(template.position, map),
+    angle: template.angle + angleDelta
+  }));
 
   queuePropertyUpdate(stageProps, ['grid', 'gridMode'], newMode, 'control');
   queuePropertyUpdate(stageProps, ['marker', 'markers'], markers, 'marker');
   queuePropertyUpdate(stageProps, ['light', 'lights'], lights, 'light');
+  if (aoeTemplates) queuePropertyUpdate(stageProps, ['aoeTemplates', 'templates'], aoeTemplates, 'control');
   queueRawSettingsUpdate({ mapCoordVersion: newMode === GridMode.MapDefined ? 1 : 0 });
 
   if (newMode === GridMode.MapDefined) {

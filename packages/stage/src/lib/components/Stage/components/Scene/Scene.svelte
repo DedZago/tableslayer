@@ -38,6 +38,8 @@
   import type { CursorData } from '../CursorLayer/types';
   import EdgeOverlayLayer from '../EdgeOverlayLayer/EdgeOverlayLayer.svelte';
   import GridLayer from '../GridLayer/GridLayer.svelte';
+  import AoeTemplateLayer from '../AoeTemplateLayer/AoeTemplateLayer.svelte';
+  import type { AoeTemplateLayerExports } from '../AoeTemplateLayer/types';
   import LightLayer from '../LightLayer/LightLayer.svelte';
   import type { LightLayerExports } from '../LightLayer/types';
   import MapLayer from '../MapLayer/MapLayer.svelte';
@@ -93,6 +95,7 @@
 
   let annotationsLayer: AnnotationExports;
   let lightLayer: LightLayerExports;
+  let aoeTemplateLayer = $state.raw<AoeTemplateLayerExports | undefined>(undefined);
   let mapLayer: MapLayerExports;
   let markerLayer: MarkerLayerExports;
   let measurementLayer: MeasurementLayerExports | null = $state(null);
@@ -642,6 +645,11 @@
     }
   };
 
+  export const aoeTemplates = {
+    cancelDraft: () => aoeTemplateLayer?.cancelDraft(),
+    hasDraft: () => aoeTemplateLayer?.hasDraft() ?? false
+  };
+
   // Export measurement layer methods
   export const measurement = {
     getCurrentMeasurement: () => measurementLayer?.getCurrentMeasurement?.() ?? null,
@@ -765,6 +773,21 @@
       display={anchoredDisplay}
       {localScale}
     />
+
+    {#if props.aoeTemplates}
+      <AoeTemplateLayer
+        bind:this={aoeTemplateLayer}
+        props={props.aoeTemplates}
+        mode={props.mode}
+        isActive={props.activeLayer === MapLayerType.AoeTemplate}
+        grid={props.grid}
+        display={anchoredDisplay}
+        sceneZoom={props.scene.zoom}
+        {localScale}
+        sceneRotation={props.scene.rotation}
+        mapRotation={isMapDefined ? props.map.rotation : 0}
+      />
+    {/if}
 
     <MarkerLayer
       bind:this={markerLayer}

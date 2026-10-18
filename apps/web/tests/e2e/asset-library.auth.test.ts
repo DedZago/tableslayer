@@ -67,10 +67,10 @@ test('personal assets create independent instances, preserve artwork after delet
     const dismiss = page.getByTestId('checklistDismissButton');
     if (await dismiss.isVisible()) await dismiss.click();
     await page.keyboard.press('m');
-    const library = page.locator('.assets');
-    await library.locator('summary').first().click();
+    await page.getByRole('tab', { name: 'Library', exact: true }).click();
+    const library = page.locator('#sidePanel-library');
     await library.getByLabel('Search assets', { exact: true }).fill(asset.name);
-    const item = library.locator('.assets__item').filter({ hasText: asset.name });
+    const item = library.locator('.assetLibrary__item').filter({ hasText: asset.name });
     await expect(item).toHaveCount(1);
     await library.getByLabel('Quantity', { exact: true }).fill('2');
     await item.getByRole('button', { name: 'Place', exact: true }).click();
@@ -84,6 +84,7 @@ test('personal assets create independent instances, preserve artwork after delet
           marker.visibility === 1 && marker.imageScale === 1.7 && marker.imageLocation === asset.artworkLocation
       )
     ).toBe(true);
+    await page.getByRole('tab', { name: 'Tokens', exact: true }).click();
     await page.getByTestId('markerListItem').first().getByRole('button', { name: asset.name, exact: true }).click();
     await page.getByTestId('markerEditView').getByLabel('Title', { exact: true }).fill('Independent instance');
     await page
@@ -98,20 +99,26 @@ test('personal assets create independent instances, preserve artwork after delet
       (response) =>
         response.url().endsWith('/api/assets/manage') && response.request().postDataJSON()?.action === 'saveMarker'
     );
-    await library.getByRole('button', { name: 'Save selected token as asset', exact: true }).click();
+    await page.getByRole('tab', { name: 'Library', exact: true }).click();
+    await library.getByRole('button', { name: 'Save selected token', exact: true }).click();
     const copiedAsset = (await (await capture).json()).asset;
     assets.add(copiedAsset.id);
     expect(copiedAsset.name).toBe('Independent instance');
+    await page.getByRole('tab', { name: 'Tokens', exact: true }).click();
     await page.getByTestId('markerBackButton').click();
-    await item.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.getByRole('tab', { name: 'Library', exact: true }).click();
+    await item.getByRole('button', { name: `More actions for ${asset.name}`, exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
     await library.getByLabel('Asset name', { exact: true }).fill('Updated library verification');
     await library.getByRole('button', { name: 'Save asset', exact: true }).click();
     await library.getByLabel('Search assets', { exact: true }).fill('Updated library verification');
-    const updated = library.locator('.assets__item').filter({ hasText: 'Updated library verification' });
+    const updated = library.locator('.assetLibrary__item').filter({ hasText: 'Updated library verification' });
     await updated.getByRole('button', { name: 'Place', exact: true }).click();
     await expect.poll(() => markers().length).toBe(4);
     expect(markers().filter((marker) => marker.title === 'Updated library verification')).toHaveLength(2);
     expect(markers().filter((marker) => marker.title === 'Independent instance')).toHaveLength(1);
+    await updated.getByRole('button', { name: 'More actions for Updated library verification', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
     await updated.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(updated).toHaveCount(0);
     expect(markers()).toHaveLength(4);

@@ -3,6 +3,8 @@
  * Handles brush size and pane layouts
  */
 
+import type { AoeToolSettings } from '@tableslayer/stage';
+
 // Debounce timers for each preference key
 const debounceTimers: Partial<Record<keyof GameSessionPreferences, ReturnType<typeof setTimeout>>> = {};
 
@@ -21,6 +23,8 @@ export interface GameSessionPreferences {
   paneLayoutMobile?: PaneConfig[];
   stagePerformance?: 'auto' | 'high' | 'medium' | 'low';
   stagePerformanceResolved?: 'high' | 'medium' | 'low';
+  statBlockQuickCardCollapsed?: boolean;
+  aoeTool?: Partial<AoeToolSettings>;
 }
 
 export interface PreferenceConfig<T> {
@@ -111,6 +115,17 @@ export const PREFERENCE_CONFIGS: Record<keyof GameSessionPreferences, Preference
     cookieName: 'tableslayer:stagePerformanceResolved',
     defaultValue: 'high',
     validate: (value): value is 'high' | 'medium' | 'low' => value === 'high' || value === 'medium' || value === 'low'
+  },
+  statBlockQuickCardCollapsed: {
+    cookieName: 'tableslayer:statBlockQuickCardCollapsed',
+    defaultValue: false,
+    validate: (value): value is boolean => typeof value === 'boolean'
+  },
+  aoeTool: {
+    cookieName: 'tableslayer:aoeTool',
+    defaultValue: {},
+    validate: (value): value is Partial<AoeToolSettings> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value)
   }
 };
 

@@ -48,6 +48,7 @@ export { SleepController, type SleepControllerOptions } from './SleepController.
 export { reuseUnchanged } from './structuralSharing';
 export type {
   AnnotationRow,
+  AoeTemplateRow,
   GameSessionHydrationData,
   HandoutDescriptor,
   LightRow,

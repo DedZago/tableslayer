@@ -82,6 +82,14 @@ export const clipboardPlacements = async (
     assetId: token.assetId && availableAssets.has(token.assetId) ? token.assetId : null,
     positionX: positions[index].x,
     positionY: positions[index].y,
-    pinnedTooltip: false
+    pinnedTooltip: false,
+    conditions: token.conditions ?? [],
+    statBlock: token.statBlock ?? null,
+    hitPoints: token.hitPoints ?? null,
+    tempHitPoints: token.tempHitPoints ?? null,
+    inCombat: false,
+    initiative: null,
+    initiativeBonus: token.initiativeBonus ?? null,
+    initiativeTiebreak: 0
   }));
 };

@@ -58,6 +58,7 @@
   .handout-image__title {
     flex-shrink: 0;
     text-align: center;
+    font-weight: 700;
     padding: 0.25rem 1rem;
   }
 </style>

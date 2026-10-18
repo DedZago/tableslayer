@@ -96,6 +96,14 @@ export const upgradeSceneCoordinates = (
       const position = displayToMapSpace({ x: light.positionX, y: light.positionY }, map);
       client.systemWrite.setLightFields(sceneId, light.id, { positionX: position.x, positionY: position.y });
     }
+    for (const template of snapshot.aoeTemplates) {
+      const position = displayToMapSpace({ x: template.positionX, y: template.positionY }, map);
+      client.systemWrite.setAoeTemplateFields(sceneId, template.id, {
+        positionX: position.x,
+        positionY: position.y,
+        angle: template.angle - map.rotation
+      });
+    }
     client.systemWrite.setSceneSettings(sceneId, settingsFields);
   });
 

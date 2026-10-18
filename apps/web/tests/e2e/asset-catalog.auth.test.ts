@@ -21,33 +21,38 @@ test('all-source catalog search feeds the shared stored-artwork import preview o
     const dismiss = page.getByTestId('checklistDismissButton');
     if (await dismiss.isVisible()) await dismiss.click();
     await page.keyboard.press('m');
-    await page.getByText('Personal asset library', { exact: true }).click();
-    await page.getByText('Import 5etools assets', { exact: true }).click();
-    const importer = page.locator('.asset-import');
-    await importer.getByText('Search 5etools catalog', { exact: true }).click();
-    const catalog = importer.locator('.asset-import__catalog');
-    await expect(catalog.getByLabel('Catalog source', { exact: true })).toHaveValue('');
-    await catalog.getByLabel('Search names').fill('goblin');
-    await expect(catalog.getByText('Goblin (MM)', { exact: true })).toBeVisible({ timeout: 180_000 });
-    await expect(catalog.getByText('Goblin Warrior (XMM)', { exact: true })).toBeVisible();
-    await catalog.getByLabel('Catalog source', { exact: true }).selectOption('MM');
-    await expect(catalog.getByText('Goblin Warrior (XMM)', { exact: true })).toHaveCount(0);
-    const goblin = catalog
-      .locator('.asset-import__item')
-      .filter({ has: page.getByText('Goblin (MM)', { exact: true }) });
-    await goblin.getByRole('button', { name: 'Add to import preview', exact: true }).click();
-    const previewRow = importer
-      .locator('.asset-import__item')
-      .filter({ has: page.getByRole('checkbox', { name: 'Goblin (MM)', exact: true }) });
-    await expect(previewRow).toContainText('Portrait available');
+    await page.getByRole('tab', { name: 'Library', exact: true }).click();
+    await page.getByRole('button', { name: 'Add from 5etools', exact: true }).click();
+    const importer = page.getByRole('dialog', { name: 'Add creatures from 5etools', exact: true });
+    const catalog = importer;
+    await expect(catalog.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await catalog.getByLabel('Search creatures', { exact: true }).fill('goblin');
+    const rowFor = (name: string, source: string) =>
+      catalog
+        .getByTestId('asset-catalog-row')
+        .filter({ has: page.locator('.assetCatalog__rowName', { hasText: new RegExp(`^${name}$`) }) })
+        .filter({ has: page.locator('.assetCatalog__rowMeta', { hasText: new RegExp(`(^|· )${source}$`) }) });
+    const goblin = rowFor('Goblin', 'MM');
+    await expect(goblin).toBeVisible({ timeout: 180_000 });
+    await expect(rowFor('Goblin Warrior', 'XMM')).toBeVisible();
+    const mmChip = catalog.getByRole('button', { name: 'MM', exact: true });
+    if (await mmChip.isVisible()) await mmChip.click();
+    else {
+      await catalog.getByRole('button', { name: 'More ▾', exact: true }).click();
+      await catalog.getByRole('menuitemradio', { name: /^MM\b/ }).click();
+    }
+    await expect(rowFor('Goblin Warrior', 'XMM')).toHaveCount(0);
+    await goblin.getByRole('button', { name: /Goblin/ }).click();
+    await expect(catalog.getByRole('heading', { name: 'Goblin', exact: true, level: 3 })).toBeVisible();
+    await goblin.getByRole('checkbox', { name: 'Select Goblin', exact: true }).check();
     page.on('response', async (response) => {
       if (response.url().endsWith('/api/assets/import') && response.request().postDataJSON()?.action === 'import') {
         for (const result of (await response.json()).results ?? [])
           if (result.assetId && result.status === 'created') assetIds.add(result.assetId);
       }
     });
-    await importer.getByRole('button', { name: 'Import selected', exact: true }).click();
-    await expect(previewRow.getByRole('status')).toHaveText('created: Goblin', { timeout: 55_000 });
+    await importer.getByRole('button', { name: 'Add 1 to library', exact: true }).click();
+    await expect(goblin.getByRole('img', { name: 'created: Goblin', exact: true })).toBeVisible({ timeout: 55_000 });
     const list = await context.request.post('/api/assets/manage', { data: { action: 'list', search: 'Goblin' } });
     const imported = (await list.json()).assets.find((asset: { id: string }) => assetIds.has(asset.id));
     expect(imported.artworkLocation).toMatch(/^originals\//);

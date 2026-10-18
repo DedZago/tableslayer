@@ -20,8 +20,8 @@ test('handouts preview locally, publish to late joiners and hide across player t
     const dismiss = page.getByTestId('checklistDismissButton');
     if (await dismiss.isVisible()) await dismiss.click();
     await page.keyboard.press('m');
-    const controls = page.locator('.handout-controls');
-    await controls.locator('summary').click();
+    await page.getByRole('tab', { name: /^Handout/ }).click();
+    const controls = page.locator('#sidePanel-handout');
     await controls
       .getByLabel('Upload handout image', { exact: true })
       .setInputFiles(path.resolve('tests/e2e/fixtures/test-image.png'));
@@ -125,8 +125,8 @@ test('viewer handouts respect pause and sleeping views wake when a presentation 
     const dismiss = page.getByTestId('checklistDismissButton');
     if (await dismiss.isVisible()) await dismiss.click();
     await page.keyboard.press('m');
-    const controls = page.locator('.handout-controls');
-    await controls.locator('summary').click();
+    await page.getByRole('tab', { name: /^Handout/ }).click();
+    const controls = page.locator('#sidePanel-handout');
     await controls
       .getByLabel('Upload handout image', { exact: true })
       .setInputFiles(path.resolve('tests/e2e/fixtures/test-image.png'));

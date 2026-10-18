@@ -8,6 +8,7 @@ import {
   listAssets,
   saveAsset
 } from '$lib/server';
+import { statBlockSchema } from '$lib/utils/statBlock/schema';
 import { z } from 'zod';
 
 const fields = z.object({
@@ -21,12 +22,14 @@ const fields = z.object({
     .regex(/^#[a-fA-F0-9]{6}$/)
     .optional(),
   size: z.number().int().min(1).max(3).optional(),
-  imageScale: z.number().finite().min(0.1).max(10).optional()
+  imageScale: z.number().finite().min(0.1).max(10).optional(),
+  statBlock: statBlockSchema.nullable().optional(),
+  initiativeBonus: z.number().int().min(-20).max(30).nullable().optional()
 });
 const validationSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('authorizeArtwork'), sceneId: z.string(), location: z.string().max(1024).optional() }),
   z.object({ action: z.literal('list'), search: z.string().max(200).default('') }),
-  z.object({ action: z.literal('save'), fields }),
+  z.object({ action: z.literal('save'), fields: fields.partial({ name: true }) }),
   z.object({ action: z.literal('delete'), id: z.uuid() }),
   z.object({
     action: z.literal('saveMarker'),

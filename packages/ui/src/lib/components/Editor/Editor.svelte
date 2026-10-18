@@ -32,7 +32,7 @@
     content?: JSONContent | null | undefined;
     debug?: boolean;
     editable?: boolean;
-    onChange?: () => void;
+    onChange?: (content: JSONContent) => void;
   } = $props();
 
   let element: HTMLDivElement | undefined = $state();
@@ -115,7 +115,7 @@
       // Only update if content actually changed (avoid infinite loops)
       if (JSON.stringify(currentContent) !== JSON.stringify(content)) {
         // Update editor with new content from outside
-        editor.commands.setContent(content || { type: 'doc', content: [{ type: 'paragraph' }] });
+        editor.commands.setContent(content || { type: 'doc', content: [{ type: 'paragraph' }] }, { emitUpdate: false });
       }
     }
   });
@@ -181,7 +181,7 @@
 
         // Call onChange callback if provided
         if (onChange) {
-          onChange();
+          onChange(newJson);
         }
       },
       onTransaction: () => {

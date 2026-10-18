@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fiveToolsTokenName, previewFiveToolsJson } from './adapter';
+import { fiveToolsTokenName, MAX_UPLOAD_PREVIEW_RECORDS, previewFiveToolsJson } from './adapter';
 import fixture from './upstream-fixture.json';
 
 const base = 'https://5e.tools/img/';
@@ -103,4 +103,42 @@ it('accepts explicit absent portrait arrays in upstream fluff', () => {
   expect(
     preview([{ name: 'Wolf', source: 'MM' }], [{ name: 'Wolf', source: 'MM', images: null }])[0].artworkUrl
   ).toBeNull();
+});
+
+describe('uploaded bestiary limits', () => {
+  it('refuses files with too many creatures', () => {
+    const monsters = Array.from({ length: MAX_UPLOAD_PREVIEW_RECORDS + 1 }, (_, index) => ({
+      name: `Goblin ${index}`,
+      source: 'HB'
+    }));
+    expect(() => preview(monsters)).toThrow(/at most 2000/);
+  });
+
+  it('refuses files whose copies expand into too much stat block data', () => {
+    const longText = 'x'.repeat(1900);
+    const base = {
+      name: 'Base',
+      source: 'HB',
+      trait: Array.from({ length: 30 }, (_, index) => ({ name: `Trait ${index}`, entries: [longText] }))
+    };
+    const copies = Array.from({ length: 1999 }, (_, index) => ({
+      name: `Copy ${index}`,
+      source: 'HB',
+      _copy: { name: 'Base', source: 'HB' }
+    }));
+    expect(() => preview([base, ...copies])).toThrow(/too large to preview/);
+  });
+
+  it('treats uploaded replaceTxt patterns as literal text', () => {
+    const records = preview([
+      { name: 'Base', source: 'HB', action: [{ name: 'Bite', entries: ['Bites (a+)+ hard.'] }] },
+      {
+        name: 'Copy',
+        source: 'HB',
+        _copy: { name: 'Base', source: 'HB', _mod: { action: { mode: 'replaceTxt', replace: '(a+)+', with: 'very' } } }
+      }
+    ]);
+    const copy = records.find((record) => record.name === 'Copy');
+    expect(copy?.statBlock?.actions[0].body[0]).toEqual([{ kind: 'text', text: 'Bites very hard.' }]);
+  });
 });

@@ -1,9 +1,11 @@
 import { db } from '$lib/db/app';
 import { assetImportReceiptsTable, assetsTable } from '$lib/db/app/schema';
 import { storeImportedArtwork } from '$lib/server/file/files';
+import type { StatBlock } from '$lib/utils/statBlock/types';
 import { and, eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { FIVETOOLS_ADAPTER_VERSION, fiveToolsIdentity, previewFiveToolsJson } from './adapter';
+import { fiveToolsCatalogStatBlock } from './catalog';
 import { downloadFiveToolsArtwork } from './download';
 import type { FiveToolsImportItem, FiveToolsImportResult, FiveToolsPreview } from './types';
 
@@ -28,7 +30,10 @@ export const fiveToolsDuplicates = async (ownerId: string, records: FiveToolsPre
   }));
 };
 
-const fingerprintItem = ({ record, policy, targetId }: FiveToolsImportItem) =>
+const resolveStatBlock = async (record: FiveToolsPreview) =>
+  record.statBlock !== undefined ? record.statBlock : fiveToolsCatalogStatBlock(record.identity);
+
+const fingerprintItem = ({ record, policy, targetId }: FiveToolsImportItem, statBlock: StatBlock | null) =>
   createHash('sha256')
     .update(
       JSON.stringify({
@@ -37,6 +42,7 @@ const fingerprintItem = ({ record, policy, targetId }: FiveToolsImportItem) =>
         source: record.source,
         artworkUrl: record.artworkUrl,
         tokenUrl: record.tokenUrl,
+        statBlockHash: createHash('sha256').update(JSON.stringify(statBlock)).digest('hex'),
         policy,
         targetId: targetId ?? null
       })
@@ -54,7 +60,8 @@ export const importFiveToolsItems = async (
     try {
       if (record.identity !== fiveToolsIdentity(record))
         throw new Error('Import identity does not match the original name and source');
-      const fingerprint = fingerprintItem(item);
+      const statBlock = await resolveStatBlock(record);
+      const fingerprint = fingerprintItem(item, statBlock);
       const receiptCondition = and(
         eq(assetImportReceiptsTable.ownerId, ownerId),
         eq(assetImportReceiptsTable.requestId, requestId)
@@ -136,6 +143,7 @@ export const importFiveToolsItems = async (
                 ...provenance,
                 ...(artworkLocation ? { artworkLocation } : {}),
                 ...(tokenArtworkLocation ? { tokenArtworkLocation } : {}),
+                ...(statBlock ? { statBlock } : {}),
                 updatedAt: new Date()
               })
               .where(and(eq(assetsTable.ownerId, ownerId), eq(assetsTable.id, currentTarget.id)))
@@ -152,6 +160,7 @@ export const importFiveToolsItems = async (
                 name: record.name,
                 artworkLocation,
                 tokenArtworkLocation,
+                statBlock,
                 importRequestId: requestId
               })
               .returning()

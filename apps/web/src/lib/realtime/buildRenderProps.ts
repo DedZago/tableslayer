@@ -1,6 +1,6 @@
 import type { SelectAnnotation, SelectLight, SelectMarker, SelectScene } from '$lib/db/app/schema';
 import { buildSceneProps } from '$lib/utils/buildSceneProps';
-import type { DrawMode, MapLayerType, StageProps, ToolType } from '@tableslayer/stage';
+import type { AoeToolSettings, DrawMode, MapLayerType, StageProps, ToolType } from '@tableslayer/stage';
 import type { SceneSnapshot } from './types';
 
 /**
@@ -38,6 +38,8 @@ export interface LocalView {
   };
   /** Active measurement tool configuration (type, cone angle, beam width). */
   measurement?: { type?: number; coneAngle?: number; beamWidth?: number };
+  /** AoE tool settings and selection are per-user, like the other tools. */
+  aoeTemplates?: { tool?: Partial<AoeToolSettings>; selectedId?: string | null; showLabels?: boolean };
 }
 
 /**
@@ -53,7 +55,8 @@ export const buildRenderProps = (snapshot: SceneSnapshot, view: LocalView, bucke
     view.mode,
     snapshot.annotations as unknown as SelectAnnotation[],
     snapshot.lights as unknown as SelectLight[],
-    bucketUrl
+    bucketUrl,
+    snapshot.aoeTemplates
   );
 
   if (view.activeLayer !== undefined) props.activeLayer = view.activeLayer;
@@ -89,6 +92,10 @@ export const buildRenderProps = (snapshot: SceneSnapshot, view: LocalView, bucke
   if (view.measurement?.type !== undefined) props.measurement.type = view.measurement.type;
   if (view.measurement?.coneAngle !== undefined) props.measurement.coneAngle = view.measurement.coneAngle;
   if (view.measurement?.beamWidth !== undefined) props.measurement.beamWidth = view.measurement.beamWidth;
+
+  if (view.aoeTemplates?.tool) props.aoeTemplates!.tool = { ...props.aoeTemplates!.tool, ...view.aoeTemplates.tool };
+  if (view.aoeTemplates?.selectedId !== undefined) props.aoeTemplates!.selectedId = view.aoeTemplates.selectedId;
+  if (view.aoeTemplates?.showLabels !== undefined) props.aoeTemplates!.showLabels = view.aoeTemplates.showLabels;
 
   return props;
 };

@@ -45,6 +45,28 @@ describe('portable token clipboard', () => {
     expect(parseTokenClipboard(serializeTokenClipboard(copied))).toEqual(copied);
   });
 
+  it('copies conditions, hit points and initiative bonus but not combat state', () => {
+    const original = {
+      ...marker('a', 0),
+      conditions: [{ id: 'prone' }, { id: 'exhaustion', value: 2 }],
+      hitPoints: 7,
+      tempHitPoints: 3,
+      initiativeBonus: 2,
+      inCombat: true,
+      initiative: 18
+    };
+    const token = createTokenClipboard([original], source, grant).tokens[0];
+    expect(token).toMatchObject({
+      conditions: original.conditions,
+      statBlock: null,
+      hitPoints: 7,
+      tempHitPoints: 3,
+      initiativeBonus: 2
+    });
+    expect(token).not.toHaveProperty('inCombat');
+    expect(token).not.toHaveProperty('initiative');
+  });
+
   it('copies reactive note proxies as independent JSON', () => {
     const original = marker('a', 0);
     original.note = new Proxy(original.note as object, {});

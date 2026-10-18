@@ -2,8 +2,9 @@
 
 How the editor's undo/redo works: a per-scene `Y.UndoManager` on top of the realtime doc
 (see `yjs-sync-architecture.md`), tracking only this client's transactions. Spec and design
-rationale live in `spec/editor-undo-redo.md`. Editor-only by design — the play route is
-primarily a receiver and never constructs an undo scope.
+rationale live in `spec/editor-undo-redo.md`. The editor tracks its own and the TV's edits;
+the play route (TV) has its own scope limited to its own asset edits (see "TV undo and
+GM undo of TV edits").
 
 ## Mental model
 
@@ -16,8 +17,8 @@ edit — no server, persistence, or play-route changes were needed.
 Reconciliation properties (pinned by tests in
 `apps/web/src/lib/realtime/docSchema.test.ts`, `undo/redo` suite):
 
-- **Per-user.** Each client tracks only its own `SessionDocClient.origin`. Ctrl+Z never
-  reverts another editor's or a player's work.
+- **Per-user by default.** A scope tracks only its own `SessionDocClient.origin`. The editor
+  opts in to `includeRemote` (below), which also tracks edits arriving from other clients.
 - **Concurrent-safe across fields.** The granular per-field Y.Map schema means undoing your
   change leaves remote edits to other fields untouched.
 - **Same-field race is safe.** If a remote peer rewrites the same field after your change,
@@ -34,8 +35,10 @@ Reconciliation properties (pinned by tests in
 
 Owns the `Y.UndoManager` and exposes the whole surface:
 
-- `setUndoScope(sceneId | null)` — destroys any prior manager and creates one scoped to the
-  selected scene's Y.Map with `trackedOrigins = new Set([this.origin])`. The default 500ms
+- `setUndoScope(sceneId | null, { includeRemote })` — destroys any prior manager and creates one
+  scoped to the selected scene's Y.Map with `trackedOrigins = new Set([this.origin])`, plus the
+  game-session provider when `includeRemote` is true (remote updates are applied with the
+  provider as their origin). The default 500ms
   `captureTimeout` merges throttled drag/slider transactions into one undo step. Warns and
   leaves undo disabled if the scene is not in the doc (matches the writer convention).
 - `undo()` / `redo()` / `stopCapturing()` — thin delegates.
@@ -69,12 +72,26 @@ changes are local, which schedules the idle capture).
 
 ### Editor page (`+page.svelte`)
 
-- An `$effect` calls `setUndoScope(selectedSceneId)` once `session.ready` — history follows
+- An `$effect` calls `setUndoScope(selectedSceneId, { includeRemote: true })` once `session.ready` — history follows
   the selected scene and resets on navigation.
 - `handleKeydown`: Ctrl/Cmd+Z → undo, Ctrl/Cmd+Shift+Z or Ctrl+Y → redo. Runs after the
   input-focus guard so text fields keep native browser undo.
 - A capture-phase `pointerdown` on the document calls `stopCapturing()` — every new pointer
   gesture starts a new undo step, so quick consecutive actions don't merge into one.
+
+### TV undo and GM undo of TV edits
+
+- **GM undoing the TV.** The editor passes `includeRemote: true`, so one chronological history
+  covers its own edits and everything that arrives over the wire (TV token/shape moves, shape
+  edits and deletes). Only changes made after the page opened are on the stack. Side effect:
+  edits from other editors in the same session are undoable too. Fog undo repaints through the
+  existing `undoRedo` classification.
+- **TV undo.** `play/+page@.svelte` calls `setUndoScope(session.activeSceneId)` (own origin
+  only) and `PlayTools.undo/redo/canUndo/canRedo` drive the toolbar buttons and Ctrl+Z /
+  Ctrl+Shift+Z / Ctrl+Y. Marker drags there are not wrapped in undo groups, so a long drag with
+  pauses can take more than one undo.
+- **TV is asset-only.** The play radial menu offers measuring only; scene switching, fog brush,
+  drawing and the four-finger map pan were removed from the TV.
 
 ### Undo groups (group token drag)
 

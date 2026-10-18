@@ -79,7 +79,7 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 
 - `helpers/moveDistance.ts` (THREE-free, tested) counts grid steps with diagonals = 1 and multiplies by `grid.worldGridSize`. `DistanceLabel` is the shared constant-screen-size label sprite; MarkerLayer shows it for the live "ft moved" while a token (or group anchor) is dragged, and — when the `<Stage distanceMode>` interaction prop is on — from the selected token to every other visible token.
 - `<Stage onMarkerVisibilityToggle>` mounts `MarkerVisibilityToggle` (HTML eye button) above the single selected token in DM mode on the None/Marker layers.
-- AoE input is no longer DM-only: players can draw with the tool active (`selectable` passive selection stays DM-only), and group drag works in Player mode. Player shapes are written to the doc by `play/usePlayTools.svelte.ts`.
+- AoE input is no longer DM-only: players can draw with the tool active (`selectable` passive selection stays DM-only), and group drag works in Player mode. Player shapes are written to the doc by `play/usePlayTools.svelte.ts`. The TV is asset-only (tokens, shapes, measuring; no fog/drawing/scene/map edits) and has its own undo scope; the editor's undo uses `setUndoScope(sceneId, { includeRemote: true })` so the GM can undo TV edits (see `docs/undo-redo-architecture.md`). On the TV the toolbar effect swatches also recolor the selected shapes.
 
 ## Dev / verify workflow
 

@@ -333,15 +333,16 @@ export class SessionDocClient {
   }
 
   // -------------------------------------------------------------------------
-  // Undo/redo — a per-scene Y.UndoManager tracking only this client's origin,
-  // so undo reverts your own edits and never another collaborator's. Each undo
-  // stack item can pin prior mask bytes against GC, hence the stack cap.
+  // Undo/redo — a per-scene Y.UndoManager tracking this client's origin, so undo
+  // reverts your own edits. `includeRemote` also tracks edits arriving from other
+  // clients (the editor undoing what the TV did). Each undo stack item can pin
+  // prior mask bytes against GC, hence the stack cap.
   // -------------------------------------------------------------------------
 
   static readonly #UNDO_STACK_LIMIT = 100;
 
   /** Scope undo history to one scene (or null to disable). Clears prior history. */
-  setUndoScope(sceneId: string | null) {
+  setUndoScope(sceneId: string | null, { includeRemote = false }: { includeRemote?: boolean } = {}) {
     this.#undoManager?.destroy();
     this.#undoManager = null;
     this.#undoGroupMark = null;
@@ -356,7 +357,7 @@ export class SessionDocClient {
     }
 
     const undoManager = new Y.UndoManager(scene, {
-      trackedOrigins: new Set([this.origin]),
+      trackedOrigins: new Set<unknown>(includeRemote ? [this.origin, this.#gameSessionProvider] : [this.origin]),
       captureTimeout: UNDO_CAPTURE_TIMEOUT_MS
     });
     const refresh = () => {

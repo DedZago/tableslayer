@@ -198,10 +198,11 @@
     }
   });
 
-  // Undo history follows the selected scene; switching scenes clears it
+  // Undo history follows the selected scene; switching scenes clears it. It also
+  // covers edits made on the TV, so the GM can take back anything players changed
   $effect(() => {
     if (session.ready && session.client && selectedSceneId) {
-      session.client.setUndoScope(selectedSceneId);
+      session.client.setUndoScope(selectedSceneId, { includeRemote: true });
     }
   });
 

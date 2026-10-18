@@ -7,7 +7,7 @@
   import { buildSceneProps, throttle } from '$lib/utils';
   import { transformCursorsToArray } from '$lib/utils/cursors';
   import { StageDefaultProps } from '$lib/utils/defaultMapState';
-  import { createMultiFingerPan, createPinchGesture, createUnifiedGestureDetector } from '$lib/utils/gestureDetection';
+  import { createPinchGesture, createUnifiedGestureDetector } from '$lib/utils/gestureDetection';
   import { applyPinchStep, type PinchStep } from '$lib/utils/pinchZoom';
   import { extractMeasurementProps, getLatestMeasurement } from '$lib/utils/measurements';
   import { createConditionalActivityTimer } from '$lib/utils/activityTimer';
@@ -192,7 +192,6 @@
         mode: 'client',
         activeLayer: tools.activeLayer,
         viewport: { offset: viewOffset, zoom: sceneZoom, autoFit: viewAutoFit },
-        mapTransform: mapDragOffset ? { offset: mapDragOffset } : undefined,
         // Untracked on purpose: drag movement is applied to renderedProps in
         // place by onMarkerMoved; the overrides only matter when a rebuild
         // fires for another reason (doc echo, remote change) so it doesn't
@@ -297,6 +296,20 @@
       : null;
   });
 
+  // Undo covers this screen's own edits (tokens, shapes) and follows the displayed scene
+  $effect(() => {
+    if (session.ready && session.client) session.client.setUndoScope(session.activeSceneId);
+  });
+
+  function onUndoKeydown(event: KeyboardEvent) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key !== 'z' && key !== 'y') return;
+    event.preventDefault();
+    if (key === 'y' || event.shiftKey) tools.redo();
+    else tools.undo();
+  }
+
   // Apply masks + refit when the rendered scene changes. Gated on session.ready
   // so it re-runs once the doc is hydrated — applying before that finds no masks.
   let lastPreparedSceneId: string | null = null;
@@ -340,34 +353,6 @@
         dragClearTimers.delete(marker.id);
       }, 300)
     );
-  }
-
-  // Four-finger pan adjusts which part of the map the TV shows: instant local
-  // override + throttled doc writes, committed shortly after the gesture ends
-  // (the same pattern as marker drags)
-  let mapDragOffset = $state<{ x: number; y: number } | null>(null);
-  let mapDragClearTimer: ReturnType<typeof setTimeout> | undefined;
-  const writeMapOffset = throttle((sceneId: string, offset: { x: number; y: number }) => {
-    session.client?.write.setSceneSettings(sceneId, { mapOffsetX: offset.x, mapOffsetY: offset.y });
-  }, 50);
-
-  function onMapPan(dx: number, dy: number) {
-    const sceneId = session.activeSceneId;
-    const settings = sceneId ? session.client?.scene(sceneId)?.settings : null;
-    if (!sceneId || !settings) return;
-
-    // Screen px → scene units; screen y points down, scene y up
-    const zoom = sceneZoom || 1;
-    const current = mapDragOffset ?? { x: settings.mapOffsetX ?? 0, y: settings.mapOffsetY ?? 0 };
-    const next = { x: current.x + dx / zoom, y: current.y - dy / zoom };
-    mapDragOffset = next;
-    writeMapOffset(sceneId, next);
-
-    clearTimeout(mapDragClearTimer);
-    mapDragClearTimer = setTimeout(() => {
-      session.client?.write.setSceneSettings(sceneId, { mapOffsetX: next.x, mapOffsetY: next.y });
-      mapDragOffset = null;
-    }, 300);
   }
 
   function onSceneUpdate(_offset: { x: number; y: number }, zoom: number) {
@@ -523,11 +508,6 @@
         }, stageElement)
       : null;
 
-    // Four-finger drag pans the map (matches the editor's four-finger gesture)
-    const mapPanGesture = stageElement
-      ? createMultiFingerPan({ fingerCount: 4, target: stageElement, onPan: onMapPan })
-      : null;
-
     const pinchGesture = stageElement ? createPinchGesture({ target: stageElement, onPinch }) : null;
 
     // Drop back to no tool after 5s of inactivity while a tool is active
@@ -549,11 +529,6 @@
     const commitPendingGestureWrites = () => {
       if (document.visibilityState !== 'hidden') return;
       const sceneId = session.activeSceneId;
-      clearTimeout(mapDragClearTimer);
-      if (mapDragOffset && sceneId) {
-        session.client?.write.setSceneSettings(sceneId, { mapOffsetX: mapDragOffset.x, mapOffsetY: mapDragOffset.y });
-      }
-      mapDragOffset = null;
       for (const [markerId, timer] of dragClearTimers) {
         clearTimeout(timer);
         const position = dragPositions[markerId];
@@ -569,11 +544,9 @@
     return () => {
       document.removeEventListener('visibilitychange', commitPendingGestureWrites);
       gestureDetector?.destroy();
-      mapPanGesture?.destroy();
       pinchGesture?.destroy();
       activityTimer?.destroy();
       for (const timer of dragClearTimers.values()) clearTimeout(timer);
-      clearTimeout(mapDragClearTimer);
       tools.destroy();
       sleep.destroy();
       session.destroy();
@@ -595,6 +568,8 @@
 {#if sleep.phase === 'asleep' || waking}
   <SleepOverlay reconnecting={waking} />
 {/if}
+
+<svelte:window onkeydown={onUndoKeydown} />
 
 <div class={stageClasses} bind:this={stageElement} data-testid="playfieldStage">
   <Stage

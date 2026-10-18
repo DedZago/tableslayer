@@ -173,53 +173,7 @@ export class PlayTools {
   }
 
   get menuItems(): RadialMenuItemProps[] {
-    const routes = this.#options.routes();
     return [
-      {
-        id: 'scene',
-        label: '',
-        icon: IconMap,
-        submenuLayout: 'table',
-        submenu: routes.flatMap((route) =>
-          route.scenes.map((scene) => ({
-            id: `scene-${scene.id}`,
-            label: scene.name,
-            gameSessionId: route.id
-          }))
-        ),
-        submenuFilterOptions: routes.map((route) => ({ value: route.id, label: route.name })),
-        submenuFilterDefault: this.#options.defaultSessionFilter(),
-        submenuFilterKey: 'gameSessionId'
-      },
-      {
-        id: 'fog',
-        label: '',
-        icon: IconShadow,
-        submenu: [
-          { id: 'fog-remove', label: '', icon: IconPaint },
-          { id: 'fog-add', label: '', icon: IconPaintFilled },
-          { id: 'fog-reset', label: '', icon: IconRestore },
-          { id: 'fog-clear', label: '', icon: IconTrash }
-        ]
-      },
-      {
-        id: 'draw',
-        label: '',
-        icon: IconPencil,
-        submenu: [
-          ...Object.entries(DRAW_COLORS).map(([id, color]) => ({ id, label: '', color })),
-          ...Object.keys(DRAW_EFFECTS).map((id) => ({ id, label: '', effectType: DRAW_EFFECTS[id] })),
-          {
-            id: 'draw-delete-all',
-            label: '',
-            icon: IconTrash,
-            submenu: [
-              { id: 'draw-delete-all-confirm', label: 'Yes, delete all' },
-              { id: 'draw-delete-all-cancel', label: 'Cancel' }
-            ]
-          }
-        ]
-      },
       {
         id: 'measure',
         label: '',
@@ -284,6 +238,7 @@ export class PlayTools {
   setAoeEffect(effect: AoeEffect) {
     this.aoeTool = { ...this.aoeTool, effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] };
     this.activeLayer = MapLayerType.AoeTemplate;
+    if (this.aoeSelectedIds.length) this.setSelectedAoeEffect(effect);
   }
 
   /** Stage callback: a token was tapped; group select toggles it, distance mode makes it the origin. */
@@ -340,6 +295,22 @@ export class PlayTools {
     [...this.aoeSelectedIds].forEach(this.onAoeTemplateDeleted);
   }
 
+  get canUndo() {
+    return this.#options.session.client?.canUndo ?? false;
+  }
+
+  get canRedo() {
+    return this.#options.session.client?.canRedo ?? false;
+  }
+
+  undo() {
+    this.#options.session.client?.undo();
+  }
+
+  redo() {
+    this.#options.session.client?.redo();
+  }
+
   clearActiveTool() {
     this.activeLayer = MapLayerType.None;
     this.annotationsActiveLayer = null;
@@ -378,45 +349,7 @@ export class PlayTools {
   selectMenuItem(itemId: string) {
     devLog('play', 'Menu item selected:', itemId);
 
-    if (itemId.startsWith('scene-')) {
-      this.#options.session.switchScene(itemId.replace('scene-', ''));
-      return;
-    }
-    if (itemId in DRAW_COLORS) {
-      this.#startTemporaryDrawing(DRAW_COLORS[itemId]);
-      return;
-    }
-    if (itemId in DRAW_EFFECTS) {
-      this.#startTemporaryDrawing('#ffffff', DRAW_EFFECTS[itemId]);
-      return;
-    }
-
     switch (itemId) {
-      case 'fog-remove':
-        this.activeLayer = MapLayerType.FogOfWar;
-        this.fogTool = { mode: DrawMode.Erase, size: PLAYFIELD_FOG_BRUSH_SIZE };
-        break;
-      case 'fog-add':
-        this.activeLayer = MapLayerType.FogOfWar;
-        this.fogTool = { mode: DrawMode.Draw, size: PLAYFIELD_FOG_BRUSH_SIZE };
-        break;
-      case 'fog-reset':
-        this.#options.getStage()?.fogOfWar?.reset();
-        this.resetToNoneAfterDelay();
-        break;
-      case 'fog-clear': {
-        this.#options.getStage()?.fogOfWar?.clear();
-        // Clearing fog also removes polygon fog rooms, matching the editor
-        const sceneId = this.#options.session.activeSceneId;
-        if (sceneId) {
-          this.#options.session.client?.write.setSceneSettings(sceneId, { fogOfWarRooms: '[]' });
-        }
-        this.resetToNoneAfterDelay();
-        break;
-      }
-      case 'draw-delete-all-confirm':
-        this.#deleteAllDrawings();
-        break;
       case 'measure-line':
         this.activeLayer = MapLayerType.Measurement;
         this.measurement = { type: MeasurementType.Line };

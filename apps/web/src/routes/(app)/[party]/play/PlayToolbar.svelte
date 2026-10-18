@@ -5,6 +5,8 @@
     IconCircle,
     IconCone2,
     IconRectangleVertical,
+    IconArrowBackUp,
+    IconArrowForwardUp,
     IconArrowsMaximize,
     IconRuler2,
     IconSelectAll,
@@ -101,6 +103,26 @@
       <Icon Icon={aoeIcon} size="1.75rem" />
       <span class="playToolbar__text">AoE</span>
     </button>
+    <button
+      type="button"
+      class="playToolbar__button"
+      aria-label="Undo"
+      disabled={!tools.canUndo}
+      onclick={() => tools.undo()}
+    >
+      <Icon Icon={IconArrowBackUp} size="1.75rem" />
+      <span class="playToolbar__text">Undo</span>
+    </button>
+    <button
+      type="button"
+      class="playToolbar__button"
+      aria-label="Redo"
+      disabled={!tools.canRedo}
+      onclick={() => tools.redo()}
+    >
+      <Icon Icon={IconArrowForwardUp} size="1.75rem" />
+      <span class="playToolbar__text">Redo</span>
+    </button>
     {#if showFit}
       <button type="button" class="playToolbar__button" aria-label="Fit view" onclick={() => onFit?.()}>
         <Icon Icon={IconArrowsMaximize} size="1.75rem" />
@@ -135,6 +157,11 @@
     border: var(--borderThin);
     border-radius: var(--radius-4);
     box-shadow: var(--shadow-1);
+  }
+
+  .playToolbar__button:disabled {
+    opacity: 0.35;
+    pointer-events: none;
   }
 
   .playToolbar__button {

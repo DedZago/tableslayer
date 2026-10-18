@@ -66,12 +66,14 @@ Not rolled
 [+ Add 2 selected]                                   [End combat]
 ```
 
-   In this view:
-   - Rows above "End of round N" still act this round. Rows below it have already acted and will act next round.
-   - The "20 · lair actions" line sits where initiative 20 falls in each part, so it can appear twice: once for this round
-     and once for the next. Lair actions lose ties, so the line goes after every combatant at exactly 20.
-   - When initiative 20 is the next thing to happen, the line turns bright and shows **Lair action** (see "Lair step" below).
-   - Dead tokens are dimmed with a skull and skipped automatically. Rows hidden from players show an eye-off icon.
+In this view:
+
+- Rows above "End of round N" still act this round. Rows below it have already acted and will act next round.
+- The "20 · lair actions" line sits where initiative 20 falls in each part, so it can appear twice: once for this round
+  and once for the next. Lair actions lose ties, so the line goes after every combatant at exactly 20.
+- When initiative 20 is the next thing to happen, the line turns bright and shows **Lair action** (see "Lair step" below).
+- Dead tokens are dimmed with a skull and skipped automatically. Rows hidden from players show an eye-off icon.
+
 6. Clicking a row selects that token on the map. Clicking the initiative number edits it in place, and Enter or blur saves.
    The list re-sorts at once and the active combatant stays active.
 7. **Add 2 selected** adds tokens mid-fight. Their initiative is empty and they wait in "Not rolled" until it is set.
@@ -82,6 +84,7 @@ Not rolled
 
 When a turn ends and the next combatant in order is below 20 while the previous one was at 20 or above (or the order wraps
 past 20 into a new round), "Next turn" first stops on the **lair step**:
+
 - The 20 line becomes the active row (gold, "▶ 20 · Lair action").
 - No token is active and nothing is selected.
 
@@ -95,39 +98,42 @@ but turns never stop on it.
 
 `scene` table:
 
-| Column | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `combat_round` | integer NOT NULL | 0 | 0 means no combat or still rolling, 1 or more is the current round |
-| `combat_active_marker_id` | text, nullable | null | Active combatant. Null in the rolling phase, after combat, or on the lair step |
-| `combat_lair_step` | integer (boolean) NOT NULL | false | True while the turn sits on the initiative-20 lair step |
-| `combat_lair_actions` | integer (boolean) NOT NULL | false | Whether turns stop on the lair step |
-| `combat_show_on_tv` | integer (boolean) NOT NULL | true | Whether the TV shows the turn-order strip |
+| Column                    | Type                       | Default | Meaning                                                                        |
+| ------------------------- | -------------------------- | ------- | ------------------------------------------------------------------------------ |
+| `combat_round`            | integer NOT NULL           | 0       | 0 means no combat or still rolling, 1 or more is the current round             |
+| `combat_active_marker_id` | text, nullable             | null    | Active combatant. Null in the rolling phase, after combat, or on the lair step |
+| `combat_lair_step`        | integer (boolean) NOT NULL | false   | True while the turn sits on the initiative-20 lair step                        |
+| `combat_lair_actions`     | integer (boolean) NOT NULL | false   | Whether turns stop on the lair step                                            |
+| `combat_show_on_tv`       | integer (boolean) NOT NULL | true    | Whether the TV shows the turn-order strip                                      |
 
 "Combat is running" is derived as `markers.some(m => m.inCombat)`. There is no separate flag that could get out of sync.
 
 `marker` table:
 
-| Column | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `in_combat` | integer (boolean) NOT NULL | false | In the turn order |
-| `initiative` | real, nullable | null | The rolled or typed total. Null means not rolled |
-| `initiative_bonus` | integer, nullable | null | GM override. Null means use the stat block or 0 |
-| `initiative_tiebreak` | real NOT NULL | 0 | Higher goes first among equal initiatives; set by the tie ▲▼ buttons |
+| Column                | Type                       | Default | Meaning                                                              |
+| --------------------- | -------------------------- | ------- | -------------------------------------------------------------------- |
+| `in_combat`           | integer (boolean) NOT NULL | false   | In the turn order                                                    |
+| `initiative`          | real, nullable             | null    | The rolled or typed total. Null means not rolled                     |
+| `initiative_bonus`    | integer, nullable          | null    | GM override. Null means use the stat block or 0                      |
+| `initiative_tiebreak` | real NOT NULL              | 0       | Higher goes first among equal initiatives; set by the tie ▲▼ buttons |
 
 `asset` table:
 
-| Column | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `initiative_bonus` | integer, nullable | null | Remembered bonus for library characters, copied to new tokens on placement |
+| Column             | Type              | Default | Meaning                                                                    |
+| ------------------ | ----------------- | ------- | -------------------------------------------------------------------------- |
+| `initiative_bonus` | integer, nullable | null    | Remembered bonus for library characters, copied to new tokens on placement |
 
 Use the existing drizzle patterns, e.g. `integer('combat_round').notNull().default(0)`,
 `integer('combat_lair_step', { mode: 'boolean' }).notNull().default(false)` and `real('initiative')`.
 
 ### Realtime types (wave 0, `apps/web/src/lib/realtime/types.ts`)
 
-- `SceneSettings` gains `combatRound: number; combatActiveMarkerId: string | null; combatLairStep: boolean;
-  combatLairActions: boolean; combatShowOnTv: boolean;`.
-- `MarkerRow` gains `inCombat: boolean; initiative: number | null; initiativeBonus: number | null; initiativeTiebreak: number;`.
+- `SceneSettings` gains `combatRound?: number; combatActiveMarkerId?: string | null; combatLairStep?: boolean;
+combatLairActions?: boolean; combatShowOnTv?: boolean;`.
+- `MarkerRow` gains `inCombat?: boolean; initiative?: number | null; initiativeBonus?: number | null; initiativeTiebreak?: number;`.
+- **All optional** (as landed in wave 0): rooms hydrated before this change lack them. Read with defaults:
+  `round = s.combatRound ?? 0`, `showOnTv = s.combatShowOnTv ?? true`, `inCombat = m.inCombat ?? false`,
+  `initiative = m.initiative ?? null`, `tiebreak = m.initiativeTiebreak ?? 0`.
 
 No new Y collection is needed. These are plain fields on the existing scene `settings` map and marker rows, so per-field LWW
 merging works as it does today. Bump `DOC_SCHEMA_VERSION` together with the AOE change. Both ride the same bump to 3, so
@@ -188,6 +194,7 @@ Build a cyclic sequence of "slots" from `rolled` (already sorted):
 3. Push each combatant as `{ combatant }`.
 
 **`getNextTurn`:**
+
 - **Rolling phase** (`round === 0`): return `{ round: 1, activeId: first non-defeated combatant, lairStep: false }`.
   If the lair slot comes first, `lairActions` is on, and no combatant is above 20, then start on the lair step instead.
 - **Otherwise:**
@@ -207,6 +214,7 @@ Build a cyclic sequence of "slots" from `rolled` (already sorted):
 At round 1 on the first slot it does nothing.
 
 **`buildTurnView`:**
+
 - **Rolling phase:** the slots in order with `isActive = false` and no `roundEnd`.
   The lair entry is always included as a reference marker.
 - **Otherwise:** rotate `slots` so the current slot comes first.
@@ -216,6 +224,7 @@ At round 1 on the first slot it does nothing.
   - `isUpNext` on a lair entry means the next turn (per `getNextTurn`) is the lair step.
 
 **Unit tests (`initiative.test.ts`):**
+
 - Sorting: ties, tiebreak values and unrolled combatants.
 - Bonus resolution order.
 - `getNextTurn`:
@@ -235,27 +244,29 @@ At round 1 on the first slot it does nothing.
 A thin layer over the writer. Every function takes `(write: SessionWriter, sceneId, snapshot)` and wraps its writes in
 `write.transaction(...)`. The page passes `client.systemWrite`.
 
-| Function | Effect |
-| --- | --- |
-| `startCombat(ids)` | Set `inCombat: true` on the ids, leaving any existing initiative. If no marker was already in combat, also set `combatRound: 0, combatActiveMarkerId: null, combatLairStep: false` |
-| `addCombatants(ids)` | Set `inCombat: true` and `initiative: null` (only for ids not already in combat) |
-| `removeCombatants(ids)` | If an id is active, first apply `getNextTurn`. Then set `inCombat: false, initiative: null, initiativeTiebreak: 0`. If nobody is left, call `endCombat` |
-| `setInitiative(id, value: number \| null)` | Write `initiative`. Reset `initiativeTiebreak` to 0 when the value changes |
-| `setInitiativeBonus(id, bonus: number \| null)` | Write the marker `initiativeBonus` (the page also saves it to the asset, see below) |
-| `rollEmpty()` | For each combatant with `initiative === null`, roll `resolveInitiativeBonus` and set the total. Returns the roll texts for the toast |
-| `rerollAll()` | Same, for every combatant (⋯ menu, behind a confirm) |
-| `rollOne(id)` | Roll a single combatant (row d20 button), overwriting it |
-| `nudgeTie(id, direction: 'up' \| 'down')` | Among combatants with the same `initiative`, give this one `max(tiebreak)+1` (up) or `min(tiebreak)-1` (down) |
-| `beginCombat()` / `nextTurn()` / `previousTurn()` | Apply `getNextTurn` / `getPreviousTurn` and write `combatRound`, `combatActiveMarkerId`, `combatLairStep` |
-| `endCombat()` | For every marker in combat: `inCombat: false, initiative: null, initiativeTiebreak: 0`. Scene: `combatRound: 0, combatActiveMarkerId: null, combatLairStep: false` |
+| Function                                          | Effect                                                                                                                                                                             |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startCombat(ids)`                                | Set `inCombat: true` on the ids, leaving any existing initiative. If no marker was already in combat, also set `combatRound: 0, combatActiveMarkerId: null, combatLairStep: false` |
+| `addCombatants(ids)`                              | Set `inCombat: true` and `initiative: null` (only for ids not already in combat)                                                                                                   |
+| `removeCombatants(ids)`                           | If an id is active, first apply `getNextTurn`. Then set `inCombat: false, initiative: null, initiativeTiebreak: 0`. If nobody is left, call `endCombat`                            |
+| `setInitiative(id, value: number \| null)`        | Write `initiative`. Reset `initiativeTiebreak` to 0 when the value changes                                                                                                         |
+| `setInitiativeBonus(id, bonus: number \| null)`   | Write the marker `initiativeBonus` (the page also saves it to the asset, see below)                                                                                                |
+| `rollEmpty()`                                     | For each combatant with `initiative === null`, roll `resolveInitiativeBonus` and set the total. Returns the roll texts for the toast                                               |
+| `rerollAll()`                                     | Same, for every combatant (⋯ menu, behind a confirm)                                                                                                                               |
+| `rollOne(id)`                                     | Roll a single combatant (row d20 button), overwriting it                                                                                                                           |
+| `nudgeTie(id, direction: 'up' \| 'down')`         | Among combatants with the same `initiative`, give this one `max(tiebreak)+1` (up) or `min(tiebreak)-1` (down)                                                                      |
+| `beginCombat()` / `nextTurn()` / `previousTurn()` | Apply `getNextTurn` / `getPreviousTurn` and write `combatRound`, `combatActiveMarkerId`, `combatLairStep`                                                                          |
+| `endCombat()`                                     | For every marker in combat: `inCombat: false, initiative: null, initiativeTiebreak: 0`. Scene: `combatRound: 0, combatActiveMarkerId: null, combatLairStep: false`                 |
 
 Also test these with a fake writer that records calls (`combatActions.test.ts`):
+
 - Removing the active combatant advances the turn.
 - `endCombat` clears everything.
 
 ## Components (`apps/web/src/lib/components/Combat/`)
 
 Files:
+
 - `InitiativeTracker.svelte`
 - `InitiativeRow.svelte`
 - `InitiativeDivider.svelte`
@@ -267,6 +278,7 @@ Files:
 ### `InitiativeTracker.svelte` (Combat tab content)
 
 Props:
+
 ```ts
 {
   combatants: Combatant[];          // markers with inCombat, from the scene snapshot
@@ -285,6 +297,7 @@ Props:
 The component only renders and emits. All writes happen in the page via `combatActions`.
 
 **Layout** (BEM block `initiativeTracker`):
+
 - `__header` (sticky top):
   - `__round`: "Round 2", or "Roll initiative" in the rolling phase. Uses `var(--font-size-4)`, bold.
   - `__controls`:
@@ -317,6 +330,7 @@ taken from `hitPoints` / `statBlock.hp.average`), `thumbUrl`, `onSelect`, `onIni
 `onNudge`, `onRemove`.
 
 A 40px row in a grid with `grid-template-columns: 1.25rem 3rem 1.75rem 1fr auto auto`. Its cells:
+
 1. **`__turn`:** a ▶ icon when active, coloured `var(--turnColor)`.
    Define `--turnColor: var(--yellow-500)` once on `.initiativeTracker` and `.initiativeStrip`. globals.css has no warning
    or gold token, and `--fgDanger` is yellow but means danger.
@@ -335,11 +349,13 @@ A 40px row in a grid with `grid-template-columns: 1.25rem 3rem 1.75rem 1fr auto 
    - A muted style when automatic, normal when set by the GM.
 
 Hover actions (`__actions`, visible on hover and focus-within):
+
 - A d20 roll `IconButton` (`IconDice5`, "Roll initiative").
 - When `isTied`, ▲▼ tie `IconButton`s.
 - Remove (`IconX`, "Remove from combat").
 
 Row states and click behaviour:
+
 - `--active`: background `color-mix(in srgb, var(--turnColor) 14%, transparent)`, a 3px left border
   `var(--turnColor)`, and `aria-current="step"`.
 - `--defeated`: opacity 0.5, the name struck through, a ☠ icon, and the title "Skipped (dead)".
@@ -401,6 +417,7 @@ Props: `combatants`, `position`, `bucketUrl`.
 ## Page integration (W2)
 
 **GM `+page.svelte`** (W2-PAGE-PANELS, after W2-PAGE-MARKERS):
+
 - `const combatants = $derived(sceneMarkers.filter((m) => m.inCombat))`. Memoize like `pinnedMarkerIds`: return the previous
   array when the ids and the combat fields are equal, so the tracker does not re-render on unrelated marker moves.
 - `const turnPosition = $derived({ round, activeId, lairStep })` from scene settings.
@@ -428,38 +445,39 @@ Props: `combatants`, `position`, `bucketUrl`.
   - **Remove from combat** when some are.
 
 **Play route `play/+page@.svelte`:**
+
 - Derive `combatants` and `turnPosition` from `session.activeScene`.
 - Pass `activeTurnMarkerId` to `<Stage>`, filtered: null if the active marker is hidden from players.
 - Render `<InitiativeStrip>` inside the stage wrapper when `settings.combatShowOnTv`.
 
 ## Changes in other scopes (added to their agents in the overview)
 
-| Scope / agent | Addition |
-| --- | --- |
-| W1-STAGE-INPUT | `activeTurnMarkerId` context + prop → `isActiveTurn` on `MarkerToken` |
-| W1-STAGE-TOKEN | Active-turn ring mesh and pulse, `activeTurnRingMaterial` in `tokenRasterCache.ts` |
-| W1-DATA | New scene and marker fields: `fromDb`, `wire`, `buildRenderProps`, demo data (all false/null/0), persist. Clipboard paste and scene duplicate **reset** `inCombat/initiative/initiativeTiebreak` (copy `initiativeBonus`). Game-session export keeps the fields; import resets combat |
-| W1-5E-SERVER | Asset `initiativeBonus`: manage `fields` gains `initiativeBonus: z.number().int().min(-20).max(30).nullable().optional()`, saved on `save`. `assetPlacements` copies it to `marker.initiativeBonus` |
-| W1-UI-PANEL | `SidePanelTabs`: the `combat` tab + `combatLive` prop. `AssetEditor`: an "Initiative bonus" numeric field (empty = automatic) |
-| W1-UI-COMBAT | `TokenContextPanel`: the "Combat" action row (props `combatState: 'none' \| 'running'`, `targetsInCombat: number`, `onCombatAction`) |
-| W1-UI-AOE | `Shortcuts.svelte`: a "Combat" group with I / N / Shift+N. `stageKeyCommands.ts` is untouched (combat keys live in the page) |
-| W1-UI-INIT (new) | `utils/initiative.ts` (+ test), `components/Combat/*` (+ `combatActions.test.ts`) |
-| W2-PAGE-PANELS | Page and play-route wiring above, plus e2e |
+| Scope / agent    | Addition                                                                                                                                                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W1-STAGE-INPUT   | `activeTurnMarkerId` context + prop → `isActiveTurn` on `MarkerToken`                                                                                                                                                                                                                 |
+| W1-STAGE-TOKEN   | Active-turn ring mesh and pulse, `activeTurnRingMaterial` in `tokenRasterCache.ts`                                                                                                                                                                                                    |
+| W1-DATA          | New scene and marker fields: `fromDb`, `wire`, `buildRenderProps`, demo data (all false/null/0), persist. Clipboard paste and scene duplicate **reset** `inCombat/initiative/initiativeTiebreak` (copy `initiativeBonus`). Game-session export keeps the fields; import resets combat |
+| W1-5E-SERVER     | Asset `initiativeBonus`: manage `fields` gains `initiativeBonus: z.number().int().min(-20).max(30).nullable().optional()`, saved on `save`. `assetPlacements` copies it to `marker.initiativeBonus`                                                                                   |
+| W1-UI-PANEL      | `SidePanelTabs`: the `combat` tab + `combatLive` prop. `AssetEditor`: an "Initiative bonus" numeric field (empty = automatic)                                                                                                                                                         |
+| W1-UI-COMBAT     | `TokenContextPanel`: the "Combat" action row (props `combatState: 'none' \| 'running'`, `targetsInCombat: number`, `onCombatAction`)                                                                                                                                                  |
+| W1-UI-AOE        | `Shortcuts.svelte`: a "Combat" group with I / N / Shift+N. `stageKeyCommands.ts` is untouched (combat keys live in the page)                                                                                                                                                          |
+| W1-UI-INIT (new) | `utils/initiative.ts` (+ test), `components/Combat/*` (+ `combatActions.test.ts`)                                                                                                                                                                                                     |
+| W2-PAGE-PANELS   | Page and play-route wiring above, plus e2e                                                                                                                                                                                                                                            |
 
 ## Files
 
-| File | Change |
-| --- | --- |
-| `apps/web/src/lib/db/app/schema.ts` | Scene, marker and asset columns (wave 0) |
-| `apps/web/src/lib/realtime/types.ts` | `SceneSettings` and `MarkerRow` fields (wave 0) |
-| `packages/stage/.../Stage/types.ts` | `activeTurnMarkerId` (wave 0) |
-| `apps/web/src/lib/utils/initiative.ts` (+ test) | New: pure turn logic |
-| `apps/web/src/lib/components/Combat/*` | New: tracker, row, divider, strip, actions, types, index |
-| `packages/stage/.../MarkerLayer/MarkerLayer.svelte`, `MarkerToken.svelte`, `helpers/tokenRasterCache.ts`, `Stage/Stage.svelte` | Ring |
-| Realtime and server files listed under W1-DATA / W1-5E-SERVER | Field plumbing |
-| `SidePanelTabs.svelte`, `AssetEditor.svelte`, `TokenContextPanel.svelte`, `Shortcuts.svelte` | Small additions |
-| GM `+page.svelte`, play `+page@.svelte` | Wiring |
-| `.claude/skills/*` | SK-1: update the realtime skill (new scene/marker fields, `systemWrite` for combat) and the stage-rendering skill (active-turn ring) |
+| File                                                                                                                           | Change                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/web/src/lib/db/app/schema.ts`                                                                                            | Scene, marker and asset columns (wave 0)                                                                                             |
+| `apps/web/src/lib/realtime/types.ts`                                                                                           | `SceneSettings` and `MarkerRow` fields (wave 0)                                                                                      |
+| `packages/stage/.../Stage/types.ts`                                                                                            | `activeTurnMarkerId` (wave 0)                                                                                                        |
+| `apps/web/src/lib/utils/initiative.ts` (+ test)                                                                                | New: pure turn logic                                                                                                                 |
+| `apps/web/src/lib/components/Combat/*`                                                                                         | New: tracker, row, divider, strip, actions, types, index                                                                             |
+| `packages/stage/.../MarkerLayer/MarkerLayer.svelte`, `MarkerToken.svelte`, `helpers/tokenRasterCache.ts`, `Stage/Stage.svelte` | Ring                                                                                                                                 |
+| Realtime and server files listed under W1-DATA / W1-5E-SERVER                                                                  | Field plumbing                                                                                                                       |
+| `SidePanelTabs.svelte`, `AssetEditor.svelte`, `TokenContextPanel.svelte`, `Shortcuts.svelte`                                   | Small additions                                                                                                                      |
+| GM `+page.svelte`, play `+page@.svelte`                                                                                        | Wiring                                                                                                                               |
+| `.claude/skills/*`                                                                                                             | SK-1: update the realtime skill (new scene/marker fields, `systemWrite` for combat) and the stage-rendering skill (active-turn ring) |
 
 ## Testing
 

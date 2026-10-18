@@ -30,45 +30,82 @@ Part of `spec/dnd-combat-polish.md`. Scope tag: **5E**. Supersedes the "stat blo
 export type Ability = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
 export type Inline =
   | { kind: 'text'; text: string }
-  | { kind: 'hit'; bonus: number }                 // {@hit 5}
-  | { kind: 'damage'; formula: string }            // {@damage 1d6+3}
-  | { kind: 'dice'; formula: string }              // {@dice 1d10}, {@d20 +5}
-  | { kind: 'dc'; dc: number }                     // {@dc 13}
-  | { kind: 'attack'; label: string }              // {@atk mw} → "Melee Weapon Attack:"
-  | { kind: 'ref'; refType: 'spell' | 'condition' | 'item' | 'creature' | 'skill' | 'action' | 'status' | 'sense' | 'other'; text: string }
+  | { kind: 'hit'; bonus: number } // {@hit 5}
+  | { kind: 'damage'; formula: string } // {@damage 1d6+3}
+  | { kind: 'dice'; formula: string } // {@dice 1d10}, {@d20 +5}
+  | { kind: 'dc'; dc: number } // {@dc 13}
+  | { kind: 'attack'; label: string } // {@atk mw} → "Melee Weapon Attack:"
+  | {
+      kind: 'ref';
+      refType: 'spell' | 'condition' | 'item' | 'creature' | 'skill' | 'action' | 'status' | 'sense' | 'other';
+      text: string;
+    }
   | { kind: 'recharge'; min: number }
   | { kind: 'em'; text: string };
 export type StatEntry = {
-  name: string; nameInlines: Inline[]; body: Inline[][];
-  attack?: { toHit: number; kind: string; reach?: string; range?: string; damage: { formula: string; average?: number; type?: string }[] };
-  save?: { dc: number; ability?: Ability }; recharge?: number; cost?: number;
+  name: string;
+  nameInlines: Inline[];
+  body: Inline[][];
+  attack?: {
+    toHit: number;
+    kind: string;
+    reach?: string;
+    range?: string;
+    damage: { formula: string; average?: number; type?: string }[];
+  };
+  save?: { dc: number; ability?: Ability };
+  recharge?: number;
+  cost?: number;
 };
 export type StatSpellcasting = {
-  name: string; header: Inline[][]; displayAs: 'trait' | 'action' | 'bonus' | 'reaction' | 'legendary';
-  dc?: number; toHit?: number; ability?: Ability;
-  groups: { label: string; slots?: number; spells: string[] }[]; footer: Inline[][];
+  name: string;
+  header: Inline[][];
+  displayAs: 'trait' | 'action' | 'bonus' | 'reaction' | 'legendary';
+  dc?: number;
+  toHit?: number;
+  ability?: Ability;
+  groups: { label: string; slots?: number; spells: string[] }[];
+  footer: Inline[][];
 };
 export type StatBlock = {
   version: 1;
   source: { provider: '5etools'; name: string; source: string; page?: number; adapterVersion: string };
-  name: string; size: string[]; type: string; alignment: string;
+  name: string;
+  size: string[];
+  type: string;
+  alignment: string;
   ac: { value: number; note?: string }[];
   hp: { average: number | null; formula?: string; note?: string };
-  speed: { mode: 'walk' | 'fly' | 'swim' | 'climb' | 'burrow'; feet: number; note?: string }[]; canHover?: boolean;
+  speed: { mode: 'walk' | 'fly' | 'swim' | 'climb' | 'burrow'; feet: number; note?: string }[];
+  canHover?: boolean;
   abilities: Record<Ability, { score: number; mod: number; save?: number }>;
-  skills: { name: string; bonus: string }[]; senses: string[]; passive?: number; languages: string[];
+  skills: { name: string; bonus: string }[];
+  senses: string[];
+  passive?: number;
+  languages: string[];
   cr: { display: string; value: number; xp?: number; pb: number; lair?: string };
   initiative?: number;
-  vulnerable: string[]; resist: string[]; immune: string[]; conditionImmune: string[];
-  traits: StatEntry[]; actions: StatEntry[]; bonusActions: StatEntry[]; reactions: StatEntry[];
-  legendary: StatEntry[]; legendaryHeader?: Inline[][]; legendaryCount?: number; mythic: StatEntry[];
-  spellcasting: StatSpellcasting[]; warnings: string[];
+  vulnerable: string[];
+  resist: string[];
+  immune: string[];
+  conditionImmune: string[];
+  traits: StatEntry[];
+  actions: StatEntry[];
+  bonusActions: StatEntry[];
+  reactions: StatEntry[];
+  legendary: StatEntry[];
+  legendaryHeader?: Inline[][];
+  legendaryCount?: number;
+  mythic: StatEntry[];
+  spellcasting: StatSpellcasting[];
+  warnings: string[];
 };
 ```
 
 ## Phase A — utilities and parser (pure, unit-tested)
 
 ### A1. `apps/web/src/lib/utils/statBlock/`
+
 - `schema.ts`: `statBlockSchema` (zod mirror of the types; strings ≤ 2000, arrays ≤ 100; `superRefine` rejecting
   `JSON.stringify(value).length > 65536`). Export `inlineSchema`, `statEntrySchema`.
 - `format.ts`: `formatModifier(n)` → "+2" / "−1" (U+2212), `abilityMod(score) = Math.floor((score - 10) / 2)`,
@@ -80,6 +117,7 @@ export type StatBlock = {
 - Tests `format.test.ts`, `dice.test.ts` (seeded rng).
 
 ### A2. `apps/web/src/lib/server/assets/fivetools/statblock/`
+
 Each file exports pure arrow functions; nothing throws on unknown shapes — push to `warnings` and continue.
 
 1. `raw.ts` — `rawMonsterSchema = z.object({ name: z.string(), source: z.string(), … }).passthrough()`; unknown-shaped fields typed `unknown`.
@@ -173,6 +211,7 @@ Opened from the Library tab (`onOpenCatalog`). Rendered by the page as an overla
 ```
 
 Files (apps/web/src/lib/components/Assets/):
+
 - `AssetCatalogOverlay.svelte` — the shell: `role="dialog" aria-modal="true" aria-labelledby`, `position: fixed`, covers the stage area
   (`inset: 3rem` desktop, full-screen < 768px), backdrop `color-mix(in srgb, var(--bg) 60%, transparent)`, panel `var(--bg)`,
   `var(--shadow-3)`, `var(--radius-3)`. Esc / ✕ / backdrop click closes. Focus trapped (first focus = search input). Holds state
@@ -224,6 +263,7 @@ onHitPointsChange?: (f: { hitPoints?: number | null; tempHitPoints?: number | nu
 │ ▸ Spellcasting  DC 20 · +12                               │
 └──────────────────────────────────────────────────────────┘
 ```
+
 - HP block: number `Input` for current HP; `−`/`+` IconButtons (±1); a "damage / heal" quick input: type a number, Enter = damage,
   Shift+Enter = heal (buttons "Damage" danger-ghost and "Heal" ghost next to it). Damage consumes temp HP first. Clamp to `[0, max]`.
   Temp HP small input. Bar `statBlock__hpBar` `var(--fgSuccess)`, `--low` (≤ 50%) `var(--orange-6)`, `--critical` (≤ 25%) `var(--fgDanger)`.
@@ -243,6 +283,7 @@ onHitPointsChange?: (f: { hitPoints?: number | null; tempHitPoints?: number | nu
   `--inputBg`, `--inputBorderColor`, `--radius-2`, `--shadow-1`. Font sizes 0.75rem labels / 0.875rem body.
 
 `StatBlockQuickCard.svelte` — **quick reference while selecting tokens on the map** (GM only):
+
 - Shown over the stage, bottom-left (`position: absolute; left: 1rem; bottom: 1rem; z-index: 2; width: min(22rem, 40vw); max-height: 45vh; overflow-y: auto`)
   whenever exactly one selected token has a stat block. Contents: name + CR, AC / HP (with −/+ and damage input) / speed, ability mods row,
   Actions list with roll chips (other sections collapsed). Header buttons: collapse (persists), "Full stat block" (opens the pane on the Tokens tab
@@ -251,6 +292,7 @@ onHitPointsChange?: (f: { hitPoints?: number | null; tempHitPoints?: number | nu
 - Never mounted while nothing with stats is selected (zero cost).
 
 Wiring (page integration wave):
+
 - `const selectedMarkerRow = $derived(selectedMarkerIds.length === 1 ? session.client?.scene(selectedSceneId)?.markers.find((m) => m.id === selectedMarkerIds[0]) : undefined);`
   (match the real accessor for scene rows used elsewhere in the page.)
 - `onHitPointsChange = (fields) => session.client?.write.setMarkerFields(selectedSceneId, id, fields)` (discrete edit → normal undo step).

@@ -32,20 +32,20 @@ refits the stage and becomes a bottom sheet on mobile. The 5etools catalog opens
 
 ## Files
 
-| File | Change |
-| --- | --- |
-| `apps/web/src/lib/components/GameSession/SidePanelTabs.svelte` (new) | tab strip |
-| `apps/web/src/lib/components/Assets/AssetLibrary.svelte` | rewrite: toolbar + thumbnail grid + view switch (`grid`/`edit`) |
-| `apps/web/src/lib/components/Assets/AssetEditor.svelte` (new) | edit/create sub-view |
-| `apps/web/src/lib/components/Assets/assetPlacement.ts` (new) | shared `placeAsset(...)` used by click-place and drop-place |
-| `apps/web/src/lib/components/Assets/types.ts`, `index.ts` | props/exports |
-| `apps/web/src/lib/components/Handouts/HandoutPanel.svelte` (new, replaces HandoutControls) | compact panel |
-| `apps/web/src/lib/components/Handouts/HandoutLivePill.svelte` (new) | "Players see: …" pill over the stage |
-| `apps/web/src/lib/components/Handouts/HandoutOverlay.svelte` | fade-in + backdrop polish (player view) |
-| `apps/web/src/lib/components/Handouts/index.ts` | exports (keep `HandoutControls` export as alias of `HandoutPanel` until all imports updated, then remove) |
-| `apps/web/src/lib/components/GameSession/MarkerManager.svelte` | remove "Preview handout" from `imagePreview`; add ghost "Show as handout" button in edit view |
-| GM `+page.svelte` | tabs, mount panels, drag-to-map, live pill, preview behaviour |
-| `apps/web/tests/e2e/{handouts,persistence,asset-library,asset-catalog,asset-import}.auth.test.ts` | selectors |
+| File                                                                                              | Change                                                                                                    |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/lib/components/GameSession/SidePanelTabs.svelte` (new)                              | tab strip                                                                                                 |
+| `apps/web/src/lib/components/Assets/AssetLibrary.svelte`                                          | rewrite: toolbar + thumbnail grid + view switch (`grid`/`edit`)                                           |
+| `apps/web/src/lib/components/Assets/AssetEditor.svelte` (new)                                     | edit/create sub-view                                                                                      |
+| `apps/web/src/lib/components/Assets/assetPlacement.ts` (new)                                      | shared `placeAsset(...)` used by click-place and drop-place                                               |
+| `apps/web/src/lib/components/Assets/types.ts`, `index.ts`                                         | props/exports                                                                                             |
+| `apps/web/src/lib/components/Handouts/HandoutPanel.svelte` (new, replaces HandoutControls)        | compact panel                                                                                             |
+| `apps/web/src/lib/components/Handouts/HandoutLivePill.svelte` (new)                               | "Players see: …" pill over the stage                                                                      |
+| `apps/web/src/lib/components/Handouts/HandoutOverlay.svelte`                                      | fade-in + backdrop polish (player view)                                                                   |
+| `apps/web/src/lib/components/Handouts/index.ts`                                                   | exports (keep `HandoutControls` export as alias of `HandoutPanel` until all imports updated, then remove) |
+| `apps/web/src/lib/components/GameSession/MarkerManager.svelte`                                    | remove "Preview handout" from `imagePreview`; add ghost "Show as handout" button in edit view             |
+| GM `+page.svelte`                                                                                 | tabs, mount panels, drag-to-map, live pill, preview behaviour                                             |
+| `apps/web/tests/e2e/{handouts,persistence,asset-library,asset-catalog,asset-import}.auth.test.ts` | selectors                                                                                                 |
 
 ## Implementation steps
 
@@ -71,9 +71,17 @@ The fourth tab "Combat" (`IconSwords`, live dot when `combatLive`) is always sho
 - Restructure the right pane `.editor-tools`:
   ```svelte
   <div class="editor-tools">
-    <SidePanelTabs selected={sidePanelTab} onSelect={(t) => (sidePanelTab = t)} handoutLive={!!activeHandout} showLibrary={canEditAssets} showHandout={canPresentHandouts} />
+    <SidePanelTabs
+      selected={sidePanelTab}
+      onSelect={(t) => (sidePanelTab = t)}
+      handoutLive={!!activeHandout}
+      showLibrary={canEditAssets}
+      showHandout={canPresentHandouts}
+    />
     <div class="editor-tools__content" id="sidePanel-tokens" role="tabpanel" hidden={sidePanelTab !== 'tokens'}>
-      {#if !isMarkersCollapsed} …existing Annotation/Light/Checklist/Marker managers (no AssetLibrary, no HandoutControls)… {/if}
+      {#if !isMarkersCollapsed}
+        …existing Annotation/Light/Checklist/Marker managers (no AssetLibrary, no HandoutControls)…
+      {/if}
     </div>
     <div class="editor-tools__content" id="sidePanel-library" role="tabpanel" hidden={sidePanelTab !== 'library'}>
       <AssetLibrary … />
@@ -131,6 +139,7 @@ Props (keep existing): `client, sceneId, selectedMarkerId, bucketUrl, onPreviewA
 ### 5. `AssetEditor.svelte`
 
 Props: `asset?: SelectAsset | null`, `bucketUrl`, `onClose()`, `onSaved(asset)`.
+
 - `.assetEditor__back` — `Link` "← Back to library".
 - `.assetEditor__formGrid` (copy MarkerManager's `__formGrid`: 2 columns, 1 column under a 420px container width via `@container`).
 - Fields: artwork drop tile `.assetEditor__artwork` (hidden `<input type=file aria-label="Artwork file">`, drop via `$lib/utils/imageDrop`),
@@ -142,6 +151,7 @@ Props: `asset?: SelectAsset | null`, `bucketUrl`, `onClose()`, `onSaved(asset)`.
 ### 6. `HandoutPanel.svelte` (replaces HandoutControls)
 
 Same props as `HandoutControlsProps`. No `<details>`, no `max-height`.
+
 - `.handoutPanel { display: flex; flex-direction: column; gap: 1rem; padding: 1rem; overflow-y: auto; height: 100%; }`
 - Empty state `.handoutPanel__dropzone`: dashed `2px dashed var(--contrastMedium)`, `border-radius: var(--radius-2)`, `padding: 2rem`,
   centered text "Drop an image here or click to upload" + muted second line "Or right-click a token → Show as handout". Contains the

@@ -15,11 +15,11 @@ Custom conditions are allowed. Each condition can be GM-only.
 - **Shape** (shared type, exported by `@tableslayer/stage`):
   ```ts
   export type MarkerCondition = {
-    id: string;          // catalog key ('prone', 'exhaustion', …) or 'custom:<uuid>'
-    label?: string;      // custom only (≤ 24 chars)
-    color?: string;      // custom only, '#rrggbb'
-    value?: number;      // exhaustion level 1–6
-    dmOnly?: boolean;    // hidden from players
+    id: string; // catalog key ('prone', 'exhaustion', …) or 'custom:<uuid>'
+    label?: string; // custom only (≤ 24 chars)
+    color?: string; // custom only, '#rrggbb'
+    value?: number; // exhaustion level 1–6
+    dmOnly?: boolean; // hidden from players
   };
   ```
   Stored sorted by catalog order (custom ones last, by label) so `conditionsKey()` is stable.
@@ -47,60 +47,60 @@ export const toggleCondition = (list: MarkerCondition[], id: string): MarkerCond
 
 Entries (5e 2024 wording, one short line each — keep descriptions ≤ 140 chars):
 
-| id | label | abbr | color | description |
-| --- | --- | --- | --- | --- |
-| blinded | Blinded | Bl | #6b7280 | Can't see; auto-fails sight checks. Attacks against have advantage; its attacks have disadvantage. |
-| charmed | Charmed | Ch | #ec4899 | Can't attack the charmer or target them with harmful effects. Charmer has advantage on social checks. |
-| deafened | Deafened | De | #9ca3af | Can't hear; auto-fails hearing checks. |
-| exhaustion | Exhaustion | Ex | #92400e | Each level: −2 to d20 tests, −5 ft speed. Dies at level 6. (maxValue 6) |
-| frightened | Frightened | Fr | #a855f7 | Disadvantage on checks/attacks while source is in sight; can't willingly move closer. |
-| grappled | Grappled | Gr | #d97706 | Speed 0. Disadvantage on attacks against targets other than the grappler. |
-| incapacitated | Incapacitated | In | #64748b | No actions, bonus actions or reactions. Concentration breaks. |
-| invisible | Invisible | Iv | #a5b4fc | Can't be seen. Attacks against have disadvantage; its attacks have advantage. |
-| paralyzed | Paralyzed | Pa | #eab308 | Incapacitated, speed 0. Fails Str/Dex saves. Attacks against have advantage; hits within 5 ft are crits. |
-| petrified | Petrified | Pe | #78716c | Turned to stone: incapacitated, speed 0, resistance to all damage, immune to poison. |
-| poisoned | Poisoned | Po | #22c55e | Disadvantage on attack rolls and ability checks. |
-| prone | Prone | Pr | #b45309 | Crawl only. Disadvantage on attacks. Melee attacks against have advantage, ranged have disadvantage. |
-| restrained | Restrained | Re | #0d9488 | Speed 0. Disadvantage on attacks and Dex saves. Attacks against have advantage. |
-| stunned | Stunned | St | #facc15 | Incapacitated. Fails Str/Dex saves. Attacks against have advantage. |
-| unconscious | Unconscious | Un | #1e3a8a | Incapacitated, prone, drops items. Fails Str/Dex saves. Hits within 5 ft are crits. |
-| concentrating | Concentrating | Co | #38bdf8 | Maintaining a spell. Con save (DC 10 or half damage) when damaged. |
-| bloodied | Bloodied | Bd | #dc2626 | At or below half hit points. |
-| blessed | Blessed | Bs | #fde68a | +1d4 to attack rolls and saving throws. |
-| baned | Baned | Bn | #7f1d1d | −1d4 to attack rolls and saving throws. |
-| hasted | Hasted | Ha | #f97316 | +2 AC, advantage on Dex saves, double speed, one extra limited action. |
-| slowed | Slowed | Sl | #60a5fa | −2 AC and Dex saves, half speed, no reactions, limited actions. |
-| dodging | Dodging | Dg | #34d399 | Attacks against have disadvantage; advantage on Dex saves. |
-| hidden | Hidden | Hd | #475569 | Unseen and unheard; attacks against have disadvantage. |
-| raging | Raging | Ra | #b91c1c | Resistance to B/P/S damage, bonus melee damage, advantage on Str checks/saves. |
-| marked | Marked | Mk | #e11d48 | Hunter's Mark / Hex: extra damage from the marker. |
-| burning | Burning | Bu | #ea580c | Takes fire damage at the start of its turn until extinguished. |
-| flying | Flying | Fl | #7dd3fc | Airborne. Falls if knocked prone or speed drops to 0. |
-| dead | Dead | ☠ | #111827 | Dead. Rendered as a skull over the token. |
+| id            | label         | abbr | color   | description                                                                                              |
+| ------------- | ------------- | ---- | ------- | -------------------------------------------------------------------------------------------------------- |
+| blinded       | Blinded       | Bl   | #6b7280 | Can't see; auto-fails sight checks. Attacks against have advantage; its attacks have disadvantage.       |
+| charmed       | Charmed       | Ch   | #ec4899 | Can't attack the charmer or target them with harmful effects. Charmer has advantage on social checks.    |
+| deafened      | Deafened      | De   | #9ca3af | Can't hear; auto-fails hearing checks.                                                                   |
+| exhaustion    | Exhaustion    | Ex   | #92400e | Each level: −2 to d20 tests, −5 ft speed. Dies at level 6. (maxValue 6)                                  |
+| frightened    | Frightened    | Fr   | #a855f7 | Disadvantage on checks/attacks while source is in sight; can't willingly move closer.                    |
+| grappled      | Grappled      | Gr   | #d97706 | Speed 0. Disadvantage on attacks against targets other than the grappler.                                |
+| incapacitated | Incapacitated | In   | #64748b | No actions, bonus actions or reactions. Concentration breaks.                                            |
+| invisible     | Invisible     | Iv   | #a5b4fc | Can't be seen. Attacks against have disadvantage; its attacks have advantage.                            |
+| paralyzed     | Paralyzed     | Pa   | #eab308 | Incapacitated, speed 0. Fails Str/Dex saves. Attacks against have advantage; hits within 5 ft are crits. |
+| petrified     | Petrified     | Pe   | #78716c | Turned to stone: incapacitated, speed 0, resistance to all damage, immune to poison.                     |
+| poisoned      | Poisoned      | Po   | #22c55e | Disadvantage on attack rolls and ability checks.                                                         |
+| prone         | Prone         | Pr   | #b45309 | Crawl only. Disadvantage on attacks. Melee attacks against have advantage, ranged have disadvantage.     |
+| restrained    | Restrained    | Re   | #0d9488 | Speed 0. Disadvantage on attacks and Dex saves. Attacks against have advantage.                          |
+| stunned       | Stunned       | St   | #facc15 | Incapacitated. Fails Str/Dex saves. Attacks against have advantage.                                      |
+| unconscious   | Unconscious   | Un   | #1e3a8a | Incapacitated, prone, drops items. Fails Str/Dex saves. Hits within 5 ft are crits.                      |
+| concentrating | Concentrating | Co   | #38bdf8 | Maintaining a spell. Con save (DC 10 or half damage) when damaged.                                       |
+| bloodied      | Bloodied      | Bd   | #dc2626 | At or below half hit points.                                                                             |
+| blessed       | Blessed       | Bs   | #fde68a | +1d4 to attack rolls and saving throws.                                                                  |
+| baned         | Baned         | Bn   | #7f1d1d | −1d4 to attack rolls and saving throws.                                                                  |
+| hasted        | Hasted        | Ha   | #f97316 | +2 AC, advantage on Dex saves, double speed, one extra limited action.                                   |
+| slowed        | Slowed        | Sl   | #60a5fa | −2 AC and Dex saves, half speed, no reactions, limited actions.                                          |
+| dodging       | Dodging       | Dg   | #34d399 | Attacks against have disadvantage; advantage on Dex saves.                                               |
+| hidden        | Hidden        | Hd   | #475569 | Unseen and unheard; attacks against have disadvantage.                                                   |
+| raging        | Raging        | Ra   | #b91c1c | Resistance to B/P/S damage, bonus melee damage, advantage on Str checks/saves.                           |
+| marked        | Marked        | Mk   | #e11d48 | Hunter's Mark / Hex: extra damage from the marker.                                                       |
+| burning       | Burning       | Bu   | #ea580c | Takes fire damage at the start of its turn until extinguished.                                           |
+| flying        | Flying        | Fl   | #7dd3fc | Airborne. Falls if knocked prone or speed drops to 0.                                                    |
+| dead          | Dead          | ☠    | #111827 | Dead. Rendered as a skull over the token.                                                                |
 
 `dead` is special in rendering: draw a skull glyph centred on the token (dimmed token) instead of a pip.
 Custom fallback: label → `abbr` = first two letters (title-cased), colour default `#8b5cf6`, description "Custom condition".
 
 ## Files
 
-| File | Change |
-| --- | --- |
-| `apps/web/src/lib/db/app/schema.ts` | `conditions` column on `markerTable` |
-| `packages/stage/.../MarkerLayer/types.ts` | `conditions?: MarkerCondition[]` on `Marker`, export `MarkerCondition` |
-| `packages/stage/.../helpers/markerConditions.ts` (new) | catalog + helpers |
-| `packages/stage/.../MarkerLayer/MarkerConditionBadges.svelte` (new) | badge mesh |
-| `packages/stage/.../MarkerLayer/MarkerToken.svelte` | mount badges; dim token + skull when `dead` |
-| `packages/stage/src/lib/components/MarkerTooltip/MarkerTooltip.svelte` | conditions list |
-| `packages/stage/src/lib/components/Stage/index.ts` | exports |
-| `apps/web/src/lib/realtime/types.ts` | `MarkerRow.conditions?` |
-| `apps/web/src/lib/utils/buildSceneProps.ts` | map conditions (+ auto bloodied, + filter `dmOnly` for player mode) |
-| `apps/web/src/lib/server/assets/assets.ts`, `server/assets/clipboard.ts`, `server/gameSession/demoSessionData.ts` | `conditions: []` in full-row builders |
-| `apps/web/src/lib/utils/tokenClipboardSchema.ts` | optional `conditions` (z array max 32) |
-| `apps/web/src/lib/components/GameSession/ConditionPicker.svelte` (new) | chip grid (popover + inline modes) |
-| `apps/web/src/lib/components/GameSession/TokenContextPanel.svelte` (new) | right-click panel |
-| `apps/web/src/lib/components/GameSession/MarkerManager.svelte` | conditions section in edit view, dots in list rows |
-| GM `+page.svelte` | writer, right-click → TokenContextPanel |
-| `.claude/skills/stage-rendering/SKILL.md`, `.claude/skills/web-data-patterns/SKILL.md` | document |
+| File                                                                                                              | Change                                                                 |
+| ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `apps/web/src/lib/db/app/schema.ts`                                                                               | `conditions` column on `markerTable`                                   |
+| `packages/stage/.../MarkerLayer/types.ts`                                                                         | `conditions?: MarkerCondition[]` on `Marker`, export `MarkerCondition` |
+| `packages/stage/.../helpers/markerConditions.ts` (new)                                                            | catalog + helpers                                                      |
+| `packages/stage/.../MarkerLayer/MarkerConditionBadges.svelte` (new)                                               | badge mesh                                                             |
+| `packages/stage/.../MarkerLayer/MarkerToken.svelte`                                                               | mount badges; dim token + skull when `dead`                            |
+| `packages/stage/src/lib/components/MarkerTooltip/MarkerTooltip.svelte`                                            | conditions list                                                        |
+| `packages/stage/src/lib/components/Stage/index.ts`                                                                | exports                                                                |
+| `apps/web/src/lib/realtime/types.ts`                                                                              | `MarkerRow.conditions?`                                                |
+| `apps/web/src/lib/utils/buildSceneProps.ts`                                                                       | map conditions (+ auto bloodied, + filter `dmOnly` for player mode)    |
+| `apps/web/src/lib/server/assets/assets.ts`, `server/assets/clipboard.ts`, `server/gameSession/demoSessionData.ts` | `conditions: []` in full-row builders                                  |
+| `apps/web/src/lib/utils/tokenClipboardSchema.ts`                                                                  | optional `conditions` (z array max 32)                                 |
+| `apps/web/src/lib/components/GameSession/ConditionPicker.svelte` (new)                                            | chip grid (popover + inline modes)                                     |
+| `apps/web/src/lib/components/GameSession/TokenContextPanel.svelte` (new)                                          | right-click panel                                                      |
+| `apps/web/src/lib/components/GameSession/MarkerManager.svelte`                                                    | conditions section in edit view, dots in list rows                     |
+| GM `+page.svelte`                                                                                                 | writer, right-click → TokenContextPanel                                |
+| `.claude/skills/stage-rendering/SKILL.md`, `.claude/skills/web-data-patterns/SKILL.md`                            | document                                                               |
 
 ## Implementation steps
 
@@ -131,6 +131,7 @@ Props: `conditions: MarkerCondition[]`, `size: number` (token world size), `mode
 
 `MarkerTooltip.svelte`: add `conditions?: MarkerCondition[]` to its `MarkerData`; render guard also true when conditions exist.
 Markup:
+
 ```svelte
 <ul class="markerTooltip__conditions">
   {#each resolved as c (c.key)}
@@ -142,6 +143,7 @@ Markup:
   {/each}
 </ul>
 ```
+
 Player mode: filter `dmOnly`. Styles use `var(--fg)`, `var(--fgMuted)`, `var(--borderThin)`; description `font-size: 0.75rem`.
 
 ### 4. Web data plumbing
@@ -150,7 +152,7 @@ Player mode: filter `dmOnly`. Styles use `var(--fg)`, `var(--fgMuted)`, `var(--b
 - `realtime/types.ts` `MarkerRow`: `conditions?: MarkerCondition[] | null`.
 - `buildSceneProps.ts` marker mapping:
   ```ts
-  conditions: withAutoConditions(Array.isArray(marker.conditions) ? marker.conditions : [], marker)
+  conditions: withAutoConditions(Array.isArray(marker.conditions) ? marker.conditions : [], marker);
   ```
   where `withAutoConditions` (same file, small) appends `{ id: 'bloodied' }` when `marker.statBlock?.hp.average` and
   `marker.hitPoints != null && marker.hitPoints > 0 && marker.hitPoints <= Math.floor(max / 2)` and not already present.
@@ -174,7 +176,8 @@ const writeMarkerConditions = (updates: Record<string, MarkerCondition[]>) => {
   }
   client.stopCapturing();
   client.write.transaction(() => {
-    for (const [id, conditions] of Object.entries(updates)) client.write.setMarkerFields(selectedSceneId, id, { conditions });
+    for (const [id, conditions] of Object.entries(updates))
+      client.write.setMarkerFields(selectedSceneId, id, { conditions });
   });
   client.stopCapturing();
 };
@@ -182,12 +185,17 @@ const writeMarkerConditions = (updates: Record<string, MarkerCondition[]>) => {
 const toggleConditionOn = (targetIds: string[], condition: MarkerCondition) => {
   const markers = targetIds.map((id) => stageProps.marker.markers.find((m) => m.id === id)).filter(Boolean);
   const allHave = markers.every((m) => m!.conditions?.some((c) => c.id === condition.id));
-  writeMarkerConditions(Object.fromEntries(markers.map((m) => {
-    const rest = (m!.conditions ?? []).filter((c) => c.id !== condition.id);
-    return [m!.id, sortConditions(allHave ? rest : [...rest, condition])];
-  })));
+  writeMarkerConditions(
+    Object.fromEntries(
+      markers.map((m) => {
+        const rest = (m!.conditions ?? []).filter((c) => c.id !== condition.id);
+        return [m!.id, sortConditions(allHave ? rest : [...rest, condition])];
+      })
+    )
+  );
 };
 ```
+
 Plus `setConditionValue(targetIds, id, value)` (exhaustion; `0` removes) and `clearConditions(targetIds)`.
 Strip the auto-added `bloodied` before writing if it isn't in the stored row (read the stored list from
 `session.client.scene(selectedSceneId)` rows, not from stageProps, when computing the new array).
@@ -199,6 +207,7 @@ Props: `active: MarkerCondition[]` (union for multi-select; a chip is "active" w
 `onToggle(c: MarkerCondition)`, `onSetValue(id, value)`, `onToggleDmOnly(id)`, `onClear()`.
 
 Layout:
+
 ```
 Conditions                                   [Clear]
 [Bl][Ch][De][Fr][Gr][In][Iv][Pa][Pe][Po][Pr][Re][St][Un]   ← chips: swatch dot + label, wrap
@@ -208,6 +217,7 @@ Combat
 Custom
 [Hexed ×]  [+ name______][● color][Add]
 ```
+
 - Chip = `<button class="conditionPicker__chip" aria-pressed={isActive}>` with `conditionPicker__chip--active`
   (background = condition colour at 25% via `color-mix(in srgb, <color> 25%, transparent)`, border = colour) and
   `conditionPicker__chip--mixed` (dashed border). Chip `title` = description. Chips are clearly buttons: border
@@ -221,6 +231,7 @@ Custom
 ### 7. `TokenContextPanel.svelte` (apps/web, GameSession)
 
 Replaces the flat marker `ContextMenu` on right-click (keep `markerContextMenuItems` data for the action rows).
+
 - Positioned at the click point with `@floating-ui/dom` (`computePosition` + `flip` + `shift`, `strategy: 'fixed'`), portal to `body`,
   `z-index` above the stage, closes on outside pointerdown, `Escape`, scroll-wheel on stage, or after a destructive action.
 - Content: header "Goblin" or "4 tokens", then `<ConditionPicker>`, then a divider and the existing actions as compact rows

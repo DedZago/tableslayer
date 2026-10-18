@@ -12,7 +12,7 @@ and the page sets `selectedMarkerIds = [marker.id]`. Only one token moves.
 
 - With ≥ 2 tokens selected, pressing on **any selected token** and dragging moves **all selected tokens** together, keeping
   their relative offsets.
-- The grabbed token is the *anchor*. The token does not jump to the cursor: the grab offset is preserved.
+- The grabbed token is the _anchor_. The token does not jump to the cursor: the grab offset is preserved.
 - Snapping (when grid snap is on): the anchor's target is snapped; the same delta is applied to every member.
   - Square grid: the delta is rounded to **whole cells** (`getGridCellSize(grid, display)`), so centred tokens stay centred.
   - Hex grid: anchor snapped with `centerOnly = true`.
@@ -26,15 +26,15 @@ and the page sets `selectedMarkerIds = [marker.id]`. Only one token moves.
 
 ## Files
 
-| File | Change |
-| --- | --- |
-| `packages/stage/src/lib/components/Stage/types.ts` | add optional callback `onMarkersMoved` |
-| `packages/stage/src/lib/components/Stage/components/MarkerLayer/MarkerLayer.svelte` | group-drag state machine |
-| `apps/web/src/lib/realtime/SessionDocClient.svelte.ts` | `beginUndoGroup()` / `endUndoGroup()` |
-| `apps/web/src/lib/realtime/docSchema.test.ts` | undo-group test |
-| `apps/web/src/routes/(app)/[party]/[gameSession]/[[selectedScene]]/+page.svelte` | `onMarkersMoved` writer, select-all, Escape, flush on hide |
-| `apps/web/src/lib/components/GameSession/Shortcuts.svelte` | document new shortcuts |
-| `docs/undo-redo-architecture.md`, `.claude/skills/stage-rendering/SKILL.md` | document undo groups + group drag |
+| File                                                                                | Change                                                     |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `packages/stage/src/lib/components/Stage/types.ts`                                  | add optional callback `onMarkersMoved`                     |
+| `packages/stage/src/lib/components/Stage/components/MarkerLayer/MarkerLayer.svelte` | group-drag state machine                                   |
+| `apps/web/src/lib/realtime/SessionDocClient.svelte.ts`                              | `beginUndoGroup()` / `endUndoGroup()`                      |
+| `apps/web/src/lib/realtime/docSchema.test.ts`                                       | undo-group test                                            |
+| `apps/web/src/routes/(app)/[party]/[gameSession]/[[selectedScene]]/+page.svelte`    | `onMarkersMoved` writer, select-all, Escape, flush on hide |
+| `apps/web/src/lib/components/GameSession/Shortcuts.svelte`                          | document new shortcuts                                     |
+| `docs/undo-redo-architecture.md`, `.claude/skills/stage-rendering/SKILL.md`         | document undo groups + group drag                          |
 
 ## Implementation steps
 
@@ -77,7 +77,13 @@ onMarkersMoved?: (moves: Array<{ marker: Marker; position: { x: number; y: numbe
        const cell = getGridCellSize(props.grid, props.display);
        return new THREE.Vector2(Math.round(delta.x / cell) * cell, Math.round(delta.y / cell) * cell);
      }
-     const snapped = snapToGrid(drag.anchorStart.clone().add(delta), props.grid, props.display, true /* centerOnly */, localScale);
+     const snapped = snapToGrid(
+       drag.anchorStart.clone().add(delta),
+       props.grid,
+       props.display,
+       true /* centerOnly */,
+       localScale
+     );
      return new THREE.Vector2(snapped.x, snapped.y).sub(drag.anchorStart);
    };
    ```
@@ -135,7 +141,11 @@ const finishGroupDrag = () => {
   const ids = Object.keys(groupDragFinal);
   if (client && ids.length) {
     client.write.transaction(() => {
-      for (const id of ids) client.write.setMarkerFields(selectedSceneId, id, { positionX: groupDragFinal[id].x, positionY: groupDragFinal[id].y });
+      for (const id of ids)
+        client.write.setMarkerFields(selectedSceneId, id, {
+          positionX: groupDragFinal[id].x,
+          positionY: groupDragFinal[id].y
+        });
     });
   }
   for (const id of ids) delete dragPositions[id];

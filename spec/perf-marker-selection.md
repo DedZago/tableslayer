@@ -8,13 +8,13 @@ Clicking a token on the GM stage takes a noticeable time before the token is hig
 Hit-testing itself is cheap (one raycast + O(n) distance check in `MarkerLayer.svelte` `findClosestMarker`), selection is
 local `$state` and never goes over the network. The latency comes from what a single selection change triggers:
 
-| ID  | Root cause | Impact |
-| --- | --- | --- |
-| RC1 | `{#key selectedMarkerId}` around `<MarkerManager>` in the GM page destroys and rebuilds the whole side panel (including a TipTap editor, ColorPicker, popovers) on every selection — even while the pane is collapsed. | HIGH |
-| RC2 | `MarkerToken.svelte` `drawMarker()` reads `isHovered \|\| isSelected` to pick the stroke colour, so hover/select re-rasterises a 1024px+ canvas with gaussian shadow blur, calls `getComputedStyle(document.documentElement)` (forced style recalc), disposes the texture and uploads a new ~5 MB `CanvasTexture` — for the old **and** the new token. | HIGH |
-| RC3 | `renderStageProps = $derived({...stageProps, marker: {...stageProps.marker, selectedIds, dropTargetId}})` creates a brand-new props object on each selection change, re-running every `props`-reading effect in Stage/Scene/layers. The pruning effect always assigns a new array; `pinnedMarkerIds` is rebuilt on every markers change. | MED-HIGH |
-| RC4 | `MarkerLayer` sets `isDragging = true` on mousedown with no movement threshold; 1–2 px of jitter writes positions to the Y doc, rebuilds the whole scene props, and can snap the token into another cell (also creating an undo step). | MED |
-| RC5 | `<Canvas renderMode="always">` + heavy frame may add up to a frame of latency. Measure only; do not change render mode (animated shaders need it). | LOW |
+| ID  | Root cause                                                                                                                                                                                                                                                                                                                                             | Impact   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| RC1 | `{#key selectedMarkerId}` around `<MarkerManager>` in the GM page destroys and rebuilds the whole side panel (including a TipTap editor, ColorPicker, popovers) on every selection — even while the pane is collapsed.                                                                                                                                 | HIGH     |
+| RC2 | `MarkerToken.svelte` `drawMarker()` reads `isHovered \|\| isSelected` to pick the stroke colour, so hover/select re-rasterises a 1024px+ canvas with gaussian shadow blur, calls `getComputedStyle(document.documentElement)` (forced style recalc), disposes the texture and uploads a new ~5 MB `CanvasTexture` — for the old **and** the new token. | HIGH     |
+| RC3 | `renderStageProps = $derived({...stageProps, marker: {...stageProps.marker, selectedIds, dropTargetId}})` creates a brand-new props object on each selection change, re-running every `props`-reading effect in Stage/Scene/layers. The pruning effect always assigns a new array; `pinnedMarkerIds` is rebuilt on every markers change.               | MED-HIGH |
+| RC4 | `MarkerLayer` sets `isDragging = true` on mousedown with no movement threshold; 1–2 px of jitter writes positions to the Y doc, rebuilds the whole scene props, and can snap the token into another cell (also creating an undo step).                                                                                                                 | MED      |
+| RC5 | `<Canvas renderMode="always">` + heavy frame may add up to a frame of latency. Measure only; do not change render mode (animated shaders need it).                                                                                                                                                                                                     | LOW      |
 
 Rust/WASM is **not** a fit here: the cost is DOM/Svelte reactivity and GPU uploads, not computation.
 
@@ -26,16 +26,16 @@ Rust/WASM is **not** a fit here: the cost is DOM/Svelte reactivity and GPU uploa
 
 ## Files
 
-| File | Change |
-| --- | --- |
-| `apps/web/src/routes/(app)/[party]/[gameSession]/[[selectedScene]]/+page.svelte` | remove `{#key}`, remove `renderStageProps`, add `setSelection`, memoise `pinnedMarkerIds`, don't mount pane content while collapsed |
-| `apps/web/src/lib/components/GameSession/MarkerManager.svelte` | edit view uses `$derived` `editingMarker` + `{#if}` (no keyed `#each`); one Editor instance reused |
-| `packages/ui/src/lib/components/Editor/Editor.svelte` | `setContent(content, { emitUpdate: false })` when content changes from outside (**needs changeset — user creates, `patch`**) |
-| `packages/stage/src/lib/components/Stage/components/MarkerLayer/MarkerToken.svelte` | separate highlight ring mesh, cached CSS var, reuse CanvasTexture, smaller canvas, shared geometry, image cache |
-| `packages/stage/src/lib/components/Stage/components/MarkerLayer/MarkerLayer.svelte` | drag start threshold, optimistic selection, read selection from stage context |
-| `packages/stage/src/lib/components/Stage/components/Stage/Stage.svelte` + `Stage/types.ts` | new props `selectedMarkerIds`, `dropTargetMarkerId` copied into stage context |
-| `packages/stage/src/lib/components/Stage/helpers/tokenRasterCache.ts` (new) | module-level image + CSS var caches |
-| `.claude/skills/stage-rendering/SKILL.md` | update "Editor selection" + new gotchas, bump "last verified" |
+| File                                                                                       | Change                                                                                                                              |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/routes/(app)/[party]/[gameSession]/[[selectedScene]]/+page.svelte`           | remove `{#key}`, remove `renderStageProps`, add `setSelection`, memoise `pinnedMarkerIds`, don't mount pane content while collapsed |
+| `apps/web/src/lib/components/GameSession/MarkerManager.svelte`                             | edit view uses `$derived` `editingMarker` + `{#if}` (no keyed `#each`); one Editor instance reused                                  |
+| `packages/ui/src/lib/components/Editor/Editor.svelte`                                      | `setContent(content, { emitUpdate: false })` when content changes from outside (**needs changeset — user creates, `patch`**)        |
+| `packages/stage/src/lib/components/Stage/components/MarkerLayer/MarkerToken.svelte`        | separate highlight ring mesh, cached CSS var, reuse CanvasTexture, smaller canvas, shared geometry, image cache                     |
+| `packages/stage/src/lib/components/Stage/components/MarkerLayer/MarkerLayer.svelte`        | drag start threshold, optimistic selection, read selection from stage context                                                       |
+| `packages/stage/src/lib/components/Stage/components/Stage/Stage.svelte` + `Stage/types.ts` | new props `selectedMarkerIds`, `dropTargetMarkerId` copied into stage context                                                       |
+| `packages/stage/src/lib/components/Stage/helpers/tokenRasterCache.ts` (new)                | module-level image + CSS var caches                                                                                                 |
+| `.claude/skills/stage-rendering/SKILL.md`                                                  | update "Editor selection" + new gotchas, bump "last verified"                                                                       |
 
 ## Implementation steps
 
@@ -55,7 +55,7 @@ Rust/WASM is **not** a fit here: the cost is DOM/Svelte reactivity and GPU uploa
      note-save path with that explicit id. A pending throttled save must never land on a different token.
 4. In `+page.svelte`, wrap the right-pane tool content (the block containing AnnotationManager / LightManager / MarkerManager)
    in `{#if !isMarkersCollapsed}` … `{/if}`. The double-click path (`onMarkerDoubleClick`) expands the pane, which mounts it — fine.
-   **Coordinate with `spec/sidepanel-library-handouts.md`**: after the tab redesign, only the *Tokens* tab content is gated; Library/Handout stay mounted.
+   **Coordinate with `spec/sidepanel-library-handouts.md`**: after the tab redesign, only the _Tokens_ tab content is gated; Library/Handout stay mounted.
 
 ### Step 2 — Highlight ring as its own mesh (RC2)
 
@@ -100,7 +100,7 @@ In `MarkerToken.svelte`:
 
 ### Step 3 — Selection out of the props object (RC3)
 
-1. `packages/stage/.../Stage/types.ts`: add to `StageProps` (top-level, *not* inside `marker`):
+1. `packages/stage/.../Stage/types.ts`: add to `StageProps` (top-level, _not_ inside `marker`):
    `selectedMarkerIds?: string[]; dropTargetMarkerId?: string | null;` (mirror how `hoveredMarkerId` is passed).
 2. `Stage.svelte`: copy both into the stage context in the existing context-sync effect.
 3. `MarkerLayer.svelte`, where each token's `isSelected` is computed:

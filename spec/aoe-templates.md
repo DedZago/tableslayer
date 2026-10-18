@@ -25,27 +25,69 @@ force, water, sleet, insect swarm, acid.
 
 ```ts
 // packages/stage/src/lib/components/Stage/components/AoeTemplateLayer/types.ts  (created in wave 0)
-export enum AoeShape { Circle = 'circle', Square = 'square', Cone = 'cone', Line = 'line' }
-export enum AoeEffect { None = 0, Fire, Lightning, Frost, PoisonGas, Thorns, Mud, Darkness, FogCloud, Web, Grease, Radiant, Necrotic, Force, Water, SleetStorm, InsectSwarm, Acid }
+export enum AoeShape {
+  Circle = 'circle',
+  Square = 'square',
+  Cone = 'cone',
+  Line = 'line'
+}
+export enum AoeEffect {
+  None = 0,
+  Fire,
+  Lightning,
+  Frost,
+  PoisonGas,
+  Thorns,
+  Mud,
+  Darkness,
+  FogCloud,
+  Web,
+  Grease,
+  Radiant,
+  Necrotic,
+  Force,
+  Water,
+  SleetStorm,
+  InsectSwarm,
+  Acid
+}
 export interface AoeTemplate {
   id: string;
   shape: AoeShape;
   position: { x: number; y: number }; // origin (centre for circle; apex for cone; face midpoint for square/line)
-  angle: number;                      // degrees CCW from +x, layer-local
-  size: number;                       // ft: radius | side | length
-  width: number;                      // ft, line only (default 5)
+  angle: number; // degrees CCW from +x, layer-local
+  size: number; // ft: radius | side | length
+  width: number; // ft, line only (default 5)
   effect: AoeEffect;
   color: string;
-  opacity: number;                    // 0..1
-  visibility: StageMode;              // DM = GM-only, Player = visible to players
-  label?: string | null;              // optional spell name
+  opacity: number; // 0..1
+  visibility: StageMode; // DM = GM-only, Player = visible to players
+  label?: string | null; // optional spell name
 }
-export interface AoeToolSettings { shape: AoeShape; effect: AoeEffect; color: string; opacity: number; lineWidth: number; snapToGrid: boolean; snapAngle: boolean; visibility: StageMode }
-export interface AoeTemplateLayerProps { templates: AoeTemplate[]; selectedId: string | null; showLabels: boolean; tool: AoeToolSettings }
-export interface AoeTemplateLayerExports { cancelDraft(): void; hasDraft(): boolean }
+export interface AoeToolSettings {
+  shape: AoeShape;
+  effect: AoeEffect;
+  color: string;
+  opacity: number;
+  lineWidth: number;
+  snapToGrid: boolean;
+  snapAngle: boolean;
+  visibility: StageMode;
+}
+export interface AoeTemplateLayerProps {
+  templates: AoeTemplate[];
+  selectedId: string | null;
+  showLabels: boolean;
+  tool: AoeToolSettings;
+}
+export interface AoeTemplateLayerExports {
+  cancelDraft(): void;
+  hasDraft(): boolean;
+}
 ```
 
 Local frame for every shape: origin (0,0), +x = direction.
+
 - Circle `|p| ≤ R` · Square `x ∈ [0,s], |y| ≤ s/2` (origin on a face; angle snaps to 90°) · Line `x ∈ [0,L], |y| ≤ w/2` ·
   Cone `x ∈ [0,L], |y| ≤ x/2` (5e: width at distance = distance, 53.13°).
 - Emanation (anchored to a token) is phase 2; the DB column `anchor_marker_id` is reserved now.
@@ -124,26 +166,26 @@ void main(){
 
 Effect bodies (each in its own `#if EFFECT_TYPE == n` block; default colours in `AOE_EFFECT_DEFAULT_COLORS`):
 
-| # | Effect | Recipe |
-| --- | --- | --- |
-| 0 | None | `vec4(uColor, .35*inside)` + rim |
-| 1 | Fire | `n=fbm(c*1.5+vec2(0,-t*.8)+fbm(c*3.+t)*.6)`; heat `h=n*(.6+.4*depth)+.15*sin(t*9.+hash12(floor(c*4.))*6.)`; ported `getFireColor(h)` ramp (dark red→orange→yellow→white, HDR >1 for bloom); alpha `inside*smoothstep(.15,.35,h)` + outer glow `exp(-max(d,0.)*.6)*.4` |
-| 2 | Lightning | `v=voronoi(c*1.2, floor(t*12.))`; arcs `smoothstep(.06,0.,v.y)*step(.5,hash12(floor(c*1.2)+floor(t*12.)))`; deep blue base `.25*inside`; colour `mix(vec3(.2,.4,1),vec3(1.2,1.3,1.6),a)`; flicker `.7+.3*hash12(vec2(floor(t*20.)))` |
-| 3 | Frost | `v=voronoi(c*2.,0.)`; facets `.6+.4*v.x`; cracks `smoothstep(.05,0.,v.y)`; sparkle `step(.985,hash12(floor(c*16.)+floor(t*3.)))`; pale cyan; thicker at rim `mix(1.,.7,depth)` |
-| 4 | Poison gas | `g=fbm(c*.8+vec2(t*.15,t*.07))*fbm(c*1.6-t*.1)`; green (.35,.8,.2); alpha `smoothstep(-2.5,0.,-d)*(.35+.5*g)`; feather 2.5 ft |
-| 5 | Thorns | per cell `id=floor(c*2.)`, `q=fract(c*2.)-.5`; star spikes `smoothstep(.02,0.,r-.35*pow(abs(cos(ang*(3.+floor(hash12(id)*3.)))),8.))`; sway `ang+=.05*sin(t+hash12(id)*6.)`; brown/green over dark fbm ground |
-| 6 | Mud | `m=fbm(c*1.3)`; puddles `smoothstep(.55,.6,m)` + ripples `sin(length(fract(c)-.5)*20.-t*2.)*.05`; browns; difficult-terrain hatching `step(.9,fract((c.x+c.y)*2.))*.15` |
-| 7 | Darkness | near-black (.02,0,.04) alpha `.92*inside`; purple wisps `fbm(c+fbm(c*2.+t*.2))*.15`; tendrils past edge `smoothstep(1.5,0.,d)*fbm(c*3.+t*.3)` |
-| 8 | Fog cloud | grey-white fbm at two drift speeds; alpha `.75*inside*(.6+.4*fbm)`; feather 2.5 ft |
-| 9 | Web | port `webMesh` strands (`abs(fract(c*k)-.5)` lines rotated per cell); static; alpha only on strands |
-| 10 | Grease | dark base + thin-film iridescence `0.5+0.5*cos(6.28*(fbm(c*2.+t*.05)*2.+vec3(0,.33,.67)))*.35` |
-| 11 | Radiant | golden; rays `pow(.5+.5*sin(atan(p.y,p.x)*12.+t*1.5),6.)*(1.-depth*.3)`; motes `step(.99,hash12(floor(c*10.+vec2(0,t))))`; HDR |
-| 12 | Necrotic | sickly green-black; veins `smoothstep(.07,0.,voronoi(c*1.5,0.).y)` pulsing `.6+.4*sin(t*2.-length(p)*.3)` |
-| 13 | Force | hex lattice lines in `uColor` (violet), shimmer `sin(t*3.+c.x*2.)`, strong rim |
-| 14 | Water | caustics `pow(abs(sin(c.x*3.+fbm(c+t*.2)*4.)*sin(c.y*3.+fbm(c-t*.2)*4.)),.5)`; teal |
-| 15 | Sleet storm | icy grey base `.4`; streaks `col=floor(c.x*12.)`, `s=fract(c.y*3.+t*4.+hash12(vec2(col)))`, `smoothstep(.95,1.,s)` on skewed axis `c+=c.yx*.3` |
-| 16 | Insect swarm | `id=floor(c*3.)`; one orbiting dot per cell `o=.5+.3*vec2(cos(t*3.+h*6.),sin(t*4.+h*9.))`; dark brown + faint haze |
-| 17 | Acid | as poison gas with acid yellow-green (.7,.9,.1) and bubbling `step(.97,hash12(floor(c*6.)+floor(t*2.)))` |
+| #   | Effect       | Recipe                                                                                                                                                                                                                                                                |
+| --- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | None         | `vec4(uColor, .35*inside)` + rim                                                                                                                                                                                                                                      |
+| 1   | Fire         | `n=fbm(c*1.5+vec2(0,-t*.8)+fbm(c*3.+t)*.6)`; heat `h=n*(.6+.4*depth)+.15*sin(t*9.+hash12(floor(c*4.))*6.)`; ported `getFireColor(h)` ramp (dark red→orange→yellow→white, HDR >1 for bloom); alpha `inside*smoothstep(.15,.35,h)` + outer glow `exp(-max(d,0.)*.6)*.4` |
+| 2   | Lightning    | `v=voronoi(c*1.2, floor(t*12.))`; arcs `smoothstep(.06,0.,v.y)*step(.5,hash12(floor(c*1.2)+floor(t*12.)))`; deep blue base `.25*inside`; colour `mix(vec3(.2,.4,1),vec3(1.2,1.3,1.6),a)`; flicker `.7+.3*hash12(vec2(floor(t*20.)))`                                  |
+| 3   | Frost        | `v=voronoi(c*2.,0.)`; facets `.6+.4*v.x`; cracks `smoothstep(.05,0.,v.y)`; sparkle `step(.985,hash12(floor(c*16.)+floor(t*3.)))`; pale cyan; thicker at rim `mix(1.,.7,depth)`                                                                                        |
+| 4   | Poison gas   | `g=fbm(c*.8+vec2(t*.15,t*.07))*fbm(c*1.6-t*.1)`; green (.35,.8,.2); alpha `smoothstep(-2.5,0.,-d)*(.35+.5*g)`; feather 2.5 ft                                                                                                                                         |
+| 5   | Thorns       | per cell `id=floor(c*2.)`, `q=fract(c*2.)-.5`; star spikes `smoothstep(.02,0.,r-.35*pow(abs(cos(ang*(3.+floor(hash12(id)*3.)))),8.))`; sway `ang+=.05*sin(t+hash12(id)*6.)`; brown/green over dark fbm ground                                                         |
+| 6   | Mud          | `m=fbm(c*1.3)`; puddles `smoothstep(.55,.6,m)` + ripples `sin(length(fract(c)-.5)*20.-t*2.)*.05`; browns; difficult-terrain hatching `step(.9,fract((c.x+c.y)*2.))*.15`                                                                                               |
+| 7   | Darkness     | near-black (.02,0,.04) alpha `.92*inside`; purple wisps `fbm(c+fbm(c*2.+t*.2))*.15`; tendrils past edge `smoothstep(1.5,0.,d)*fbm(c*3.+t*.3)`                                                                                                                         |
+| 8   | Fog cloud    | grey-white fbm at two drift speeds; alpha `.75*inside*(.6+.4*fbm)`; feather 2.5 ft                                                                                                                                                                                    |
+| 9   | Web          | port `webMesh` strands (`abs(fract(c*k)-.5)` lines rotated per cell); static; alpha only on strands                                                                                                                                                                   |
+| 10  | Grease       | dark base + thin-film iridescence `0.5+0.5*cos(6.28*(fbm(c*2.+t*.05)*2.+vec3(0,.33,.67)))*.35`                                                                                                                                                                        |
+| 11  | Radiant      | golden; rays `pow(.5+.5*sin(atan(p.y,p.x)*12.+t*1.5),6.)*(1.-depth*.3)`; motes `step(.99,hash12(floor(c*10.+vec2(0,t))))`; HDR                                                                                                                                        |
+| 12  | Necrotic     | sickly green-black; veins `smoothstep(.07,0.,voronoi(c*1.5,0.).y)` pulsing `.6+.4*sin(t*2.-length(p)*.3)`                                                                                                                                                             |
+| 13  | Force        | hex lattice lines in `uColor` (violet), shimmer `sin(t*3.+c.x*2.)`, strong rim                                                                                                                                                                                        |
+| 14  | Water        | caustics `pow(abs(sin(c.x*3.+fbm(c+t*.2)*4.)*sin(c.y*3.+fbm(c-t*.2)*4.)),.5)`; teal                                                                                                                                                                                   |
+| 15  | Sleet storm  | icy grey base `.4`; streaks `col=floor(c.x*12.)`, `s=fract(c.y*3.+t*4.+hash12(vec2(col)))`, `smoothstep(.95,1.,s)` on skewed axis `c+=c.yx*.3`                                                                                                                        |
+| 16  | Insect swarm | `id=floor(c*3.)`; one orbiting dot per cell `o=.5+.3*vec2(cos(t*3.+h*6.),sin(t*4.+h*9.))`; dark brown + faint haze                                                                                                                                                    |
+| 17  | Acid         | as poison gas with acid yellow-green (.7,.9,.1) and bubbling `step(.97,hash12(floor(c*6.)+floor(t*2.)))`                                                                                                                                                              |
 
 ## Interaction
 
@@ -164,6 +206,7 @@ Effect bodies (each in its own `#if EFFECT_TYPE == n` block; default colours in 
 ## Files and steps
 
 ### Stage (`packages/stage/src/lib/components/Stage/`)
+
 1. `components/AoeTemplateLayer/types.ts` (wave 0) + `AOE_EFFECT_DEFAULT_COLORS`, `AOE_EFFECT_LABELS` (added by the AoE agent).
 2. `helpers/aoeTemplates.ts` (THREE-free): `getTemplateLocalBounds(t, featherFt)`, `templateSdf(t, localPointFt)`,
    `worldToTemplateLocal(t, point, ftPerPx)`, `sizeFromCursor(shape, origin, cursor, ftPerPx, angleDeg, snap)`,
@@ -180,13 +223,14 @@ Effect bodies (each in its own `#if EFFECT_TYPE == n` block; default colours in 
    `renderer.clippingPlanes = []`; use `$state.raw` for Three objects. Dispose material in `onDestroy`.
 9. `AoeTemplateLayer/AoeTemplateHandles.svelte` — Overlay layer, DM only: origin disc, end disc, dashed outline for drafts, label sprite.
 10. `AoeTemplateLayer/AoeTemplateLayer.svelte` — props `props, mode, isActive, grid, display (anchoredDisplay), realDisplay, sceneZoom,
-    localScale, sceneRotation, mapRotation`; `ftToPx = getGridCellSize(grid, display) / (grid.worldGridSize || 5)`; input like `LightLayer`;
+localScale, sceneRotation, mapRotation`; `ftToPx = getGridCellSize(grid, display) / (grid.worldGridSize || 5)`; input like `LightLayer`;
     state machine `idle | aiming | dragging | editMove | editHandle`; filters `visibility === DM` templates out in Player mode;
     exports `cancelDraft`, `hasDraft`; clears draft when `isActive` goes false or scene changes.
 11. `Scene.svelte` mount + exports; `index.ts` exports types/helpers/enums.
 12. Docs playground `apps/docs/src/routes/(components)/stage/` defaults + tweakpane folder (shape, effect, colour, opacity, snap) + key.
 
 ### Web realtime (`apps/web/src/lib/`)
+
 13. `realtime/types.ts` (wave 0): `AoeTemplateRow`; add to `SceneSnapshot`, hydration data, `ScenePart`.
 14. `realtime/docSchema.ts`: collection union, `rowsOf<AoeTemplateRow>(scene, 'aoeTemplates')` sorted (createdAt, id), `createScene` loop,
     `SCENE_PARTS`; writers `upsertAoeTemplate`, `setAoeTemplateFields`, `deleteAoeTemplate`; `DOC_SCHEMA_VERSION = 3`.
@@ -200,6 +244,7 @@ Effect bodies (each in its own `#if EFFECT_TYPE == n` block; default colours in 
 20. Tests: `docSchema.test.ts` (create/upsert/delete/undo), `wire.test.ts`.
 
 ### Web UI
+
 21. `components/GameSession/AoeTemplateControls.svelte` in `SceneControls.svelte` next to measurement: tool IconButton (`IconCone2`),
     `SelectorMenu` for shape (Circle `IconCircle`, Cube `IconSquare`, Cone `IconCone2`, Line `IconRectangleVertical`) — copy
     `MeasurementControls`; effect swatch button → `Popover` with 4-column grid of 28px swatches (CSS gradients from
@@ -213,6 +258,7 @@ Effect bodies (each in its own `#if EFFECT_TYPE == n` block; default colours in 
 25. Play route: nothing beyond props — read-only render, GM-only filtered in the layer.
 
 ### Docs
+
 26. `.claude/skills/stage-rendering/SKILL.md` (layer order, shared time, define pattern) and `docs/yjs-sync-architecture.md` (collection, v3).
 
 ## Testing

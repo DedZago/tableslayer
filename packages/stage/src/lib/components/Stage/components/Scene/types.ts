@@ -59,6 +59,7 @@ export interface SceneLayerProps {
   zoom: number;
 }
 
+import type { AoeTemplateLayerExports } from '../AoeTemplateLayer/types';
 import type { Light } from '../LightLayer/types';
 import type { Marker } from '../MarkerLayer/types';
 
@@ -67,6 +68,7 @@ export interface SceneExports {
   fit: () => void;
   generateThumbnail: () => Promise<Blob>;
   getMarkerScreenPosition: (marker: Marker) => { x: number; y: number } | null;
+  aoeTemplates?: AoeTemplateLayerExports;
 
   annotations: {
     clear: (layerId: string) => void;

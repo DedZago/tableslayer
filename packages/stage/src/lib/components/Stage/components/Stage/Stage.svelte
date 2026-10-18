@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Canvas, T } from '@threlte/core';
   import * as THREE from 'three';
-  import type { Callbacks, StageProps } from './types';
+  import type { Callbacks, StageInteractionProps, StageProps } from './types';
   import Scene from '../Scene/Scene.svelte';
   import { type SceneExports, SceneLayerOrder } from '../Scene/types';
   import { setContext } from 'svelte';
@@ -37,7 +37,7 @@
     return renderer;
   };
 
-  interface Props {
+  interface Props extends StageInteractionProps {
     props: StageProps;
     callbacks: Callbacks;
     receivedMeasurement?: {
@@ -76,6 +76,9 @@
     trackLocalCursor = false,
     hoveredMarkerId = null,
     pinnedMarkerIds = [],
+    selectedMarkerIds = undefined,
+    dropTargetMarkerId = undefined,
+    activeTurnMarkerId = null,
     onPinToggle
   }: Props = $props();
 
@@ -111,6 +114,10 @@
     mode: props.mode,
     hoveredMarkerId,
     pinnedMarkerIds,
+    // Synced from props by the effect below
+    selectedMarkerIds: undefined as string[] | undefined,
+    dropTargetMarkerId: undefined as string | null | undefined,
+    activeTurnMarkerId: null as string | null,
     performanceTier: props.performanceTier ?? 'high',
     // Set by MarkerLayer when a pointer-down hits a marker; other layers use
     // it to yield shared gestures (e.g. fog-room double-tap) to the marker
@@ -126,6 +133,9 @@
     stageContext.mode = props.mode;
     stageContext.hoveredMarkerId = hoveredMarkerId;
     stageContext.pinnedMarkerIds = pinnedMarkerIds;
+    stageContext.selectedMarkerIds = selectedMarkerIds;
+    stageContext.dropTargetMarkerId = dropTargetMarkerId;
+    stageContext.activeTurnMarkerId = activeTurnMarkerId;
     stageContext.performanceTier = props.performanceTier ?? 'high';
     stageContext.mainPassUsesComposer = hasActivePostProcessing(props.postProcessing, props.performanceTier);
   });
@@ -182,6 +192,11 @@
     hitTest: (point: { x: number; y: number }) => sceneRef?.markers.hitTest(point) ?? null,
     inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>
       sceneRef?.markers.inRectangle(start, end) ?? []
+  };
+
+  export const aoeTemplates = {
+    cancelDraft: () => sceneRef?.aoeTemplates?.cancelDraft(),
+    hasDraft: () => sceneRef?.aoeTemplates?.hasDraft() ?? false
   };
 
   export const lights = {

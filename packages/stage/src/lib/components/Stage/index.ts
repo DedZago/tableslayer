@@ -7,6 +7,14 @@ export {
   type AnnotationLayerData,
   type AnnotationsLayerProps
 } from './components/AnnotationLayer/types';
+export {
+  AoeEffect,
+  AoeShape,
+  type AoeTemplate,
+  type AoeTemplateLayerExports,
+  type AoeTemplateLayerProps,
+  type AoeToolSettings
+} from './components/AoeTemplateLayer/types';
 export { DrawMode, RenderMode, ToolType, peekRLEDimensions } from './components/DrawingLayer/types';
 export { type EdgeOverlayProps } from './components/EdgeOverlayLayer/types';
 export { type FogLayerProps } from './components/FogLayer/types';
@@ -27,6 +35,7 @@ export {
   MarkerSize,
   MarkerVisibility,
   type Marker,
+  type MarkerCondition,
   type MarkerLayerExports,
   type MarkerLayerProps
 } from './components/MarkerLayer/types';

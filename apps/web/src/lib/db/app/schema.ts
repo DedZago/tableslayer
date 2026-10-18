@@ -1,4 +1,6 @@
 import type { HandoutDescriptor } from '$lib/realtime/types';
+import type { StatBlock } from '$lib/utils/statBlock/types';
+import type { MarkerCondition } from '@tableslayer/stage';
 import { sql } from 'drizzle-orm';
 import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { createInsertSchema, createSelectSchema, createUpdateSchema } from 'drizzle-zod';
@@ -441,7 +443,13 @@ export const sceneTable = sqliteTable(
     markerStrokeWidth: integer('marker_stroke_width').notNull().default(50),
     markerTextColor: text('marker_text_color').notNull().default('#ffffff'),
     markerTextStrokeColor: text('marker_text_stroke_color').notNull().default('#000000'),
-    annotationLayers: text('annotation_layers', { mode: 'json' })
+    annotationLayers: text('annotation_layers', { mode: 'json' }),
+    // Combat: round 0 = not started or still rolling initiative
+    combatRound: integer('combat_round').notNull().default(0),
+    combatActiveMarkerId: text('combat_active_marker_id'),
+    combatLairStep: integer('combat_lair_step', { mode: 'boolean' }).notNull().default(false),
+    combatLairActions: integer('combat_lair_actions', { mode: 'boolean' }).notNull().default(false),
+    combatShowOnTv: integer('combat_show_on_tv', { mode: 'boolean' }).notNull().default(true)
   },
   (table) => [
     // No unique index on (gameSessionId, order): scene order is a fractional sort
@@ -459,6 +467,7 @@ export const sceneTable = sqliteTable(
     check('protected_edge_opacity', sql`${table.edgeOpacity} >= 0 AND ${table.edgeOpacity} <= 1`),
     check('protected_edge_fade_start', sql`${table.edgeFadeStart} >= 0 AND ${table.edgeFadeStart} <= 1`),
     check('protected_edge_fade_end', sql`${table.edgeFadeEnd} >= 0 AND ${table.edgeFadeEnd} <= 1`),
+    check('protected_combat_round', sql`${table.combatRound} >= 0`),
     index('idx_scene_order').on(table.order),
     index('idx_scene_game_session_id').on(table.gameSessionId)
   ]
@@ -496,7 +505,18 @@ export const markerTable = sqliteTable(
     shapeColor: text('shape_color').notNull().default('#ffffff'),
     size: integer('size').notNull().default(1),
     note: text('note', { mode: 'json' }),
-    pinnedTooltip: integer('pinned_tooltip', { mode: 'boolean' }).notNull().default(false)
+    pinnedTooltip: integer('pinned_tooltip', { mode: 'boolean' }).notNull().default(false),
+    conditions: text('conditions', { mode: 'json' })
+      .$type<MarkerCondition[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    statBlock: text('stat_block', { mode: 'json' }).$type<StatBlock>(),
+    hitPoints: integer('hit_points'),
+    tempHitPoints: integer('temp_hit_points'),
+    inCombat: integer('in_combat', { mode: 'boolean' }).notNull().default(false),
+    initiative: real('initiative'),
+    initiativeBonus: integer('initiative_bonus'),
+    initiativeTiebreak: real('initiative_tiebreak').notNull().default(0)
   },
   (table) => [
     index('idx_marker_scene_id').on(table.sceneId),
@@ -535,6 +555,8 @@ export const assetsTable = sqliteTable(
     sourceUrl: text('source_url'),
     adapterVersion: text('adapter_version'),
     importRequestId: text('import_request_id'),
+    statBlock: text('stat_block', { mode: 'json' }).$type<StatBlock>(),
+    initiativeBonus: integer('initiative_bonus'),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -638,6 +660,54 @@ export type SelectLight = typeof lightTable.$inferSelect;
 export const insertLightSchema = createInsertSchema(lightTable);
 export const selectLightSchema = createSelectSchema(lightTable);
 export const updateLightSchema = createUpdateSchema(lightTable);
+
+// AOE TEMPLATES
+// AOE TEMPLATES
+// AOE TEMPLATES
+
+export const VALID_AOE_SHAPES = ['circle', 'square', 'cone', 'line'] as const;
+
+export const aoeTemplateTable = sqliteTable(
+  'aoe_template',
+  {
+    id: text('id')
+      .primaryKey()
+      .notNull()
+      .$default(() => uuidv4()),
+    sceneId: text('scene_id')
+      .notNull()
+      .references(() => sceneTable.id, { onDelete: 'cascade' }),
+    shape: text('shape', { enum: VALID_AOE_SHAPES }).notNull().default('circle'),
+    positionX: real('position_x').notNull().default(0),
+    positionY: real('position_y').notNull().default(0),
+    angle: real('angle').notNull().default(0), // Degrees CCW from +x, layer-local
+    size: real('size').notNull().default(20), // Feet: radius | side | length
+    width: real('width').notNull().default(5), // Feet, line only
+    effect: integer('effect').notNull().default(0), // AoeEffect enum
+    color: text('color').notNull().default('#ff6a00'),
+    opacity: real('opacity').notNull().default(0.6),
+    visibility: integer('visibility').notNull().default(1), // StageMode enum (0=DM, 1=Player)
+    label: text('label'),
+    anchorMarkerId: text('anchor_marker_id'), // Reserved for token-anchored emanations
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date())
+  },
+  (table) => [
+    index('idx_aoe_template_scene_id').on(table.sceneId),
+    check('protected_aoe_template_size', sql`${table.size} > 0`),
+    check('protected_aoe_template_width', sql`${table.width} > 0`),
+    check('protected_aoe_template_opacity', sql`${table.opacity} >= 0 AND ${table.opacity} <= 1`),
+    check('protected_aoe_template_visibility', sql`${table.visibility} >= 0 AND ${table.visibility} <= 1`)
+  ]
+);
+
+export type AoeTemplateShape = (typeof VALID_AOE_SHAPES)[number];
+export type InsertAoeTemplate = typeof aoeTemplateTable.$inferInsert;
+export type SelectAoeTemplate = typeof aoeTemplateTable.$inferSelect;
+export const insertAoeTemplateSchema = createInsertSchema(aoeTemplateTable);
+export const selectAoeTemplateSchema = createSelectSchema(aoeTemplateTable);
+export const updateAoeTemplateSchema = createUpdateSchema(aoeTemplateTable);
 
 // ANNOTATIONS
 // ANNOTATIONS

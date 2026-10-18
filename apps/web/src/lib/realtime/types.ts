@@ -4,6 +4,9 @@
 // server without dragging in drizzle/zod. Field names must match the DB columns 1:1 —
 // the server persister copies them straight into upserts.
 
+import type { AoeTemplate, MarkerCondition } from '@tableslayer/stage';
+import type { StatBlock } from '../utils/statBlock/types';
+
 export interface SceneSettings {
   id: string;
   gameSessionId: string;
@@ -71,6 +74,15 @@ export interface SceneSettings {
   markerStrokeWidth: number;
   markerTextColor: string;
   markerTextStrokeColor: string;
+  // Combat (optional: rows hydrated before these fields existed lack them)
+  /** 0 = no combat or still rolling initiative, 1+ = current round */
+  combatRound?: number;
+  combatActiveMarkerId?: string | null;
+  /** True while the turn sits on the initiative-20 lair step */
+  combatLairStep?: boolean;
+  /** Whether turns stop on the lair step */
+  combatLairActions?: boolean;
+  combatShowOnTv?: boolean;
 }
 
 export interface MarkerRow {
@@ -89,6 +101,18 @@ export interface MarkerRow {
   size: number;
   note: unknown;
   pinnedTooltip: boolean;
+  conditions?: MarkerCondition[] | null;
+  statBlock?: StatBlock | null;
+  hitPoints?: number | null;
+  tempHitPoints?: number | null;
+  // Combat (optional for the same reason as SceneSettings)
+  inCombat?: boolean;
+  /** Rolled or typed total; null = not rolled */
+  initiative?: number | null;
+  /** GM override; null = use the stat block or 0 */
+  initiativeBonus?: number | null;
+  /** Higher acts first among equal initiatives */
+  initiativeTiebreak?: number;
 }
 
 export interface LightRow {
@@ -115,11 +139,31 @@ export interface AnnotationRow {
   effectType: number | null;
 }
 
+export interface AoeTemplateRow {
+  id: string;
+  sceneId: string;
+  shape: `${AoeTemplate['shape']}`;
+  positionX: number;
+  positionY: number;
+  angle: number;
+  size: number;
+  width: number;
+  effect: number;
+  color: string;
+  opacity: number;
+  visibility: number;
+  label: string | null;
+  anchorMarkerId: string | null;
+  /** Unix seconds, like the DB column; used for stable ordering */
+  createdAt: number;
+}
+
 export interface SceneSnapshot {
   id: string;
   settings: SceneSettings;
   markers: MarkerRow[];
   lights: LightRow[];
+  aoeTemplates: AoeTemplateRow[];
   /** Includes each annotation's RLE mask as a stable Uint8Array reference. */
   annotations: Array<AnnotationRow & { mask?: Uint8Array | null }>;
 }
@@ -154,19 +198,20 @@ export interface GameSessionHydrationData {
     settings: SceneSettings;
     markers: MarkerRow[];
     lights: LightRow[];
+    aoeTemplates?: AoeTemplateRow[];
     annotations: Array<AnnotationRow & { mask?: Uint8Array | null }>;
     fogMask?: Uint8Array | null;
   }>;
 }
 
-export type ScenePart = 'settings' | 'markers' | 'lights' | 'annotations' | 'fogMask';
+export type ScenePart = 'settings' | 'markers' | 'lights' | 'aoeTemplates' | 'annotations' | 'fogMask';
 
 export interface SceneChange {
   sceneId: string;
   part: ScenePart | 'scenes';
   /** Changed keys at the event target (settings field names, marker/annotation ids, ...). */
   keys: string[];
-  /** Set when the change happened inside a keyed child (markerId, lightId, annotationId). */
+  /** Set when the change happened inside a keyed child (markerId, lightId, aoeTemplateId, annotationId). */
   childId?: string;
   /** False when this client's own transaction produced the change. */
   remote: boolean;

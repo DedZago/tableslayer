@@ -21,6 +21,19 @@ export enum MarkerSize {
   Large = 3
 }
 
+export type MarkerCondition = {
+  /** Catalog key ('prone', 'exhaustion', …) or 'custom:<uuid>' */
+  id: string;
+  /** Custom conditions only (≤ 24 chars) */
+  label?: string;
+  /** Custom conditions only, '#rrggbb' */
+  color?: string;
+  /** Exhaustion level 1–6 */
+  value?: number;
+  /** Hidden from players */
+  dmOnly?: boolean;
+};
+
 export interface Marker {
   id: string;
   title: string;
@@ -37,6 +50,7 @@ export interface Marker {
   visibility: MarkerVisibility;
   note: JSONContent | null;
   pinnedTooltip?: boolean;
+  conditions?: MarkerCondition[];
 }
 
 export interface MarkerLayerProps {

@@ -1,4 +1,5 @@
 import type { AnnotationsLayerProps } from '../AnnotationLayer/types';
+import type { AoeTemplate, AoeTemplateLayerExports, AoeTemplateLayerProps } from '../AoeTemplateLayer/types';
 import type { EdgeOverlayProps } from '../EdgeOverlayLayer/types';
 import type { FogLayerProps } from '../FogLayer/types';
 import type { FogOfWarLayerProps } from '../FogOfWarLayer/types';
@@ -23,6 +24,8 @@ export interface Callbacks {
   onStageInitialized: () => void;
   onMarkerAdded: (marker: Marker) => void;
   onMarkerMoved: (marker: Marker, position: { x: number; y: number }) => void;
+  /** Group drag: called once per pointer move with every moved marker. Optional — falls back to onMarkerMoved per marker. */
+  onMarkersMoved?: (moves: Array<{ marker: Marker; position: { x: number; y: number } }>) => void;
   onMarkerSelected: (marker: Marker | null) => void;
   onMarkerDoubleClick?: (marker: Marker) => void;
   onMarkerContextMenu: (marker: Marker, event: MouseEvent | TouchEvent) => void;
@@ -38,6 +41,21 @@ export interface Callbacks {
   onLightAdded?: (light: Light) => void;
   onLightMoved?: (light: Light, position: { x: number; y: number }) => void;
   onLightSelected?: (light: Light | null) => void;
+  onAoeTemplateAdded?: (template: AoeTemplate) => void;
+  onAoeTemplateUpdated?: (id: string, patch: Partial<Omit<AoeTemplate, 'id'>>) => void;
+  onAoeTemplateSelected?: (id: string | null) => void;
+  onAoeTemplateDeleted?: (id: string) => void;
+}
+
+/**
+ * Fast-changing state passed to <Stage> as component props, outside the main
+ * `props` object, so changing it never rebuilds the render props.
+ */
+export interface StageInteractionProps {
+  selectedMarkerIds?: string[];
+  dropTargetMarkerId?: string | null;
+  /** Combatant whose turn it is; draws the active-turn ring */
+  activeTurnMarkerId?: string | null;
 }
 
 export enum StageMode {
@@ -143,6 +161,8 @@ export type StageProps = {
   map: MapLayerProps;
   marker: MarkerLayerProps;
   measurement: MeasurementLayerProps;
+  /** Spell area templates. Optional so existing consumers keep working. */
+  aoeTemplates?: AoeTemplateLayerProps;
   /**
    * Rendering quality tier. Defaults to 'high' (full quality).
    */
@@ -196,6 +216,7 @@ export interface StageExports {
     isHoveringLight: boolean;
     isDraggingLight: boolean;
   };
+  aoeTemplates: AoeTemplateLayerExports;
   measurement: {
     getCurrentMeasurement: () => {
       startPoint: { x: number; y: number } | null;

@@ -7,7 +7,7 @@ SENTINEL := map/pirateking-30x60.jpg
 
 help:
 	@echo "make dev      build, migrate and start the development stack (http://$(LAN_HOST):5174)"
-	@echo "make release  build, migrate and start the release stack (http://$(LAN_HOST):8080)"
+	@echo "make release  build, migrate and start the release stack (https://$(LAN_HOST):8443)"
 	@echo "make stop     stop both stacks"
 	@echo "make backup-release  archive the release data folder"
 
@@ -26,9 +26,10 @@ dev: .env
 release: .env
 	-$(HOST) down release
 	$(HOST) migrate release
+	@test -f "$(DATA_ROOT)/tls/server.crt" || $(HOST) tls
 	@test -f "$(DATA_ROOT)/release/assets/$(SENTINEL)" || $(HOST) assets release
 	$(HOST) up release
-	@echo "App: http://$(LAN_HOST):8080"
+	@echo "App: https://$(LAN_HOST):8443  CA certificate: $(DATA_ROOT)/tls/ca.crt"
 
 stop: .env
 	-$(HOST) down development

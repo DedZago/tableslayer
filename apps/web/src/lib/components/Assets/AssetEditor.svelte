@@ -62,7 +62,6 @@
     initial ? { x: initial.cropX, y: initial.cropY, zoom: initial.cropZoom } : DEFAULT_TOKEN_CROP
   );
   let cropImage = $state<HTMLImageElement | null>(null);
-  let cropChanged = $state(false);
   let cropUnavailable = $state(false);
   let pendingFile = $state<File | null>(null);
   let pendingUrl = $state<string | null>(null);
@@ -106,7 +105,6 @@
     pendingUrl = URL.createObjectURL(file);
     cropImage = null;
     cropUnavailable = false;
-    cropChanged = true;
     crop = DEFAULT_TOKEN_CROP;
     if (!name.trim()) name = file.name.replace(/\.[^.]+$/, '').slice(0, 200);
   };
@@ -135,7 +133,7 @@
     return (await uploadMediaFile(file, 'asset')).location;
   };
 
-  const needsTokenImage = $derived(!!cropImage && !cropUnavailable && (cropChanged || !tokenArtworkLocation));
+  const needsTokenImage = $derived(!!cropImage && !cropUnavailable);
 
   const saveWithImages = async () => {
     let nextArtwork = artworkLocation;
@@ -249,7 +247,6 @@
             bind:crop
             bind:image={cropImage}
             crossOrigin={!pendingUrl}
-            onChange={() => (cropChanged = true)}
             onError={() => (cropUnavailable = true)}
           />
           <p class="assetEditor__hint">

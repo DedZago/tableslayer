@@ -1,3 +1,4 @@
+import { ASSET_ROLES } from '$lib/db/app/schema';
 import { apiFactory } from '$lib/factories';
 import {
   assertOwnedMedia,
@@ -24,6 +25,10 @@ const fields = z.object({
     .optional(),
   size: z.number().int().min(1).max(3).optional(),
   imageScale: z.number().finite().min(0.1).max(10).optional(),
+  role: z.enum(ASSET_ROLES).nullable().optional(),
+  cropX: z.number().finite().min(0).max(1).optional(),
+  cropY: z.number().finite().min(0).max(1).optional(),
+  cropZoom: z.number().finite().min(1).max(16).optional(),
   statBlock: statBlockSchema.nullable().optional(),
   initiativeBonus: z.number().int().min(-20).max(30).nullable().optional()
 });

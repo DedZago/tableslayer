@@ -1,5 +1,6 @@
 import { db } from '$lib/db/app';
 import {
+  type AssetRole,
   assetsTable,
   filesTable,
   gameSessionTable,
@@ -27,6 +28,10 @@ const assetListColumns = {
   shapeColor: assetsTable.shapeColor,
   size: assetsTable.size,
   imageScale: assetsTable.imageScale,
+  role: assetsTable.role,
+  cropX: assetsTable.cropX,
+  cropY: assetsTable.cropY,
+  cropZoom: assetsTable.cropZoom,
   provider: assetsTable.provider,
   originalName: assetsTable.originalName,
   sourceIdentity: assetsTable.sourceIdentity,
@@ -103,6 +108,10 @@ export const saveAsset = async (
     shapeColor?: string;
     size?: number;
     imageScale?: number;
+    role?: AssetRole | null;
+    cropX?: number;
+    cropY?: number;
+    cropZoom?: number;
     statBlock?: StatBlock | null;
     initiativeBonus?: number | null;
   }

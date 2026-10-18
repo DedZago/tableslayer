@@ -41,6 +41,14 @@ for (const statement of combatMigration
   .split('--> statement-breakpoint')
   .filter((statement) => statement.includes('ALTER TABLE `asset`')))
   await testClient.execute(statement);
+// Mirrors the token role and framing columns until their migration is generated
+for (const statement of [
+  'ALTER TABLE `asset` ADD `role` text',
+  'ALTER TABLE `asset` ADD `crop_x` real DEFAULT 0.5 NOT NULL',
+  'ALTER TABLE `asset` ADD `crop_y` real DEFAULT 0.5 NOT NULL',
+  'ALTER TABLE `asset` ADD `crop_zoom` real DEFAULT 1 NOT NULL'
+])
+  await testClient.execute(statement);
 afterAll(() => testClient.close());
 beforeEach(async () => {
   await db.delete(assetImportReceiptsTable);

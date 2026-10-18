@@ -22,17 +22,22 @@
     IconTriangle
   } from '@tabler/icons-svelte';
   import { handleMutation } from '$lib/factories';
+  import { ASSET_ROLES, type AssetRole } from '$lib/db/app/schema';
   import { useAssetMutation } from '$lib/queries/assets';
-  import { useUploadFileMutation } from '$lib/queries/file';
+  import { uploadMediaFile } from '$lib/queries/file';
   import { generateR2Url } from '$lib/utils/generateR2Url';
   import { hasFileDrop, hasWebsiteImageDrop, WEBSITE_IMAGE_DROP_MESSAGE } from '$lib/utils/imageDrop';
   import { validateMediaUpload } from '$lib/utils/mediaUpload';
-  import { untrack } from 'svelte';
+  import { DEFAULT_TOKEN_CROP, renderTokenImage, type TokenCrop } from '$lib/utils/tokenCrop';
+  import { onDestroy, untrack } from 'svelte';
+  import TokenImageCropper from './TokenImageCropper.svelte';
   import type { AssetEditorProps } from './types';
 
-  let { asset = null, bucketUrl, onClose, onSaved }: AssetEditorProps = $props();
+  let { asset = null, bucketUrl, backLabel = 'Back to library', onClose, onSaved }: AssetEditorProps = $props();
   const mutation = useAssetMutation();
-  const upload = useUploadFileMutation();
+  const roleLabels: Record<AssetRole, string> = { hero: 'Hero', npc: 'NPC', monster: 'Monster' };
+  const roleColors: Record<AssetRole, string> = { hero: '#4ade80', npc: '#60a5fa', monster: '#f87171' };
+  const SOURCE_PREVIEW_WIDTH = 2000;
   const sizeNames: Record<string, string> = {
     T: 'Tiny',
     S: 'Small',
@@ -51,6 +56,16 @@
   let shapeColor = $state(initial?.shapeColor ?? '#ffffff');
   let size = $state(initial?.size ?? 1);
   let imageScale = $state(initial?.imageScale ?? 1);
+  let role = $state<AssetRole | null>(initial?.role ?? null);
+  let colorTouched = $state(!!initial);
+  let crop = $state<TokenCrop>(
+    initial ? { x: initial.cropX, y: initial.cropY, zoom: initial.cropZoom } : DEFAULT_TOKEN_CROP
+  );
+  let cropImage = $state<HTMLImageElement | null>(null);
+  let cropChanged = $state(false);
+  let cropUnavailable = $state(false);
+  let pendingFile = $state<File | null>(null);
+  let pendingUrl = $state<string | null>(null);
   let initiativeBonus = $state<number | null>(initial?.initiativeBonus ?? null);
   const statSummary = $derived(asset?.statSummary ?? null);
   const statLine = $derived.by(() => {
@@ -60,6 +75,18 @@
     return [cr && `CR ${cr}`, kind, 'stats attached'].filter(Boolean).join(' · ');
   });
 
+  const sourceLocation = $derived(artworkLocation || tokenArtworkLocation);
+  const cropSource = $derived(
+    pendingUrl ??
+      (sourceLocation
+        ? generateR2Url(sourceLocation, { width: SOURCE_PREVIEW_WIDTH, fit: 'scale-down', bucketUrl })
+        : null)
+  );
+
+  onDestroy(() => {
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+  });
+
   const runAction = (action: Parameters<typeof mutation.mutateAsync>[0]) =>
     handleMutation({
       mutation: () => mutation.mutateAsync(action),
@@ -67,26 +94,28 @@
       toastMessages: { error: { title: 'Asset action failed', body: (error) => error.message } }
     });
 
-  const uploadArtwork = async (file: File) => {
-    const result = await handleMutation({
-      mutation: () => {
-        validateMediaUpload(file, true);
-        return upload.mutateAsync({ file, folder: 'asset' });
-      },
-      formLoadingState: (value) => (loading = value),
-      toastMessages: { error: { title: 'Artwork upload failed', body: (error) => error.message } }
-    });
-    if (result) {
-      artworkLocation = result.location;
-      tokenArtworkLocation = null;
+  const chooseArtwork = (file: File) => {
+    try {
+      validateMediaUpload(file, true);
+    } catch (error) {
+      addToast({ data: { title: 'Artwork not usable', body: (error as Error).message, type: 'danger' } });
+      return;
     }
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+    pendingFile = file;
+    pendingUrl = URL.createObjectURL(file);
+    cropImage = null;
+    cropUnavailable = false;
+    cropChanged = true;
+    crop = DEFAULT_TOKEN_CROP;
+    if (!name.trim()) name = file.name.replace(/\.[^.]+$/, '').slice(0, 200);
   };
 
   const pickArtwork = (event: Event) => {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    if (file) void uploadArtwork(file);
+    if (file) chooseArtwork(file);
   };
 
   const handleArtworkDrop = (event: DragEvent) => {
@@ -94,27 +123,62 @@
     dragging = false;
     if (hasFileDrop(event.dataTransfer)) {
       const files = event.dataTransfer?.files ?? [];
-      if (files.length === 1) void uploadArtwork(files[0]);
+      if (files.length === 1) chooseArtwork(files[0]);
       else if (files.length > 1) addToast({ data: { title: 'Drop one image file', type: 'info' } });
     } else if (hasWebsiteImageDrop(event.dataTransfer)) {
       addToast({ data: { title: WEBSITE_IMAGE_DROP_MESSAGE, type: 'info' } });
     }
   };
 
+  const uploadImage = async (blob: Blob | File, fileName: string) => {
+    const file = blob instanceof File ? blob : new File([blob], fileName, { type: blob.type });
+    return (await uploadMediaFile(file, 'asset')).location;
+  };
+
+  const needsTokenImage = $derived(!!cropImage && !cropUnavailable && (cropChanged || !tokenArtworkLocation));
+
+  const saveWithImages = async () => {
+    let nextArtwork = artworkLocation;
+    let nextToken = tokenArtworkLocation;
+    if (pendingFile) {
+      nextArtwork = await uploadImage(pendingFile, pendingFile.name);
+      nextToken = null;
+    }
+    if (needsTokenImage && cropImage) {
+      nextToken = await uploadImage(await renderTokenImage(cropImage, crop), 'token.webp');
+    }
+    return runAction({
+      action: 'save',
+      fields: {
+        id: asset?.id,
+        name: name.trim(),
+        artworkLocation: nextArtwork,
+        tokenArtworkLocation: nextToken,
+        shape,
+        shapeColor,
+        size,
+        imageScale,
+        role,
+        cropX: crop.x,
+        cropY: crop.y,
+        cropZoom: crop.zoom,
+        initiativeBonus
+      }
+    });
+  };
+
   const save = async () => {
-    const fields = {
-      id: asset?.id,
-      name: name.trim(),
-      artworkLocation,
-      tokenArtworkLocation,
-      shape,
-      shapeColor,
-      size,
-      imageScale,
-      initiativeBonus
-    };
-    const result = await runAction({ action: 'save', fields });
+    const result = await handleMutation({
+      mutation: saveWithImages,
+      formLoadingState: (value) => (loading = value),
+      toastMessages: { error: { title: 'Could not save the token', body: (error) => error.message } }
+    });
     if (result?.asset) onSaved(result.asset);
+  };
+
+  const selectRole = (value: string) => {
+    role = value ? (value as AssetRole) : null;
+    if (role && !colorTouched) shapeColor = roleColors[role];
   };
 
   const deleteAsset = async () => {
@@ -142,7 +206,7 @@
   <div class="assetEditor__header">
     <Link onclick={onClose}>
       <Icon Icon={IconArrowBack} size="1rem" />
-      Back to library
+      {backLabel}
     </Link>
   </div>
   <form
@@ -153,7 +217,11 @@
     }}
   >
     <label
-      class={['assetEditor__artwork', dragging && 'assetEditor__artwork--dragging']}
+      class={[
+        'assetEditor__artwork',
+        cropSource && 'assetEditor__artwork--compact',
+        dragging && 'assetEditor__artwork--dragging'
+      ]}
       ondragover={(event) => {
         event.preventDefault();
         dragging = true;
@@ -169,21 +237,47 @@
         disabled={loading}
         onchange={pickArtwork}
       />
-      {#if artworkLocation}
-        <img
-          class="assetEditor__artworkImage"
-          src={generateR2Url(artworkLocation, { width: 300, fit: 'contain', bucketUrl })}
-          alt={name || 'Asset artwork'}
-        />
-      {:else}
-        <Icon Icon={IconPhotoPlus} size="1.5rem" />
-        <span>Drop an image or click to upload</span>
-      {/if}
+      <Icon Icon={IconPhotoPlus} size="1.5rem" />
+      <span>{cropSource ? 'Drop or click to replace the image' : 'Drop an image or click to upload'}</span>
     </label>
+
+    {#if cropSource}
+      {#key cropSource}
+        <div class="assetEditor__crop">
+          <TokenImageCropper
+            src={cropSource}
+            bind:crop
+            bind:image={cropImage}
+            crossOrigin={!pendingUrl}
+            onChange={() => (cropChanged = true)}
+            onError={() => (cropUnavailable = true)}
+          />
+          <p class="assetEditor__hint">
+            {#if cropUnavailable}
+              The framing editor could not load this image. Replace the image to change it.
+            {:else}
+              Drag to move and scroll or pinch to zoom. The circle is what shows on the table; the full image is kept
+              for handouts.
+            {/if}
+          </p>
+        </div>
+      {/key}
+    {/if}
 
     <FormControl label="Asset name" name="name">
       {#snippet input({ inputProps })}
         <Input {...inputProps} required maxlength={200} bind:value={name} />
+      {/snippet}
+    </FormControl>
+
+    <FormControl label="Role" name="role">
+      {#snippet input({ inputProps })}
+        <RadioButton
+          {...inputProps}
+          selected={role ?? ''}
+          options={[{ label: 'None', value: '' }, ...ASSET_ROLES.map((value) => ({ label: roleLabels[value], value }))]}
+          onSelectedChange={selectRole}
+        />
       {/snippet}
     </FormControl>
 
@@ -230,13 +324,16 @@
               <ColorPicker
                 showOpacity={false}
                 hex={shapeColor}
-                onUpdate={(colorData) => (shapeColor = colorData.hex)}
+                onUpdate={(colorData) => {
+                  colorTouched = true;
+                  shapeColor = colorData.hex;
+                }}
               />
             {/snippet}
           </Popover>
         {/snippet}
         {#snippet input({ inputProps })}
-          <Input {...inputProps} bind:value={shapeColor} />
+          <Input {...inputProps} bind:value={shapeColor} oninput={() => (colorTouched = true)} />
         {/snippet}
       </FormControl>
 
@@ -338,10 +435,16 @@
     border-color: var(--fgPrimary);
     color: var(--fg);
   }
-  .assetEditor__artworkImage {
-    max-height: 10rem;
-    max-width: 100%;
-    object-fit: contain;
+  .assetEditor__artwork--compact {
+    min-height: 0;
+    padding: 0.5rem;
+    flex-direction: row;
+  }
+  .assetEditor__crop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
   }
   .assetEditor__fileInput {
     position: absolute;

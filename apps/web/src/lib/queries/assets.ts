@@ -1,4 +1,4 @@
-import type { SelectAsset } from '$lib/db/app/schema';
+import type { AssetRole, SelectAsset } from '$lib/db/app/schema';
 import { mutationFactory } from '$lib/factories';
 import type { MarkerRow } from '$lib/realtime';
 import type { AssetStatSummary } from '$lib/server/assets/assets';
@@ -20,6 +20,10 @@ type AssetAction =
         shapeColor?: string;
         size?: number;
         imageScale?: number;
+        role?: AssetRole | null;
+        cropX?: number;
+        cropY?: number;
+        cropZoom?: number;
         initiativeBonus?: number | null;
       };
     }

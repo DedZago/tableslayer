@@ -533,6 +533,9 @@ export const insertMarkerSchema = createInsertSchema(markerTable);
 export const selectMarkerSchema = createSelectSchema(markerTable);
 export const updateMarkerSchema = createUpdateSchema(markerTable);
 
+export const ASSET_ROLES = ['hero', 'npc', 'monster'] as const;
+export type AssetRole = (typeof ASSET_ROLES)[number];
+
 export const assetsTable = sqliteTable(
   'asset',
   {
@@ -550,6 +553,10 @@ export const assetsTable = sqliteTable(
     shapeColor: text('shape_color').notNull().default('#ffffff'),
     size: integer('size').notNull().default(1),
     imageScale: real('image_scale').notNull().default(1),
+    role: text('role').$type<AssetRole>(),
+    cropX: real('crop_x').notNull().default(0.5),
+    cropY: real('crop_y').notNull().default(0.5),
+    cropZoom: real('crop_zoom').notNull().default(1),
     provider: text('provider'),
     originalName: text('original_name'),
     sourceIdentity: text('source_identity'),
@@ -570,7 +577,9 @@ export const assetsTable = sqliteTable(
     index('idx_asset_source').on(table.ownerId, table.provider, table.sourceIdentity),
     uniqueIndex('idx_asset_import_request').on(table.ownerId, table.importRequestId),
     check('asset_shape', sql`${table.shape} >= 0 AND ${table.shape} <= 4`),
-    check('asset_size', sql`${table.size} >= 1 AND ${table.size} <= 3`)
+    check('asset_size', sql`${table.size} >= 1 AND ${table.size} <= 3`),
+    check('asset_role', sql`${table.role} IS NULL OR ${table.role} IN ('hero', 'npc', 'monster')`),
+    check('asset_crop_zoom', sql`${table.cropZoom} >= 1`)
   ]
 );
 export const clipboardArtworkTable = sqliteTable('clipboard_artwork', {

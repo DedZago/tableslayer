@@ -21,6 +21,7 @@ export interface AssetLibraryProps {
 export interface AssetEditorProps {
   asset?: AssetListItem | null;
   bucketUrl: string;
+  backLabel?: string;
   onClose: () => void;
   onSaved: (asset: SelectAsset) => void;
 }

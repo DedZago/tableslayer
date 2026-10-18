@@ -21,6 +21,7 @@
     ASSET_DRAG_TYPE,
     AssetCatalogOverlay,
     AssetLibrary,
+    SavedTokens,
     markerAssetSnapshot,
     placeAsset,
     type PlacementPoint
@@ -2667,6 +2668,16 @@
               onDismiss={handleChecklistDismiss}
             />
           {:else if !isMarkersCollapsed}
+            {#if canEditAssets && selectedMarkerId === undefined}
+              <SavedTokens
+                client={session.client}
+                sceneId={selectedSceneId}
+                bucketUrl={data.bucketUrl}
+                visibility={libraryVisibility}
+                {getViewportCenter}
+                snapPosition={snapPlacement}
+              />
+            {/if}
             <MarkerManager
               partyId={party.id}
               {stageProps}

@@ -791,7 +791,7 @@
     <LightLayer
       bind:this={lightLayer}
       {props}
-      isActive={props.activeLayer === MapLayerType.Light}
+      isActive={props.activeLayer === MapLayerType.Light || props.activeLayer === MapLayerType.None}
       grid={props.grid}
       display={anchoredDisplay}
       {localScale}

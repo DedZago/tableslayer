@@ -60,7 +60,7 @@
       <Button variant="link" size="sm" isDisabled={busy} onclick={onRetry}>Retry {failedCount} failed</Button>
     {/if}
     <Button isLoading={busy} isDisabled={busy || batchCount === 0} onclick={onImport}>
-      Add {batchCount} to library
+      {batchCount > 1 ? `Add ${batchCount} to library` : 'Add to library'}
     </Button>
   </div>
 </footer>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import AssetCatalogOverlay from './AssetCatalogOverlay.svelte';
 
-  let { onClose, onPlace }: { onClose: () => void; onPlace?: (assetId: string) => void } = $props();
+  let { onClose }: { onClose: () => void } = $props();
 </script>
 
-<AssetCatalogOverlay {onClose} {onPlace} />
+<AssetCatalogOverlay {onClose} />

@@ -25,7 +25,7 @@
   const focusableSelector =
     'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]';
 
-  let { onClose, onPlace }: { onClose: () => void; onPlace?: (assetId: string) => void } = $props();
+  let { onClose }: { onClose: () => void } = $props();
 
   const preview = useAssetImportPreviewMutation();
   const importer = useAssetImportMutation();
@@ -75,6 +75,10 @@
 
   const findRow = (identity: string) => rows.find((row) => row.record.identity === identity);
   const isSelected = (identity: string) => findRow(identity)?.selected ?? false;
+  const isAdded = (identity: string) => {
+    const status = findRow(identity)?.result?.status;
+    return status === 'created' || status === 'updated';
+  };
   const resultFor = (identity: string): FiveToolsImportResult | undefined => findRow(identity)?.result;
 
   const newRow = (record: FiveToolsPreview, uploaded: boolean): AssetImportRow => ({
@@ -164,16 +168,6 @@
     if (!previewRecord) return;
     const result = await addRecord(previewRecord);
     if (result) summary = summarize([result]);
-  };
-
-  const addAndPlace = async () => {
-    if (!previewRecord) return;
-    const result = await addRecord(previewRecord);
-    if (!result || result.status === 'failed') return;
-    const assetId = result.assetId ?? previewRecord.duplicates?.[0]?.id;
-    if (!assetId) return;
-    onPlace?.(assetId);
-    onClose();
   };
 
   const uploadFile = async (file: File) => {
@@ -303,7 +297,12 @@
       />
       <div class="assetCatalog__preview">
         {#if previewRecord}
-          <AssetStatPreview record={previewRecord} {busy} onAddToLibrary={addToLibrary} onAddAndPlace={addAndPlace} />
+          <AssetStatPreview
+            record={previewRecord}
+            {busy}
+            inLibrary={Boolean(previewRecord.duplicates?.length) || isAdded(previewRecord.identity)}
+            onAddToLibrary={addToLibrary}
+          />
         {:else}
           <p class="assetCatalog__empty">Select a creature to see its stat block.</p>
         {/if}

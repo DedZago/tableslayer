@@ -25,8 +25,10 @@
 
   const { props, isActive, display, grid, localScale = 1 }: Props = $props();
 
-  const stage = getContext<{ mode: StageMode }>('stage');
+  const stage = getContext<{ mode: StageMode; markerClaimAt: number }>('stage');
   const { onLightAdded, onLightMoved, onLightSelected } = getContext<Callbacks>('callbacks');
+
+  const MARKER_CLAIM_WINDOW_MS = 100;
 
   // Quad used for raycasting / mouse input detection
   let inputMesh = $state.raw(new THREE.Mesh());
@@ -89,7 +91,15 @@
 
     const closestLight = findClosestLight(gridCoords);
 
-    if (closestLight !== undefined) {
+    if (closestLight !== undefined && props.activeLayer === MapLayerType.None) {
+      // Markers share this click; the marker layer stamps its claim during the same dispatch
+      setTimeout(() => {
+        if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
+        selectedLight = closestLight;
+        isDragging = true;
+        onLightSelected?.(closestLight);
+      }, 0);
+    } else if (closestLight !== undefined) {
       selectedLight = closestLight;
       isDragging = true;
       onLightSelected?.(selectedLight);

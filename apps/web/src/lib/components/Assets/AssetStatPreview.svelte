@@ -7,13 +7,13 @@
   let {
     record,
     busy = false,
-    onAddToLibrary,
-    onAddAndPlace
+    inLibrary = false,
+    onAddToLibrary
   }: {
     record: FiveToolsPreview;
     busy?: boolean;
+    inLibrary?: boolean;
     onAddToLibrary: () => void;
-    onAddAndPlace: () => void;
   } = $props();
 
   const statBlockQuery = createCatalogStatBlockQuery(() => (record.statBlock === undefined ? record.identity : null));
@@ -50,8 +50,9 @@
   </div>
 
   <footer class="assetCatalog__previewActions">
-    <Button isDisabled={busy} onclick={onAddAndPlace}>Add & place</Button>
-    <Button variant="ghost" isDisabled={busy} onclick={onAddToLibrary}>Add to library</Button>
+    <Button isLoading={busy} isDisabled={busy || inLibrary} onclick={onAddToLibrary}>
+      {inLibrary ? 'In library' : 'Add to library'}
+    </Button>
   </footer>
 </article>
 

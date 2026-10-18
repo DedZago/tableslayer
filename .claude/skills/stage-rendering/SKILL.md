@@ -58,6 +58,7 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 - `marker.selectedIds` and `marker.dropTargetId` are optional local selection/drop presentation state; consumers must keep it out of shared documents. `markers.hitTest` and `markers.inRectangle` accept viewport client coordinates, project through the current map and scene transforms, and exclude non-interactable tokens. The editor captures Shift mouse gestures before layer handlers; Shift-click toggles and Shift-drag adds token centers in the rectangle.
 - `markers.clientToPosition(point, requireOnMap)` inverts the live orthographic camera, scene offset/zoom and (in MapDefined) map offset/rotation/zoom. `markers.viewportCenter()` supplies a paste fallback; `markers.snapPosition()` applies the renderer's grid math once to the group anchor. Public `getGridCellSize` and `snapToGrid` exports let consumers reuse existing grid calculations.
 - Touch input debounces 50ms to disambiguate draw vs pinch-zoom (`LayerInput.svelte`).
+- Lights are selectable and draggable in both the Light tool and the no-tool state (`LightLayer` is active for `None` too); in `None` a light click defers one tick and yields to a marker claim (`markerClaimAt`). The editor's Delete/Backspace removes selected tokens or the selected light.
 - Annotation layers with visual effects render on `SceneLayer.Main` (get postprocessing); plain-color layers render on `Overlay`.
 
 ## Tokens, selection and combat state

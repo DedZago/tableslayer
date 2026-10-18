@@ -23,6 +23,7 @@ type AssetAction =
         initiativeBonus?: number | null;
       };
     }
+  | { action: 'get'; id: string }
   | { action: 'delete'; id: string }
   | {
       action: 'saveMarker';
@@ -57,13 +58,36 @@ export const createAssetsQuery = (search: () => string) =>
     }
   }));
 
+export const createAssetDetailQuery = (id: () => string | null) =>
+  createQuery<SelectAsset>(() => {
+    const current = id();
+    return {
+      queryKey: ['assetDetail', current],
+      enabled: !!current,
+      queryFn: async () => {
+        const response = await fetch('/api/assets/manage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get', id: current })
+        });
+        if (!response.ok) throw new Error((await response.json()).message || 'Failed to load asset');
+        return (await response.json()).asset;
+      },
+      retry: false
+    };
+  });
+
 export const useAssetMutation = () => {
   const client = useQueryClient();
   return mutationFactory<AssetAction, { asset?: SelectAsset; markers?: MarkerRow[]; success?: boolean }>({
     mutationKey: ['assets'],
     endpoint: '/api/assets/manage',
     method: 'POST',
-    onSuccess: () => client.invalidateQueries({ queryKey: ['assets'] })
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: ['assets'] }),
+        client.invalidateQueries({ queryKey: ['assetDetail'] })
+      ])
   });
 };
 

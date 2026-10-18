@@ -51,6 +51,7 @@
     { label: 'Rotate AoE template 15°', shortcut: '[ / ]' },
     { label: 'Rotate AoE template 45°', shortcut: 'Shift + [ / ]' },
     { label: 'Delete AoE template', shortcut: 'Delete' },
+    { label: 'Delete selected tokens', shortcut: 'Delete' },
     { divider: true },
     { label: 'Start combat or add tokens', shortcut: 'I' },
     { label: 'Next turn', shortcut: 'N' },

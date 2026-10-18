@@ -5,6 +5,7 @@ import {
   assetFromMarker,
   assetPlacements,
   deleteAsset,
+  getOwnedAsset,
   listAssets,
   saveAsset
 } from '$lib/server';
@@ -29,6 +30,7 @@ const fields = z.object({
 const validationSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('authorizeArtwork'), sceneId: z.string(), location: z.string().max(1024).optional() }),
   z.object({ action: z.literal('list'), search: z.string().max(200).default('') }),
+  z.object({ action: z.literal('get'), id: z.uuid() }),
   z.object({ action: z.literal('save'), fields: fields.partial({ name: true }) }),
   z.object({ action: z.literal('delete'), id: z.uuid() }),
   z.object({
@@ -58,6 +60,8 @@ export const POST = apiFactory(
         return { success: true };
       case 'list':
         return { assets: await listAssets(ownerId, body.search) };
+      case 'get':
+        return { asset: await getOwnedAsset(ownerId, body.id) };
       case 'save':
         return { asset: await saveAsset(ownerId, body.fields) };
       case 'delete':

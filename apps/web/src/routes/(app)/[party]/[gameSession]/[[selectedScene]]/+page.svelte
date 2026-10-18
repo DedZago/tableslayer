@@ -1895,8 +1895,11 @@
   // A scene switch invalidates the in-progress polygon's coordinate space
   $effect(() => {
     void selectedSceneId;
-    stage?.fogOfWar?.cancelPolygon();
-    stage?.aoeTemplates?.cancelDraft();
+    // The cancel calls read layer state; tracking it would cancel every gesture as it starts
+    untrack(() => {
+      stage?.fogOfWar?.cancelPolygon();
+      stage?.aoeTemplates?.cancelDraft();
+    });
   });
 
   // Measurements (broadcast only when editing the active scene) -------------------
@@ -2058,6 +2061,24 @@
 
   // Keyboard -------------------------------------------------------------------
 
+  const isPlainDeleteKey = (event: KeyboardEvent) =>
+    (event.key === 'Delete' || event.key === 'Backspace') && !event.ctrlKey && !event.metaKey && !event.altKey;
+
+  // Removes whatever the active tool has selected; AoE templates and fog rooms are handled by stageKeyCommands
+  const deleteSelectionForKey = (): boolean => {
+    const layer = stageProps.activeLayer;
+    if (selectedMarkerIds.length > 0 && [MapLayerType.None, MapLayerType.Marker].includes(layer)) {
+      deleteTokenPanelTargets();
+      return true;
+    }
+    if (selectedLightId && [MapLayerType.None, MapLayerType.Light].includes(layer)) {
+      onLightDeleted(selectedLightId);
+      selectedLightId = undefined;
+      return true;
+    }
+    return false;
+  };
+
   const handleKeydown = (event: KeyboardEvent) => {
     if (catalogOpen) return;
     const activeElement = document.activeElement as HTMLElement | null;
@@ -2113,6 +2134,11 @@
         });
         return;
       }
+    }
+
+    if (isPlainDeleteKey(event) && deleteSelectionForKey()) {
+      event.preventDefault();
+      return;
     }
 
     activeControl = handleKeyCommands(
@@ -2495,10 +2521,7 @@
         <ChecklistHelpButton onclick={handleShowChecklist} />
         <HandoutLivePill partyId={party.id} client={session.client} onOpen={() => openSidePanelTab('handout')} />
         {#if catalogOpen}
-          <AssetCatalogOverlay
-            onClose={() => (catalogOpen = false)}
-            onPlace={(assetId) => placeAssetAt(assetId, 1, getViewportCenter() ?? { x: 0, y: 0 })}
-          />
+          <AssetCatalogOverlay onClose={() => (catalogOpen = false)} />
         {/if}
         <Hints {stageProps} />
         {#if quickCardRow?.statBlock}

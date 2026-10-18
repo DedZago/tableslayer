@@ -1,7 +1,9 @@
 <script lang="ts">
   import { Button, ContextMenu, type ContextMenuItem, Icon, IconButton, Input, ToolTip } from '@tableslayer/ui';
+  import { v4 as uuidv4 } from 'uuid';
   import {
     IconBookmarkPlus,
+    IconArrowLeft,
     IconDots,
     IconDownload,
     IconPlus,
@@ -14,7 +16,12 @@
   import type { SelectAsset } from '$lib/db/app/schema';
   import type { AssetListItem } from '$lib/queries/assets';
   import { ASSET_DRAG_TYPE, markerAssetSnapshot, placeAsset, MAX_PLACEMENT_QUANTITY } from './assetPlacement';
+  import { useAssetImportMutation } from '$lib/queries/assetImport';
+  import type { FiveToolsPreview } from '$lib/server/assets/fivetools/types';
   import AssetEditor from './AssetEditor.svelte';
+  import AssetDetail from './AssetDetail.svelte';
+  import AssetCatalogInline from './AssetCatalogInline.svelte';
+  import AssetStatPreview from './AssetStatPreview.svelte';
   import type { AssetLibraryProps } from './types';
 
   let {
@@ -30,15 +37,47 @@
   }: AssetLibraryProps = $props();
 
   let search = $state('');
-  let view = $state<'grid' | 'edit'>('grid');
+  let debouncedSearch = $state('');
+  let view = $state<'grid' | 'edit' | 'detail' | 'catalog'>('grid');
   let editing = $state<AssetListItem | null>(null);
+  let detailAsset = $state<AssetListItem | null>(null);
+  let catalogRecord = $state<FiveToolsPreview | null>(null);
+  let addingIdentity = $state<string | null>(null);
+  let addedIdentities = $state(new Set<string>());
   let loading = $state(false);
   let menuAsset = $state<AssetListItem | null>(null);
   let armedDeleteId = $state<string | null>(null);
   let contextMenu = $state<{ open: (event: MouseEvent) => Promise<void> } | undefined>();
   const query = createAssetsQuery(() => search);
   const mutation = useAssetMutation();
+  const importer = useAssetImportMutation();
   const assets = $derived(query.data?.assets ?? []);
+  const showCatalog = $derived(
+    !!search.trim() && !query.isPending && assets.length === 0 && debouncedSearch === search.trim()
+  );
+
+  $effect(() => {
+    const value = search.trim();
+    const timer = setTimeout(() => (debouncedSearch = value), 200);
+    return () => clearTimeout(timer);
+  });
+
+  const addToLibrary = async (record: FiveToolsPreview) => {
+    if (addingIdentity) return;
+    addingIdentity = record.identity;
+    const response = await handleMutation({
+      mutation: () =>
+        importer.mutateAsync({
+          action: 'import',
+          items: [{ record, requestId: uuidv4(), policy: 'skip' }]
+        }),
+      formLoadingState: () => {},
+      toastMessages: { error: { title: 'Could not add to library', body: (error) => error.message } }
+    });
+    addingIdentity = null;
+    const status = response?.results[0]?.status;
+    if (status && status !== 'failed') addedIdentities = new Set([...addedIdentities, record.identity]);
+  };
 
   const runAction = (action: Parameters<typeof mutation.mutateAsync>[0]) =>
     handleMutation({
@@ -66,11 +105,27 @@
     });
   };
 
-  const placeFromKeyboard = (event: KeyboardEvent, assetId: string) => {
+  const openDetail = (asset: AssetListItem) => {
+    detailAsset = asset;
+    view = 'detail';
+  };
+
+  const openDetailFromKeyboard = (event: KeyboardEvent, asset: AssetListItem) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     event.stopPropagation();
-    void place(assetId);
+    openDetail(asset);
+  };
+
+  const openCatalogRecord = (record: FiveToolsPreview) => {
+    catalogRecord = record;
+    view = 'catalog';
+  };
+
+  const closeDetail = () => {
+    detailAsset = null;
+    catalogRecord = null;
+    view = 'grid';
   };
 
   const saveSelectedMarker = async () => {
@@ -89,6 +144,10 @@
     view = 'edit';
   };
 
+  const catalogRecordInLibrary = $derived(
+    !!catalogRecord && (Boolean(catalogRecord.duplicates?.length) || addedIdentities.has(catalogRecord.identity))
+  );
+
   const showSaved = ({ statBlock, ...saved }: SelectAsset) => {
     editing = {
       ...saved,
@@ -100,12 +159,13 @@
 
   const closeEditor = () => {
     editing = null;
-    view = 'grid';
+    view = detailAsset ? 'detail' : 'grid';
   };
 
   const confirmDelete = async (asset: AssetListItem) => {
     const result = await runAction({ action: 'delete', id: asset.id });
     if (result) armedDeleteId = null;
+    if (result && detailAsset?.id === asset.id) closeDetail();
   };
 
   const assetMenuItems = (asset: AssetListItem): ContextMenuItem[] => [
@@ -136,6 +196,34 @@
     {#key editing?.id ?? 'new'}
       <AssetEditor asset={editing} {bucketUrl} onClose={closeEditor} onSaved={showSaved} />
     {/key}
+  {:else if view === 'detail' && detailAsset}
+    {#key detailAsset.id}
+      <AssetDetail
+        asset={detailAsset}
+        {bucketUrl}
+        busy={loading}
+        onBack={closeDetail}
+        onPlace={() => place(detailAsset!.id)}
+        onEdit={() => openEditor(detailAsset)}
+        onShowHandout={canShowHandout(detailAsset) ? () => onPreviewArtwork?.(detailAsset!) : undefined}
+      />
+    {/key}
+  {:else if view === 'catalog' && catalogRecord}
+    <div class="assetLibrary__catalogDetail">
+      <div class="assetLibrary__backBar">
+        <IconButton variant="ghost" size="sm" aria-label="Back to search" onclick={closeDetail}>
+          <Icon Icon={IconArrowLeft} size="1.125rem" />
+        </IconButton>
+      </div>
+      <div class="assetLibrary__catalogBody">
+        <AssetStatPreview
+          record={catalogRecord}
+          busy={addingIdentity === catalogRecord.identity}
+          inLibrary={catalogRecordInLibrary}
+          onAddToLibrary={() => addToLibrary(catalogRecord!)}
+        />
+      </div>
+    </div>
   {:else}
     <div class="assetLibrary__toolbar">
       <div class="assetLibrary__search">
@@ -187,10 +275,18 @@
 
     {#if query.isPending}
       <p class="assetLibrary__status">Loading assets…</p>
+    {:else if showCatalog}
+      <AssetCatalogInline
+        search={debouncedSearch}
+        {addingIdentity}
+        {addedIdentities}
+        onSelect={openCatalogRecord}
+        onAdd={addToLibrary}
+      />
     {:else if assets.length === 0}
       <div class="assetLibrary__empty">
         {#if search.trim()}
-          <p>No assets match "{search.trim()}".</p>
+          <p>Searching…</p>
         {:else}
           <p>No assets yet. Add one from 5etools or save a token from the map.</p>
           <div class="assetLibrary__emptyActions">
@@ -213,10 +309,9 @@
                 tabindex="0"
                 class="assetLibrary__tile"
                 draggable="true"
-                aria-label="Place {asset.name}"
-                aria-disabled={loading}
-                onclick={() => place(asset.id)}
-                onkeydown={(event) => placeFromKeyboard(event, asset.id)}
+                aria-label="Show {asset.name}"
+                onclick={() => openDetail(asset)}
+                onkeydown={(event) => openDetailFromKeyboard(event, asset)}
                 oncontextmenu={(event) => openMenu(event, asset)}
                 ondragstart={(event) => startDrag(event, asset)}
               >
@@ -233,17 +328,19 @@
                 {/if}
                 {#if badge}<span class="assetLibrary__badge">{badge}</span>{/if}
               </div>
-              <div class="assetLibrary__tileActions">
+              <span class="assetLibrary__place">
                 <IconButton
-                  variant="ghost"
+                  variant="primary"
                   size="sm"
-                  aria-label="Place"
-                  title="Place"
+                  aria-label="Place {asset.name} on the map"
+                  title="Place on the map"
                   disabled={loading}
                   onclick={() => place(asset.id)}
                 >
                   <Icon Icon={IconPlus} size="1rem" />
                 </IconButton>
+              </span>
+              <div class="assetLibrary__tileActions">
                 {#if canShowHandout(asset)}
                   <IconButton
                     variant="ghost"
@@ -284,7 +381,7 @@
       </div>
     {/if}
 
-    <p class="assetLibrary__hint">Click to place · drag onto the map · right-click for more</p>
+    <p class="assetLibrary__hint">Click for details · + to place · drag onto the map</p>
   {/if}
 
   <ContextMenu bind:this={contextMenu} items={menuItems} />
@@ -389,6 +486,30 @@
     font-size: 0.625rem;
     color: var(--fg);
     background: color-mix(in srgb, var(--bg) 80%, transparent);
+  }
+  .assetLibrary__place {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    z-index: 1;
+    display: flex;
+  }
+  .assetLibrary__catalogDetail {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .assetLibrary__backBar {
+    flex-shrink: 0;
+    padding: 0.5rem 0.75rem;
+    border-bottom: var(--borderThin);
+  }
+  .assetLibrary__catalogBody {
+    flex: 1;
+    min-height: 0;
+    padding: 0.75rem;
+    overflow-y: auto;
   }
   .assetLibrary__tileActions {
     position: absolute;

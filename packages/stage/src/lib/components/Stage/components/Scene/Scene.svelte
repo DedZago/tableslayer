@@ -670,7 +670,10 @@
 
   export const aoeTemplates = {
     cancelDraft: () => aoeTemplateLayer?.cancelDraft(),
-    hasDraft: () => aoeTemplateLayer?.hasDraft() ?? false
+    hasDraft: () => aoeTemplateLayer?.hasDraft() ?? false,
+    hitTest: (point: { x: number; y: number }) => aoeTemplateLayer?.hitTest(point) ?? null,
+    inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>
+      aoeTemplateLayer?.inRectangle(start, end) ?? []
   };
 
   // Export measurement layer methods

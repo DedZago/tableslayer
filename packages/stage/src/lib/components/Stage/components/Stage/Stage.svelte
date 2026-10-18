@@ -196,7 +196,10 @@
 
   export const aoeTemplates = {
     cancelDraft: () => sceneRef?.aoeTemplates?.cancelDraft(),
-    hasDraft: () => sceneRef?.aoeTemplates?.hasDraft() ?? false
+    hasDraft: () => sceneRef?.aoeTemplates?.hasDraft() ?? false,
+    hitTest: (point: { x: number; y: number }) => sceneRef?.aoeTemplates?.hitTest(point) ?? null,
+    inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>
+      sceneRef?.aoeTemplates?.inRectangle(start, end) ?? []
   };
 
   export const lights = {

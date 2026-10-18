@@ -6,9 +6,11 @@ import {
   formatTemplateLabel,
   getTemplateLocalBounds,
   getTemplateOutline,
+  nextTemplateInStack,
   normalizeTemplateAngle,
   rotateTemplateAngle,
   sizeFromCursor,
+  templateIntersectsRect,
   templateLocalToLayer,
   templateSdf,
   templateSeed,
@@ -201,5 +203,41 @@ describe('rotateTemplateAngle', () => {
     expect(rotateTemplateAngle(AoeShape.Square, 0, 15)).toBe(90);
     expect(rotateTemplateAngle(AoeShape.Square, 0, -45)).toBe(270);
     expect(rotateTemplateAngle(AoeShape.Square, 15, 15)).toBe(90);
+  });
+});
+
+describe('nextTemplateInStack', () => {
+  it('starts at the topmost when nothing in the stack is selected', () => {
+    expect(nextTemplateInStack(['a', 'b', 'c'], null)).toBe('a');
+    expect(nextTemplateInStack(['a', 'b', 'c'], 'z')).toBe('a');
+  });
+
+  it('steps down the stack and wraps around', () => {
+    expect(nextTemplateInStack(['a', 'b', 'c'], 'a')).toBe('b');
+    expect(nextTemplateInStack(['a', 'b', 'c'], 'c')).toBe('a');
+  });
+
+  it('returns null for an empty stack', () => {
+    expect(nextTemplateInStack([], 'a')).toBeNull();
+  });
+});
+
+describe('templateIntersectsRect', () => {
+  const circle = makeTemplate({ position: { x: 100, y: 100 }, size: 20 });
+
+  it('matches a rectangle around the origin', () => {
+    expect(templateIntersectsRect(circle, { x: 90, y: 90 }, { x: 110, y: 110 }, 0.1)).toBe(true);
+  });
+
+  it('matches a rectangle sitting entirely inside the shape', () => {
+    expect(templateIntersectsRect(circle, { x: 101, y: 101 }, { x: 102, y: 102 }, 0.1)).toBe(true);
+  });
+
+  it('matches a rectangle that only clips the edge', () => {
+    expect(templateIntersectsRect(circle, { x: 190, y: 90 }, { x: 400, y: 110 }, 0.1)).toBe(true);
+  });
+
+  it('misses a distant rectangle', () => {
+    expect(templateIntersectsRect(circle, { x: 400, y: 400 }, { x: 500, y: 500 }, 0.1)).toBe(false);
   });
 });

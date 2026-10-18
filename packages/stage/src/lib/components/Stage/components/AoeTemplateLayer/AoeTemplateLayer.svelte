@@ -13,8 +13,10 @@
     TEMPLATE_MIN_SIZE_FT,
     angleFromCursor,
     getTemplateHandlePoints,
+    nextTemplateInStack,
     sizeFromCursor,
     templateContainsPoint,
+    templateIntersectsRect,
     type TemplatePoint
   } from '../../helpers/aoeTemplates';
   import {
@@ -60,20 +62,24 @@
   const stage = getContext<{ performanceTier: PerformanceTier; markerClaimAt: number }>('stage');
   const framePacer = getContext<FramePacer | undefined>('framePacer');
   const MARKER_CLAIM_WINDOW_MS = 100;
-  const { onAoeTemplateAdded, onAoeTemplateUpdated, onAoeTemplateSelected } = getContext<Callbacks>('callbacks');
+  const { onAoeTemplateAdded, onAoeTemplateUpdated, onAoeTemplateSelected, onAoeTemplatesSelected } =
+    getContext<Callbacks>('callbacks');
 
   const EDIT_EMIT_INTERVAL_MS = 50;
+  // A press that starts on an existing shape is a tap (select / cycle) until it travels this far
+  const TAP_SLOP_PX = 10;
 
   type Interaction =
     | { kind: 'idle' }
-    | { kind: 'dragging'; draft: AoeTemplate }
+    /** `tapStack` is the shapes under the press, topmost first; while `crossed` is false it may still be a tap */
+    | { kind: 'dragging'; draft: AoeTemplate; tapStack: string[]; crossed: boolean }
     | { kind: 'aiming'; draft: AoeTemplate }
-    | { kind: 'moving'; id: string; grab: TemplatePoint }
+    | { kind: 'moving'; id: string; grab: TemplatePoint; starts: Record<string, TemplatePoint> }
     | { kind: 'resizing'; id: string };
 
   let inputMesh = $state.raw(new THREE.Mesh());
   let interaction = $state<Interaction>({ kind: 'idle' });
-  let edit: { id: string; patch: Partial<AoeTemplate> } | null = $state(null);
+  let edit: { patches: Record<string, Partial<AoeTemplate>> } | null = $state(null);
   let lastEmitAt = 0;
 
   // Shared time for every fill; each template's uTime is this same object
@@ -87,13 +93,22 @@
   const ftToPx = $derived(cellPx / (grid.worldGridSize || 5));
   const ftPerPx = $derived(1 / ftToPx);
   const handleRadius = $derived(0.35 * cellPx);
-  const draft = $derived(interaction.kind === 'dragging' || interaction.kind === 'aiming' ? interaction.draft : null);
+  const isPendingTap = $derived(
+    interaction.kind === 'dragging' && interaction.tapStack.length > 0 && !interaction.crossed
+  );
+  const draft = $derived(
+    (interaction.kind === 'dragging' || interaction.kind === 'aiming') && !isPendingTap ? interaction.draft : null
+  );
+  const selectedIds = $derived(props.selectedIds ?? (props.selectedId ? [props.selectedId] : []));
+  const selectedSet = $derived(new Set(selectedIds));
 
   const visibleTemplates = $derived(
     props.templates.filter((template) => mode === StageMode.DM || template.visibility !== StageMode.DM)
   );
   const editedTemplates = $derived(
-    visibleTemplates.map((template) => (edit?.id === template.id ? { ...template, ...edit.patch } : template))
+    visibleTemplates.map((template) =>
+      edit?.patches[template.id] ? { ...template, ...edit.patches[template.id] } : template
+    )
   );
   const drawnTemplates = $derived(draft ? [...editedTemplates, draft] : editedTemplates);
   const animatedTemplateCount = $derived(
@@ -126,12 +141,23 @@
 
   const isNear = (a: TemplatePoint, b: TemplatePoint) => Math.hypot(a.x - b.x, a.y - b.y) <= handleRadius;
 
-  const findTemplateAt = (point: TemplatePoint) =>
+  // Topmost first: later templates draw over earlier ones
+  const findTemplatesAt = (point: TemplatePoint) =>
     [...editedTemplates]
       .reverse()
-      .find((template) => isNear(point, template.position) || templateContainsPoint(template, point, ftPerPx));
+      .filter((template) => isNear(point, template.position) || templateContainsPoint(template, point, ftPerPx));
 
-  const findSelectedTemplate = () => editedTemplates.find((template) => template.id === props.selectedId);
+  const selectTemplates = (ids: string[]) => {
+    if (onAoeTemplatesSelected) onAoeTemplatesSelected(ids);
+    else onAoeTemplateSelected?.(ids.at(-1) ?? null);
+  };
+
+  // Tapping a stack of overlapping shapes walks down it, one shape per tap
+  const cycleSelection = (stack: string[]) => {
+    const next = nextTemplateInStack(stack, props.selectedId);
+    if (!next || (selectedIds.length === 1 && selectedIds[0] === next)) return;
+    selectTemplates([next]);
+  };
 
   const updateDraft = (current: AoeTemplate, point: TemplatePoint, disableSnap: boolean): AoeTemplate => {
     const angle =
@@ -142,10 +168,12 @@
     return { ...current, angle, size };
   };
 
-  const startDraft = (point: TemplatePoint, disableSnap: boolean) => {
+  const startDraft = (point: TemplatePoint, disableSnap: boolean, tapStack: string[]) => {
     const position = snapPoint(point, disableSnap);
     interaction = {
       kind: 'dragging',
+      tapStack,
+      crossed: false,
       draft: {
         id: uuidv4(),
         shape: props.tool.shape,
@@ -167,7 +195,7 @@
     const now = performance.now();
     if (!final && now - lastEmitAt < EDIT_EMIT_INTERVAL_MS) return;
     lastEmitAt = now;
-    onAoeTemplateUpdated?.(edit.id, edit.patch);
+    for (const [id, patch] of Object.entries(edit.patches)) onAoeTemplateUpdated?.(id, patch);
   };
 
   // Ends any gesture; an in-progress move/resize lands its latest patch first
@@ -182,9 +210,24 @@
     interaction = { kind: 'idle' };
   };
 
-  const startEdit = (id: string, kind: 'moving' | 'resizing', grab: TemplatePoint = { x: 0, y: 0 }) => {
-    interaction = kind === 'moving' ? { kind, id, grab } : { kind, id };
-    edit = { id, patch: {} };
+  // Dragging a selected shape's origin carries the whole selection along with it
+  const startMove = (anchor: AoeTemplate, point: TemplatePoint) => {
+    const ids = selectedSet.has(anchor.id) ? selectedIds : [anchor.id];
+    const starts = Object.fromEntries(
+      editedTemplates.filter((template) => ids.includes(template.id)).map((t) => [t.id, { ...t.position }])
+    );
+    interaction = {
+      kind: 'moving',
+      id: anchor.id,
+      grab: { x: point.x - anchor.position.x, y: point.y - anchor.position.y },
+      starts
+    };
+    edit = { patches: {} };
+  };
+
+  const startResize = (id: string) => {
+    interaction = { kind: 'resizing', id };
+    edit = { patches: {} };
   };
 
   const onMouseDown = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
@@ -196,12 +239,12 @@
     const disableSnap = e instanceof MouseEvent && e.altKey;
 
     if (!isActive) {
-      const hit = findTemplateAt(point);
-      if (!hit || hit.id === props.selectedId) return;
+      const stack = findTemplatesAt(point).map((template) => template.id);
+      if (stack.length === 0) return;
       // A token or light under the same click wins; markers stamp the claim on their own mouse-down
       setTimeout(() => {
         if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
-        onAoeTemplateSelected?.(hit.id);
+        cycleSelection(stack);
       }, 0);
       return;
     }
@@ -212,29 +255,25 @@
     }
     if (interaction.kind !== 'idle') return;
 
-    const selected = findSelectedTemplate();
-    if (selected) {
-      const handles = getTemplateHandlePoints(selected, ftPerPx);
-      if (isNear(point, handles.origin)) {
-        startEdit(selected.id, 'moving', { x: point.x - selected.position.x, y: point.y - selected.position.y });
-        return;
-      }
-      if (isNear(point, handles.end)) {
-        startEdit(selected.id, 'resizing');
-        return;
-      }
-    }
-
-    const hit = findTemplateAt(point);
-    if (hit) {
-      if (hit.id === props.selectedId) {
-        startEdit(hit.id, 'moving', { x: point.x - hit.position.x, y: point.y - hit.position.y });
-      } else {
-        onAoeTemplateSelected?.(hit.id);
-      }
+    const selected = editedTemplates.filter((template) => selectedSet.has(template.id));
+    const handles = selected.map((template) => ({ template, ...getTemplateHandlePoints(template, ftPerPx) }));
+    const grabbedOrigin = handles.find((handle) => isNear(point, handle.origin));
+    if (grabbedOrigin) {
+      startMove(grabbedOrigin.template, point);
       return;
     }
-    startDraft(point, disableSnap);
+    const grabbedEnd = handles.find((handle) => isNear(point, handle.end));
+    if (grabbedEnd) {
+      startResize(grabbedEnd.template.id);
+      return;
+    }
+
+    // Starts a new shape even on top of existing ones; a short tap instead selects the shape under it
+    startDraft(
+      point,
+      disableSnap,
+      findTemplatesAt(point).map((template) => template.id)
+    );
   };
 
   const onMouseMove = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
@@ -250,13 +289,31 @@
     }
 
     switch (interaction.kind) {
-      case 'dragging':
+      case 'dragging': {
+        const moved = Math.hypot(point.x - interaction.draft.position.x, point.y - interaction.draft.position.y);
+        interaction = {
+          ...interaction,
+          crossed: interaction.crossed || moved >= Math.max(cellPx, TAP_SLOP_PX),
+          draft: updateDraft(interaction.draft, point, disableSnap)
+        };
+        break;
+      }
       case 'aiming':
         interaction = { ...interaction, draft: updateDraft(interaction.draft, point, disableSnap) };
         break;
       case 'moving': {
-        const position = snapPoint({ x: point.x - interaction.grab.x, y: point.y - interaction.grab.y }, disableSnap);
-        edit = { id: interaction.id, patch: { position } };
+        const { id, grab, starts } = interaction;
+        const anchor = snapPoint({ x: point.x - grab.x, y: point.y - grab.y }, disableSnap);
+        const dx = anchor.x - starts[id].x;
+        const dy = anchor.y - starts[id].y;
+        edit = {
+          patches: Object.fromEntries(
+            Object.entries(starts).map(([startId, start]) => [
+              startId,
+              { position: { x: start.x + dx, y: start.y + dy } }
+            ])
+          )
+        };
         emitEdit(false);
         break;
       }
@@ -269,7 +326,7 @@
             ? template.angle
             : angleFromCursor(template.position, point, template.shape, props.tool.snapAngle && !disableSnap);
         const size = sizeFromCursor(template.shape, template.position, point, ftPerPx, angle, !disableSnap);
-        edit = { id: template.id, patch: template.shape === AoeShape.Circle ? { size } : { size, angle } };
+        edit = { patches: { [template.id]: template.shape === AoeShape.Circle ? { size } : { size, angle } } };
         emitEdit(false);
         break;
       }
@@ -289,7 +346,11 @@
       case 'dragging': {
         const current = updateDraft(interaction.draft, point, disableSnap);
         const movedPx = Math.hypot(point.x - current.position.x, point.y - current.position.y);
-        if (movedPx >= cellPx) {
+        const { tapStack, crossed } = interaction;
+        if (tapStack.length > 0 && !crossed && movedPx < Math.max(cellPx, TAP_SLOP_PX)) {
+          interaction = { kind: 'idle' };
+          cycleSelection(tapStack);
+        } else if (movedPx >= cellPx) {
           commitDraft(current);
         } else {
           interaction = { kind: 'aiming', draft: current };
@@ -304,6 +365,13 @@
   };
 
   export const hasDraft = () => interaction.kind === 'dragging' || interaction.kind === 'aiming';
+
+  export const hitTest = (point: TemplatePoint) => findTemplatesAt(point)[0]?.id ?? null;
+
+  export const inRectangle = (start: TemplatePoint, end: TemplatePoint) =>
+    editedTemplates
+      .filter((template) => templateIntersectsRect(template, start, end, ftPerPx))
+      .map((template) => template.id);
 
   export const cancelDraft = () => {
     if (hasDraft()) interaction = { kind: 'idle' };
@@ -348,7 +416,7 @@
       {localScale}
       {sceneRotation}
       {mapRotation}
-      isSelected={template.id === props.selectedId}
+      isSelected={selectedSet.has(template.id)}
       isDraft={draft?.id === template.id}
       showLabel={props.showLabels}
     />

@@ -49,6 +49,8 @@ export interface Callbacks {
   onAoeTemplateAdded?: (template: AoeTemplate) => void;
   onAoeTemplateUpdated?: (id: string, patch: Partial<Omit<AoeTemplate, 'id'>>) => void;
   onAoeTemplateSelected?: (id: string | null) => void;
+  /** Multi-selection; when omitted, `onAoeTemplateSelected` receives the last id */
+  onAoeTemplatesSelected?: (ids: string[]) => void;
   onAoeTemplateDeleted?: (id: string) => void;
 }
 

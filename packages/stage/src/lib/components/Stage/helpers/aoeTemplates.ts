@@ -119,6 +119,39 @@ export const templateLocalToLayer = (template: AoeTemplate, localFt: TemplatePoi
 export const templateContainsPoint = (template: AoeTemplate, point: TemplatePoint, ftPerPx: number): boolean =>
   templateSdf(template, worldToTemplateLocal(template, point, ftPerPx)) <= 0;
 
+/** Next template to select among overlapping ones (topmost first), wrapping past the current one */
+export const nextTemplateInStack = (stackTopFirst: string[], currentId: string | null): string | null => {
+  if (stackTopFirst.length === 0) return null;
+  const index = currentId ? stackTopFirst.indexOf(currentId) : -1;
+  return stackTopFirst[(index + 1) % stackTopFirst.length];
+};
+
+/** Whether a layer-local rectangle touches the template: shared points either way, or the origin inside it */
+export const templateIntersectsRect = (
+  template: AoeTemplate,
+  start: TemplatePoint,
+  end: TemplatePoint,
+  ftPerPx: number
+): boolean => {
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+  const inRect = (point: TemplatePoint) => point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
+  const rectPoints = [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: minX, y: maxY },
+    { x: maxX, y: maxY },
+    { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+  ];
+  return (
+    inRect(template.position) ||
+    getTemplateOutline(template).some((point) => inRect(templateLocalToLayer(template, point, ftPerPx))) ||
+    rectPoints.some((point) => templateContainsPoint(template, point, ftPerPx))
+  );
+};
+
 /** Origin and far-edge handle positions in layer-local px; the end handle sits at (size, 0) for every shape */
 export const getTemplateHandlePoints = (
   template: AoeTemplate,

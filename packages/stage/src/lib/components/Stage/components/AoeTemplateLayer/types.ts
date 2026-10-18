@@ -62,7 +62,10 @@ export interface AoeToolSettings {
 
 export interface AoeTemplateLayerProps {
   templates: AoeTemplate[];
+  /** Primary selection (last of `selectedIds`); drives the edit panel */
   selectedId: string | null;
+  /** Every selected template; falls back to `selectedId` when omitted */
+  selectedIds?: string[];
   showLabels: boolean;
   tool: AoeToolSettings;
 }
@@ -70,6 +73,10 @@ export interface AoeTemplateLayerProps {
 export interface AoeTemplateLayerExports {
   cancelDraft(): void;
   hasDraft(): boolean;
+  /** Topmost visible template at a point in marker-space (layer-local px) */
+  hitTest(point: { x: number; y: number }): string | null;
+  /** Visible templates touched by a rectangle in marker-space */
+  inRectangle(start: { x: number; y: number }, end: { x: number; y: number }): string[];
 }
 
 export const AOE_EFFECT_DEFAULT_COLORS: Record<AoeEffect, string> = {

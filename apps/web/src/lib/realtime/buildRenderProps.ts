@@ -39,7 +39,12 @@ export interface LocalView {
   /** Active measurement tool configuration (type, cone angle, beam width). */
   measurement?: { type?: number; coneAngle?: number; beamWidth?: number };
   /** AoE tool settings and selection are per-user, like the other tools. */
-  aoeTemplates?: { tool?: Partial<AoeToolSettings>; selectedId?: string | null; showLabels?: boolean };
+  aoeTemplates?: {
+    tool?: Partial<AoeToolSettings>;
+    selectedId?: string | null;
+    selectedIds?: string[];
+    showLabels?: boolean;
+  };
 }
 
 /**
@@ -95,6 +100,7 @@ export const buildRenderProps = (snapshot: SceneSnapshot, view: LocalView, bucke
 
   if (view.aoeTemplates?.tool) props.aoeTemplates!.tool = { ...props.aoeTemplates!.tool, ...view.aoeTemplates.tool };
   if (view.aoeTemplates?.selectedId !== undefined) props.aoeTemplates!.selectedId = view.aoeTemplates.selectedId;
+  if (view.aoeTemplates?.selectedIds !== undefined) props.aoeTemplates!.selectedIds = view.aoeTemplates.selectedIds;
   if (view.aoeTemplates?.showLabels !== undefined) props.aoeTemplates!.showLabels = view.aoeTemplates.showLabels;
 
   return props;

@@ -351,6 +351,7 @@ export const buildSceneProps = (
     aoeTemplates: {
       templates: aoeTemplates,
       selectedId: null,
+      selectedIds: [],
       showLabels: true,
       tool: { ...DEFAULT_AOE_TOOL }
     },

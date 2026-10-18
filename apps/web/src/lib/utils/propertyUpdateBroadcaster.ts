@@ -38,6 +38,7 @@ const LOCAL_ONLY_PREFIXES = [
   'measurement', // measurement tool config is ephemeral
   'aoeTemplates.tool',
   'aoeTemplates.selectedId',
+  'aoeTemplates.selectedIds',
   'aoeTemplates.showLabels',
   'debug'
 ];

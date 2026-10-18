@@ -449,6 +449,7 @@
           aoeTemplates: {
             tool: prev.aoeTemplates?.tool,
             selectedId: isSceneSwitch ? null : prev.aoeTemplates?.selectedId,
+            selectedIds: isSceneSwitch ? [] : prev.aoeTemplates?.selectedIds,
             showLabels: prev.aoeTemplates?.showLabels
           }
         },
@@ -1647,13 +1648,20 @@
     const layer = stageProps.aoeTemplates;
     if (!layer) return;
     layer.templates = layer.templates.filter((template) => template.id !== id);
-    if (layer.selectedId === id) layer.selectedId = null;
+    selectAoeTemplates((layer.selectedIds ?? []).filter((selected) => selected !== id));
     session.client?.write.deleteAoeTemplate(selectedSceneId, id);
   };
 
-  const selectAoeTemplate = (id: string | null) => {
-    if (stageProps.aoeTemplates) stageProps.aoeTemplates.selectedId = id;
+  const selectAoeTemplates = (ids: string[]) => {
+    const layer = stageProps.aoeTemplates;
+    if (!layer) return;
+    layer.selectedIds = ids;
+    layer.selectedId = ids.at(-1) ?? null;
   };
+
+  const selectAoeTemplate = (id: string | null) => selectAoeTemplates(id ? [id] : []);
+
+  const removeSelectedAoeTemplates = () => [...(stageProps.aoeTemplates?.selectedIds ?? [])].forEach(removeAoeTemplate);
 
   const changeAoeTool = (patch: Partial<AoeToolSettings>) => {
     const layer = stageProps.aoeTemplates;
@@ -1666,7 +1674,7 @@
     const layer = stageProps.aoeTemplates;
     if (!layer) return;
     layer.templates = [...layer.templates, template];
-    layer.selectedId = template.id;
+    selectAoeTemplate(template.id);
     session.client?.write.upsertAoeTemplate(selectedSceneId, aoeRowFromTemplate(template));
   };
 
@@ -1674,10 +1682,7 @@
     hasDraft: () => stage?.aoeTemplates?.hasDraft() ?? false,
     cancelDraft: () => stage?.aoeTemplates?.cancelDraft(),
     deselect: () => selectAoeTemplate(null),
-    deleteSelected: () => {
-      const id = stageProps.aoeTemplates?.selectedId;
-      if (id) removeAoeTemplate(id);
-    },
+    deleteSelected: removeSelectedAoeTemplates,
     rotateSelected: (delta: number) => {
       const layer = stageProps.aoeTemplates;
       const target = layer?.templates.find((template) => template.id === layer.selectedId);
@@ -2081,9 +2086,8 @@
       selectedLightId = undefined;
       return true;
     }
-    const aoeId = stageProps.aoeTemplates?.selectedId;
-    if (aoeId && layer === MapLayerType.None) {
-      removeAoeTemplate(aoeId);
+    if ((stageProps.aoeTemplates?.selectedIds?.length ?? 0) > 0 && layer === MapLayerType.None) {
+      removeSelectedAoeTemplates();
       return true;
     }
     return false;
@@ -2194,7 +2198,12 @@
 
   onMount(() => {
     const element = stageElement;
-    let gesture: { start: { x: number; y: number }; sceneId: string; initialIds: string[] } | null = null;
+    let gesture: {
+      start: { x: number; y: number };
+      sceneId: string;
+      initialIds: string[];
+      initialAoeIds: string[];
+    } | null = null;
     const cancel = () => {
       gesture = null;
       selectionRectangle = null;
@@ -2206,7 +2215,7 @@
         event.ctrlKey ||
         event.metaKey ||
         !(event.target instanceof HTMLCanvasElement) ||
-        ![MapLayerType.None, MapLayerType.Marker].includes(stageProps.activeLayer)
+        ![MapLayerType.None, MapLayerType.Marker, MapLayerType.AoeTemplate].includes(stageProps.activeLayer)
       )
         return;
       event.preventDefault();
@@ -2214,7 +2223,8 @@
       gesture = {
         start: { x: event.clientX, y: event.clientY },
         sceneId: selectedSceneId,
-        initialIds: [...selectedMarkerIds]
+        initialIds: [...selectedMarkerIds],
+        initialAoeIds: [...(stageProps.aoeTemplates?.selectedIds ?? [])]
       };
     };
     const move = (event: MouseEvent) => {
@@ -2243,16 +2253,27 @@
         const end = { x: event.clientX, y: event.clientY };
         const point = stage?.markers.clientToPosition(end, true);
         if (point) clipboardPointer = { sceneId: selectedSceneId, point };
-        if (Math.hypot(end.x - gesture.start.x, end.y - gesture.start.y) < 5) {
-          const id = stage?.markers.hitTest(end);
-          if (id)
-            setSelection(
-              gesture.initialIds.includes(id)
-                ? gesture.initialIds.filter((selected) => selected !== id)
-                : [...gesture.initialIds, id]
-            );
+        const selectsMarkers = stageProps.activeLayer !== MapLayerType.AoeTemplate;
+        const selectsShapes = stageProps.activeLayer !== MapLayerType.Marker;
+        const isClick = Math.hypot(end.x - gesture.start.x, end.y - gesture.start.y) < 5;
+        const toggled = (ids: string[], id: string) =>
+          ids.includes(id) ? ids.filter((selected) => selected !== id) : [...ids, id];
+        const shapeStart = stage?.markers.clientToPosition(gesture.start);
+        const shapeEnd = stage?.markers.clientToPosition(end);
+        if (isClick) {
+          const markerId = selectsMarkers ? stage?.markers.hitTest(end) : null;
+          const shapeId = !markerId && selectsShapes && shapeEnd ? stage?.aoeTemplates.hitTest(shapeEnd) : null;
+          if (markerId) setSelection(toggled(gesture.initialIds, markerId));
+          else if (shapeId) selectAoeTemplates(toggled(gesture.initialAoeIds, shapeId));
         } else {
-          setSelection([...new Set([...gesture.initialIds, ...stage.markers.inRectangle(gesture.start, end)])]);
+          if (selectsMarkers) {
+            setSelection([...new Set([...gesture.initialIds, ...stage.markers.inRectangle(gesture.start, end)])]);
+          }
+          if (selectsShapes && shapeStart && shapeEnd) {
+            selectAoeTemplates([
+              ...new Set([...gesture.initialAoeIds, ...stage.aoeTemplates.inRectangle(shapeStart, shapeEnd)])
+            ]);
+          }
         }
       }
       cancel();
@@ -2453,6 +2474,7 @@
               onAoeTemplateAdded,
               onAoeTemplateUpdated: updateAoeTemplate,
               onAoeTemplateSelected: selectAoeTemplate,
+              onAoeTemplatesSelected: selectAoeTemplates,
               onAoeTemplateDeleted: removeAoeTemplate,
               onCursorMove: handleCursorMove
             }}

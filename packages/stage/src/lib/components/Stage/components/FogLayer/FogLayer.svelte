@@ -65,16 +65,18 @@
     material.uniforms.uAmplitude.value = props.amplitude;
     material.uniforms.uLevels.value = clampedLevels;
 
-    material.uniforms.uClippingPlanes.value = clippingPlaneStore.value.map(
-      (p) => new THREE.Vector4(p.normal.x, p.normal.y, p.normal.z, p.constant)
-    );
+    const planes = clippingPlaneStore.value;
+    for (let i = 0; i < planes.length; i++) {
+      const p = planes[i];
+      material.uniforms.uClippingPlanes.value[i].set(p.normal.x, p.normal.y, p.normal.z, p.constant);
+    }
   });
 
   useTask(
     (dt) => {
       material.uniforms.uTime.value += dt;
     },
-    { stage: renderStage }
+    { stage: renderStage, running: () => props.enabled }
   );
 </script>
 

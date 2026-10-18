@@ -65,7 +65,7 @@
   // Update material when light properties change
   $effect(() => {
     lightMaterial.uniforms.uStyle.value = getStyleIndex(light.style);
-    lightMaterial.uniforms.uColor.value = new THREE.Color(light.color);
+    lightMaterial.uniforms.uColor.value.set(light.color);
     lightMaterial.uniforms.uSelected.value = isSelected || isHovered;
     lightMaterial.uniforms.uLightSize.value = lightSize;
   });

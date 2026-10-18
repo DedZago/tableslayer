@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { ApiKeyManager, PartyInviteResponse, Head } from '$lib/components';
+  import ApiKeyManager from '$lib/components/ApiKeyManager.svelte';
+  import PartyInviteResponse from '$lib/components/party/PartyInviteResponse.svelte';
+  import Head from '$lib/components/Head/Head.svelte';
   import {
     Text,
     Title,

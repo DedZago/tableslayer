@@ -1,8 +1,9 @@
 <script lang="ts">
   import * as THREE from 'three';
   import { T, useTask } from '@threlte/core';
-  import { onDestroy } from 'svelte';
+  import { getContext, onDestroy } from 'svelte';
   import { MeasurementType, type MeasurementLayerProps } from './types';
+  import type { FramePacer } from '../../helpers/framePacing';
   import type { IMeasurement } from './measurements/BaseMeasurement';
   import { LineMeasurement } from './measurements/LineMeasurement';
   import { CircleMeasurement } from './measurements/CircleMeasurement';
@@ -79,9 +80,12 @@
   let previewSize = $derived(props ? (props.markerSize + props.outlineThickness * 2) / localScale : 22);
   let showPreview = $state(false);
 
+  const framePacer = getContext<FramePacer | undefined>('framePacer');
+
   // Task for fade animation
   useTask(() => {
     if (isFading && props) {
+      framePacer?.markActive();
       const now = performance.now();
       const fadeElapsed = now - fadeStartTime;
       // Use receivedFadeoutTime if set, otherwise use props.fadeoutTime

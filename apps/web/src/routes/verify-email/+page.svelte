@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button, FormControl, Input, Link, Panel, Spacer, Text, Title } from '@tableslayer/ui';
-  import { IllustrationPortal, Head } from '$lib/components/index.js';
+  import IllustrationPortal from '$lib/components/Illustration/Portal.svelte';
+  import Head from '$lib/components/Head/Head.svelte';
   import {
     useAuthVerifyEmailMutation,
     useAuthResendVerificationEmailMutation,

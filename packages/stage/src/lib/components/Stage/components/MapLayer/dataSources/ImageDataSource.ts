@@ -14,8 +14,6 @@ export class ImageDataSource implements IMapDataSource {
   private texture: THREE.Texture | null = null;
   /** Dimensions of the loaded image */
   private size: Size | null = null;
-  /** Three.js texture loader instance for loading images */
-  private loader = new THREE.TextureLoader();
 
   /**
    * Gets the Three.js texture containing the loaded image.
@@ -38,47 +36,57 @@ export class ImageDataSource implements IMapDataSource {
   /**
    * Loads an image from a URL and creates a texture.
    *
-   * This method uses Three.js TextureLoader to load various image formats
-   * (JPG, PNG, WebP, etc.) and creates a texture with proper color space
-   * settings for 3D rendering.
+   * Decodes off the main thread with createImageBitmap (falls back to
+   * TextureLoader where unavailable). The bitmap is flipped at decode time
+   * because WebGL ignores UNPACK_FLIP_Y for ImageBitmap sources. Colour
+   * profiles are converted by the browser, matching the HTMLImageElement path
+   * (three's ImageBitmapLoader forces colorSpaceConversion 'none').
    *
    * @param url - The URL of the image file to load
    * @returns A promise that resolves when the image is loaded and ready
    * @throws Error if the image cannot be loaded or processed
    */
   async load(url: string): Promise<void> {
-    // Dispose of previous texture if it exists
     this.dispose();
 
-    return new Promise((resolve, reject) => {
-      this.loader.load(
-        url,
-        (texture) => {
-          texture.colorSpace = THREE.SRGBColorSpace;
-          this.texture = texture;
-          this.size = {
-            width: texture.image.width,
-            height: texture.image.height
-          };
-          resolve();
-        },
-        undefined,
-        (error) => {
-          console.error('Failed to load image:', error);
-          reject(error);
-        }
-      );
-    });
+    try {
+      if (typeof createImageBitmap === 'undefined') {
+        const texture = await new THREE.TextureLoader().loadAsync(url);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        this.texture = texture;
+        this.size = { width: texture.image.width, height: texture.image.height };
+        return;
+      }
+
+      const response = await fetch(url, { mode: 'cors', credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`Map image request failed: ${response.status}`);
+      const bitmap = await createImageBitmap(await response.blob(), {
+        imageOrientation: 'flipY',
+        premultiplyAlpha: 'none',
+        colorSpaceConversion: 'default'
+      });
+      const texture = new THREE.Texture(bitmap);
+      texture.flipY = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      this.texture = texture;
+      this.size = { width: bitmap.width, height: bitmap.height };
+    } catch (error) {
+      console.error('Failed to load image:', error);
+      throw error;
+    }
   }
 
   /**
    * Disposes of the loaded texture and resets internal state.
    *
-   * This method cleans up the Three.js texture to prevent memory leaks
-   * and resets the size information.
+   * This method closes the decoded bitmap, cleans up the Three.js texture to prevent
+   * memory leaks, and resets the size information.
    */
   dispose(): void {
     if (this.texture) {
+      const image = this.texture.image as unknown;
+      if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) image.close();
       this.texture.dispose();
       this.texture = null;
     }

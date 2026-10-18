@@ -63,6 +63,7 @@ export function generateR2Url(
   // Construct URL
   let url: string;
   if (transforms.length > 0) {
+    transforms.push('format=auto');
     url = `${baseUrl}/cdn-cgi/image/${transforms.join(',')}/${location}`;
   } else {
     url = `${baseUrl}/${location}`;

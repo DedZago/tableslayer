@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button, Avatar, Title, Panel, Spacer, Text, Link } from '@tableslayer/ui';
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
   import { useRedeemPromoMutation } from '$lib/queries/admin';
   import { handleMutation, type FormMutationError } from '$lib/factories';
   import { goto } from '$app/navigation';

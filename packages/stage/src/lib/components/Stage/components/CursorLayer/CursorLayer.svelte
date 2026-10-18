@@ -3,7 +3,8 @@
   import { T, useTask, useThrelte } from '@threlte/core';
   import type { CursorData, CursorLayerProps } from './types';
   import { SceneLayer, SceneLayerOrder } from '../Scene/types';
-  import { onMount } from 'svelte';
+  import { getContext, onMount } from 'svelte';
+  import type { FramePacer } from '../../helpers/framePacing';
 
   interface Props {
     props: CursorLayerProps;
@@ -11,13 +12,18 @@
 
   const { props }: Props = $props();
   const { invalidate } = useThrelte();
+  const framePacer = getContext<FramePacer | undefined>('framePacer');
 
   // Track current time for fade calculations
   let currentTime = $state(Date.now());
 
-  useTask(() => {
-    currentTime = Date.now();
-  });
+  useTask(
+    () => {
+      currentTime = Date.now();
+      framePacer?.markActive();
+    },
+    { running: () => props.cursors.length > 0 }
+  );
 
   // Calculate opacity for each cursor based on fade settings
   const getCursorOpacity = (cursor: CursorData): number => {

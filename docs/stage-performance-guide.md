@@ -231,9 +231,27 @@ The debug interface supports disabling layers via `debug.disabledLayers`. This c
 
 ---
 
+## Idle Frame Pacing
+
+The frame loop always ticks, but `Scene.svelte` skips the GPU work while nothing is happening. The cap per
+tier is in `helpers/framePacing.ts` (`IDLE_FRAME_RATE`: high uncapped, medium 30 fps, low 20 fps). Any
+props change, window input, map load or resize gives full rate for 1.5 s. A layer whose transient
+animation must stay smooth calls `getContext<FramePacer>('framePacer')?.markActive()` from its `useTask`.
+The F9 overlay reports rendered frames, so an idle medium-tier stage shows ~30 fps by design.
+
+## Mask Readback
+
+Fog and annotation masks are read back with `readRenderTargetPixelsAsync` (PBO + fence, no pipeline stall).
+The `onFogUpdate` / `onAnnotationUpdate` callbacks receive a `getBlob` thunk, so the PNG is only encoded
+when a consumer asks for it. See `spec/performance-optimization.md` for the full PERF-2 pass.
+
 ## Future Optimization Opportunities
 
 These patterns have been identified but not yet implemented:
+
+- **Bake the feathered fog mask** into a texture when the mask changes, instead of sampling 8 mip levels per pixel per frame
+- **KTX2/Basis map textures** and **GIF→MP4 at upload** (needs a transcoding pipeline)
+- **RLE encode in a Web Worker** for very large maps
 
 1. **Texture atlasing** - Combine marker textures to reduce draw calls
 2. **Instanced rendering** - For multiple similar markers

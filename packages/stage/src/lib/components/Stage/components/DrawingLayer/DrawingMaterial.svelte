@@ -241,7 +241,14 @@
 
     // Read pixels from WebGL render target
     const pixels = new Uint8Array(4 * persistedTarget.width * persistedTarget.height);
-    renderer.readRenderTargetPixels(persistedTarget, 0, 0, persistedTarget.width, persistedTarget.height, pixels);
+    await renderer.readRenderTargetPixelsAsync(
+      persistedTarget,
+      0,
+      0,
+      persistedTarget.width,
+      persistedTarget.height,
+      pixels
+    );
 
     // Draw pixels to canvas
     const imageData = ctx.createImageData(persistedTarget.width, persistedTarget.height);
@@ -274,7 +281,7 @@
 
     // Read pixels from WebGL render target
     const pixels = new Uint8Array(4 * width * height);
-    renderer.readRenderTargetPixels(persistedTarget, 0, 0, width, height, pixels);
+    await renderer.readRenderTargetPixelsAsync(persistedTarget, 0, 0, width, height, pixels);
 
     // Extract alpha channel and flip vertically
     const binaryData = new Uint8Array(width * height);

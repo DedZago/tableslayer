@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Input, Button, FormControl, Title, Spacer, Panel, Text, Link } from '@tableslayer/ui';
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
   import { useAuthForgotPasswordMutation } from '$lib/queries';
   import { type FormMutationError, handleMutation } from '$lib/factories';
   import { goto } from '$app/navigation';

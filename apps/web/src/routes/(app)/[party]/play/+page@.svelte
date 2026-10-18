@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
   import { InitiativeStrip } from '$lib/components/Combat';
   import { HandoutOverlay } from '$lib/components/Handouts';
   import { createPartyLiveStateQuery } from '$lib/queries';

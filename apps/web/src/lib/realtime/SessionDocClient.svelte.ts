@@ -11,6 +11,7 @@ import {
   getPartyState,
   getScenesMap,
   getSceneSnapshot,
+  invalidateRowObject,
   isDocHydrated,
   listScenes,
   openUndoCaptureGroup,
@@ -158,6 +159,7 @@ export class SessionDocClient {
     );
 
     this.doc.getMap('scenes').observeDeep((events, transaction) => {
+      for (const event of events) invalidateRowObject(event.target);
       const changes = classifySceneEvents(events as Y.YEvent<Y.Map<unknown>>[], transaction);
       this.#applyChanges(changes);
     });

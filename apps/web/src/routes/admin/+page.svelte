@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button, Title, Spacer, Input, FormControl, Table, Th, Td, Text, Link } from '@tableslayer/ui';
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
   import { useCreatePromoMutation, useDeletePromoMutation } from '$lib/queries/admin';
   import { handleMutation, type FormMutationError } from '$lib/factories';
   import { invalidateAll } from '$app/navigation';

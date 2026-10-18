@@ -50,6 +50,18 @@ const DEFAULT_AOE_TOOL: AoeToolSettings = {
   visibility: StageMode.DM
 };
 
+let gradientMemo: { key: string; value: ReturnType<typeof generateGradientColors> } | null = null;
+const gradientColorsFor = (color: string) => {
+  if (gradientMemo?.key !== color) gradientMemo = { key: color, value: generateGradientColors(color) };
+  return [...gradientMemo.value];
+};
+
+let fogRoomsMemo: { key: Parameters<typeof parseFogRooms>[0]; value: ReturnType<typeof parseFogRooms> } | null = null;
+const fogRoomsFor = (raw: Parameters<typeof parseFogRooms>[0]) => {
+  if (!fogRoomsMemo || fogRoomsMemo.key !== raw) fogRoomsMemo = { key: raw, value: parseFogRooms(raw) };
+  return fogRoomsMemo.value.map((room) => ({ ...room, points: room.points.map((point) => ({ ...point })) }));
+};
+
 // Bloodied is derived, never stored: at or below half of the stat block's max HP
 export const isAutoBloodied = (marker: {
   statBlock?: SelectMarker['statBlock'];
@@ -71,7 +83,9 @@ export const withAutoConditions = (
 
 // GM-only conditions never reach player clients
 const conditionsForMode = (conditions: unknown, mode: 'client' | 'editor'): MarkerCondition[] => {
-  const list = Array.isArray(conditions) ? (conditions as MarkerCondition[]) : [];
+  const list = Array.isArray(conditions)
+    ? (conditions as MarkerCondition[]).map((condition) => ({ ...condition }))
+    : [];
   return mode === 'client' ? list.filter((condition) => !condition.dmOnly) : list;
 };
 
@@ -85,7 +99,7 @@ export const buildSceneProps = (
   bucketUrl?: string,
   activeSceneAoeTemplates: AoeTemplateRow[] = []
 ): StageProps => {
-  const fogColors = generateGradientColors(activeScene.fogOfWarColor || '#000000');
+  const fogColors = gradientColorsFor(activeScene.fogOfWarColor || '#000000');
 
   // MapDefined marker/light positions are center-relative map pixels
   // (mapCoordVersion 1). Scenes not yet upgraded (v0, including old exports)
@@ -236,7 +250,7 @@ export const buildSceneProps = (
     },
     fogOfWar: {
       url: activeScene.fogOfWarUrl ?? '',
-      rooms: parseFogRooms(activeScene.fogOfWarRooms),
+      rooms: fogRoomsFor(activeScene.fogOfWarRooms),
       opacity: {
         dm: activeScene.fogOfWarOpacityDm ?? 0.3,
         player: activeScene.fogOfWarOpacityPlayer ?? 0.9

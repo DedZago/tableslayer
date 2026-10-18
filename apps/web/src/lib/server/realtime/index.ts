@@ -74,18 +74,11 @@ const replaceRows = async <T extends { id: string; sceneId: string }>(
     await db.delete(table).where(eq(table.sceneId, sceneId));
     return;
   }
-  await db.delete(table).where(
-    and(
-      eq(table.sceneId, sceneId),
-      notInArray(
-        table.id,
-        rows.map((row) => row.id)
-      )
-    )
-  );
-  for (const row of rows) {
-    await db.insert(table).values(row).onConflictDoUpdate({ target: table.id, set: row });
-  }
+  const ids = rows.map((row) => row.id);
+  await db.batch([
+    db.delete(table).where(and(eq(table.sceneId, sceneId), notInArray(table.id, ids))),
+    ...rows.map((row) => db.insert(table).values(row).onConflictDoUpdate({ target: table.id, set: row }))
+  ]);
 };
 
 export const applySessionPersist = async (payload: PersistSessionWire) => {

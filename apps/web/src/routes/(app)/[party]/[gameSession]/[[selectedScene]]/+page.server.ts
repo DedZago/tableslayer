@@ -43,20 +43,28 @@ export const load: PageServerLoad = async ({ parent, params, url, cookies }) => 
   }
 
   // Full scene data for first paint (the doc takes over once connected)
-  const selectedScene = await getScene(sceneFromList.id);
-  const [selectedSceneMarkers, selectedSceneLights, selectedSceneAnnotations, fogMaskResult, annotationMasks] =
-    await Promise.all([
-      getMarkersForScene(selectedScene.id),
-      getLightsForScene(selectedScene.id),
-      getAnnotationsForScene(selectedScene.id),
-      getSceneMaskData(selectedScene.id).catch(() => ({ fogOfWarMask: null })),
-      getAnnotationMasksForScene(selectedScene.id)
-    ]);
+  const sceneId = sceneFromList.id;
+  const [
+    selectedScene,
+    selectedSceneMarkers,
+    selectedSceneLights,
+    selectedSceneAnnotations,
+    fogMaskResult,
+    annotationMasks,
+    checklistState
+  ] = await Promise.all([
+    getScene(sceneId),
+    getMarkersForScene(sceneId),
+    getLightsForScene(sceneId),
+    getAnnotationsForScene(sceneId),
+    getSceneMaskData(sceneId).catch(() => ({ fogOfWarMask: null })),
+    getAnnotationMasksForScene(sceneId),
+    getUserChecklistState(user.id)
+  ]);
 
   const paneLayoutDesktop = getPreferenceServer(cookies, 'paneLayoutDesktop');
   const paneLayoutMobile = getPreferenceServer(cookies, 'paneLayoutMobile');
 
-  const checklistState = await getUserChecklistState(user.id);
   const isEligibleForAutoShow = checkUserChecklistEligibility(
     parties?.length ?? 0,
     gameSessions?.length ?? 0,

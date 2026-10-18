@@ -107,18 +107,9 @@ float combinedMaskLod(vec2 uv, float lod) {
   return combinedMask(textureLod(uRoomsTexture, uv, lod), textureLod(uMaskTexture, uv, lod).a);
 }
 
-float mask(vec2 uv, vec2 size, float amplitude, float frequency) {
-  // Sample the mask at multiple mipmap levels to get a feathered edge
-  float featheredMask = 0.0;
-  float totalWeight = 0.0;
-  for(int i = uEdgeMinMipMapLevel; i <= uEdgeMaxMipMapLevel; i++) {
-    featheredMask += combinedMaskLod(uv, float(i));
-  }
-  featheredMask /= float(uEdgeMaxMipMapLevel - uEdgeMinMipMapLevel + 1);
-  featheredMask = clamp(featheredMask, 0.0, 1.0);
-
+float mask(vec2 size, float amplitude, float frequency, float featheredMask, float baseMask) {
   // Add noise to the edge of the mask
-  vec2 noiseUV = uv * size;
+  vec2 noiseUV = vUv * size;
   float edgeNoise = snoise(frequency * noiseUV + uTime * uEdgeSpeed) + uEdgeOffset;
 
   // Create an edge mask that's only non-zero near the transition
@@ -128,7 +119,6 @@ float mask(vec2 uv, vec2 size, float amplitude, float frequency) {
   // Blend the noise only at the edges
   float finalMask = featheredMask + edgeNoise * amplitude * edgeMask;
 
-  float baseMask = combinedMask(texture2D(uRoomsTexture, vUv), texture2D(uMaskTexture, vUv).a);
   return amplitude * finalMask + (1.0 - amplitude) * baseMask;
 }
 
@@ -155,31 +145,39 @@ void main() {
   // Sample at multiple levels of detail to get a nice feathered edge
   vec2 texSize = vec2(textureSize(uMaskTexture, 0));
 
+  // The feathered mask and base mask do not depend on the layer, so compute them once per pixel
+  float featheredMask = 0.0;
+  for(int i = uEdgeMinMipMapLevel; i <= uEdgeMaxMipMapLevel; i++) {
+    featheredMask += combinedMaskLod(vUv, float(i));
+  }
+  featheredMask = clamp(featheredMask / float(uEdgeMaxMipMapLevel - uEdgeMinMipMapLevel + 1), 0.0, 1.0);
+  float baseMask = combinedMask(texture2D(uRoomsTexture, vUv), texture2D(uMaskTexture, vUv).a);
+
   // Layers 2-4 are skipped on lower performance tiers; the branches are on a
   // uniform, so the skipped noise work is genuinely not executed
   vec4 finalFog = vec4(
     uFogColor1 * fog(vUv, texSize, uAmplitude.x, uFrequency.x, uPersistence.x, uLacunarity.x, uOffset.x, uLevels.x, uFogSpeed.x),
-    mask(vUv, texSize, uEdgeAmplitude.x, uEdgeFrequency.x)
+    mask(texSize, uEdgeAmplitude.x, uEdgeFrequency.x, featheredMask, baseMask)
   );
 
   if(uFogLayerCount >= 2) {
     finalFog += vec4(
       uFogColor2 * fog(vUv, texSize, uAmplitude.y, uFrequency.y, uPersistence.y, uLacunarity.y, uOffset.y, uLevels.y, uFogSpeed.y),
-      mask(vUv, texSize, uEdgeAmplitude.y, uEdgeFrequency.y)
+      mask(texSize, uEdgeAmplitude.y, uEdgeFrequency.y, featheredMask, baseMask)
     );
   }
 
   if(uFogLayerCount >= 3) {
     finalFog += vec4(
       uFogColor3 * fog(vUv, texSize, uAmplitude.z, uFrequency.z, uPersistence.z, uLacunarity.z, uOffset.z, uLevels.z, uFogSpeed.z),
-      mask(vUv, texSize, uEdgeAmplitude.z, uEdgeFrequency.z)
+      mask(texSize, uEdgeAmplitude.z, uEdgeFrequency.z, featheredMask, baseMask)
     );
   }
 
   if(uFogLayerCount >= 4) {
     finalFog += vec4(
       uFogColor4 * fog(vUv, texSize, uAmplitude.w, uFrequency.w, uPersistence.w, uLacunarity.w, uOffset.w, uLevels.w, uFogSpeed.w),
-      mask(vUv, texSize, uEdgeAmplitude.w, uEdgeFrequency.w)
+      mask(texSize, uEdgeAmplitude.w, uEdgeFrequency.w, featheredMask, baseMask)
     );
   }
 

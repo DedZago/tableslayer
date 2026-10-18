@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as THREE from 'three';
-  import { getContext, onMount, onDestroy, untrack } from 'svelte';
+  import { getContext, setContext, onMount, onDestroy, untrack } from 'svelte';
   import { T, useThrelte, useTask } from '@threlte/core';
   import {
     EffectComposer,
@@ -31,6 +31,7 @@
   import { debugState } from '../../helpers/debugState.svelte';
   import { getActiveEffects, hasActivePostProcessing } from '../../helpers/postProcessing';
   import { snapToGrid, getGridCellSize as getGridCellSizeHelper } from '../../helpers/grid';
+  import { createFramePacer, IDLE_FRAME_RATE } from '../../helpers/framePacing';
   import { SceneLayer, SceneLayerOrder, SceneLoadingState } from './types';
   import type { AnnotationExports } from '../AnnotationLayer/types';
   import AnnotationLayer from '../AnnotationLayer/AnnotationLayer.svelte';
@@ -126,12 +127,28 @@
 
   let composer = new EffectComposer(renderer);
 
+  const framePacer = createFramePacer();
+  setContext('framePacer', framePacer);
+  const activityEvents = ['pointerdown', 'pointermove', 'wheel', 'keydown'] as const;
+  const markFrameActive = () => framePacer.markActive();
+
+  $effect(() => {
+    void props;
+    void cursors;
+    void receivedMeasurement;
+    untrack(() => framePacer.markActive());
+  });
+
   onMount(() => {
     let before = autoRender.current;
     autoRender.set(false);
     renderer.autoClear = false;
     renderer.setClearColor(0, 0);
     renderer.localClippingEnabled = true;
+
+    activityEvents.forEach((type) => window.addEventListener(type, markFrameActive, { passive: true }));
+    const detachActivityListeners = () =>
+      activityEvents.forEach((type) => window.removeEventListener(type, markFrameActive));
 
     // Add mouse tracking if enabled
     if (trackLocalCursor && callbacks.onCursorMove) {
@@ -165,12 +182,14 @@
 
       return () => {
         autoRender.set(before);
+        detachActivityListeners();
         renderer.domElement.removeEventListener('mousemove', handleMouseMove);
       };
     }
 
     return () => {
       autoRender.set(before);
+      detachActivityListeners();
     };
   });
 
@@ -328,12 +347,16 @@
   });
 
   // Check if any post-processing effects are active
-  const hasActiveEffects = $derived(() => hasActivePostProcessing(props.postProcessing, props.performanceTier));
+  const hasActiveEffects = $derived(hasActivePostProcessing(props.postProcessing, props.performanceTier));
 
   // Custom render task
   useTask(
     (dt) => {
       if (!scene || !renderer || !camera) return;
+
+      const now = performance.now();
+      if (needsResize) framePacer.markActive(now);
+      if (!framePacer.shouldRender(now, IDLE_FRAME_RATE[props.performanceTier ?? 'high'])) return;
 
       const enableMetrics = debugState.enableMetrics;
       const frameStart = enableMetrics ? beginFrame() : 0;
@@ -353,7 +376,7 @@
       camera.current.layers.set(SceneLayer.Main);
 
       let composerTime = 0;
-      if (hasActiveEffects()) {
+      if (hasActiveEffects) {
         const composerStart = enableMetrics ? startTiming() : 0;
         composer.render(dt);
         composerTime = enableMetrics ? endTiming(composerStart) : 0;
@@ -840,6 +863,7 @@
       onMapLoaded={(_mapUrl, size) => {
         mapSize = size;
         needsResize = true;
+        framePacer.markActive();
         if (loadingState === SceneLoadingState.LoadingMap) {
           setLoadingState(SceneLoadingState.Resizing);
         }

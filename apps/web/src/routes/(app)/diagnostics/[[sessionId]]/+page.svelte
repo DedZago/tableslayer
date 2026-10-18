@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
   import { Title, Text, Spacer, Panel, Button, Select, Icon, Link, FormControl } from '@tableslayer/ui';
   import { IconCircleCheckFilled, IconAlertCircleFilled, IconCircleXFilled } from '@tabler/icons-svelte';
   import { goto } from '$app/navigation';

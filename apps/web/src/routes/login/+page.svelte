@@ -3,7 +3,8 @@
   import { type FormMutationError, handleMutation } from '$lib/factories';
   import { invalidateAll } from '$app/navigation';
   import { FormError, Input, Button, FormControl, Title, Link, Text, Spacer, Panel } from '@tableslayer/ui';
-  import { IllustrationTown, Head } from '$lib/components';
+  import IllustrationTown from '$lib/components/Illustration/Town.svelte';
+  import Head from '$lib/components/Head/Head.svelte';
   import { page } from '$app/state';
   import { onMount } from 'svelte';
 

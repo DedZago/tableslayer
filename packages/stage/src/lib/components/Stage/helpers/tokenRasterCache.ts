@@ -115,11 +115,16 @@ export const syncRingColors = () => {
   activeTurnRingMaterial.color.set(getCssColor('--yellow-500'));
 };
 
+const IMAGE_CACHE_LIMIT = 128;
 const imageCache = new Map<string, Promise<ImageBitmap>>();
 
 export const loadTokenImage = (url: string): Promise<ImageBitmap> => {
   const cached = imageCache.get(url);
-  if (cached) return cached;
+  if (cached) {
+    imageCache.delete(url);
+    imageCache.set(url, cached);
+    return cached;
+  }
   const request = fetch(url, { mode: 'cors' })
     .then((response) => response.blob())
     .then((blob) => createImageBitmap(blob))
@@ -128,6 +133,9 @@ export const loadTokenImage = (url: string): Promise<ImageBitmap> => {
       throw error;
     });
   imageCache.set(url, request);
+  while (imageCache.size > IMAGE_CACHE_LIMIT) {
+    imageCache.delete(imageCache.keys().next().value!);
+  }
   return request;
 };
 

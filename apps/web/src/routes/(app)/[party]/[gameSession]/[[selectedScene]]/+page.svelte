@@ -1800,7 +1800,7 @@
   };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const onAnnotationUpdate = (layerId: string, _blob: Promise<Blob>) => {
+  const onAnnotationUpdate = (layerId: string, _getBlob: () => Promise<Blob>) => {
     const existing = pendingAnnotationCommits.get(layerId);
     if (existing) clearTimeout(existing.timer);
     const sceneId = selectedSceneId;
@@ -1842,7 +1842,7 @@
   });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const onFogUpdate = (_blob: Promise<Blob>) => {
+  const onFogUpdate = (_getBlob: () => Promise<Blob>) => {
     trackChecklistItemLocal('fog-erase');
     if (pendingFogCommit) clearTimeout(pendingFogCommit.timer);
     const sceneId = selectedSceneId;

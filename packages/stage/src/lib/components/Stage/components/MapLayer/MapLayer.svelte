@@ -36,7 +36,12 @@
   $effect(() => {
     if (!props.map.url) {
       currentMapUrl = props.map.url;
-      // Dispose of data source when URL is null
+      // Dispose of data source when URL is null; detach the texture first so the
+      // still-mounted mesh never re-uploads a closed ImageBitmap
+      if (mapImageMaterial.map) {
+        mapImageMaterial.map = null;
+        mapImageMaterial.needsUpdate = true;
+      }
       if (dataSource) {
         dataSource.dispose();
         dataSource = null;

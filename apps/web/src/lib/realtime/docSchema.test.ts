@@ -10,7 +10,9 @@ import {
   getFogMask,
   getPartyState,
   getSceneSnapshot,
+  getScenesMap,
   hydrateGameSessionDoc,
+  invalidateRowObject,
   isDocHydrated,
   listScenes,
   openUndoCaptureGroup,
@@ -728,5 +730,48 @@ describe('combat fields', () => {
       initiativeTiebreak: 1,
       positionX: 0
     });
+  });
+});
+
+describe('row object cache', () => {
+  const markerMap = (doc: Y.Doc, id: string) =>
+    (getScenesMap(doc).get('s1')!.get('markers') as Y.Map<Y.Map<unknown>>).get(id)!;
+  const markerIn = (snapshot: ReturnType<typeof getSceneSnapshot>, id: string) =>
+    snapshot!.markers.find((m) => m.id === id)!;
+
+  it('returns the same row objects while nothing changes', () => {
+    const doc = hydratedDoc();
+    const first = getSceneSnapshot(doc, 's1')!;
+    const second = getSceneSnapshot(doc, 's1')!;
+
+    expect(markerIn(second, 'm1')).toBe(markerIn(first, 'm1'));
+    expect(markerIn(second, 'm2')).toBe(markerIn(first, 'm2'));
+  });
+
+  it('replaces only the row whose field changed', () => {
+    const doc = hydratedDoc();
+    const first = getSceneSnapshot(doc, 's1')!;
+    createSessionWriter(doc, 'me').setMarkerFields('s1', 'm1', { title: 'Renamed' });
+    invalidateRowObject(markerMap(doc, 'm1'));
+    const after = getSceneSnapshot(doc, 's1')!;
+
+    expect(markerIn(after, 'm1')).not.toBe(markerIn(first, 'm1'));
+    expect(markerIn(after, 'm1').title).toBe('Renamed');
+    expect(markerIn(after, 'm2')).toBe(markerIn(first, 'm2'));
+  });
+
+  it('refreshes rows changed through the doc without a caller invalidating them', () => {
+    const doc = hydratedDoc();
+    const remote = new Y.Doc();
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
+    const first = getSceneSnapshot(doc, 's1')!;
+
+    createSessionWriter(remote, 'remote').setMarkerFields('s1', 'm1', { positionX: 9 });
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(remote));
+    const after = getSceneSnapshot(doc, 's1')!;
+
+    expect(markerIn(after, 'm1').positionX).toBe(9);
+    expect(markerIn(after, 'm1')).not.toBe(markerIn(first, 'm1'));
+    expect(markerIn(after, 'm2')).toBe(markerIn(first, 'm2'));
   });
 });

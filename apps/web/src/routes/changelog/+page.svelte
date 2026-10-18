@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Link, Text, Spacer, Title, Logo } from '@tableslayer/ui';
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
   import { marked } from 'marked';
   import type { PageData } from './$types';
   import { onMount, onDestroy } from 'svelte';

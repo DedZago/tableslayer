@@ -1,16 +1,14 @@
 <script lang="ts">
   import { Panel, Title, Text, Spacer } from '@tableslayer/ui';
-  import {
-    PartyMember,
-    ResendInvite,
-    PartyTitle,
-    CreateGameSession,
-    GameSessionCard,
-    DefaultPartySettings,
-    InvitePartyMember,
-    PartyUpgrade,
-    Head
-  } from '$lib/components';
+  import PartyMember from '$lib/components/party/PartyMember.svelte';
+  import ResendInvite from '$lib/components/party/ResendInvite.svelte';
+  import PartyTitle from '$lib/components/party/PartyTitle.svelte';
+  import CreateGameSession from '$lib/components/GameSession/CreateGameSession.svelte';
+  import GameSessionCard from '$lib/components/GameSession/GameSessionCard.svelte';
+  import DefaultPartySettings from '$lib/components/party/DefaultSettings.svelte';
+  import InvitePartyMember from '$lib/components/party/InvitePartyMember.svelte';
+  import PartyUpgrade from '$lib/components/party/PartyUpgrade.svelte';
+  import Head from '$lib/components/Head/Head.svelte';
 
   let { data } = $props();
   const { party, gameSessions, isPartyAdmin, invitedEmails, user, isStripeEnabled, isEmailEnabled } = $derived(data);

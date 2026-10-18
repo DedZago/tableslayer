@@ -11,7 +11,9 @@
     FormControl,
     Text
   } from '@tableslayer/ui';
-  import { IllustrationOverlook, Head, Turnstile } from '$lib/components';
+  import IllustrationOverlook from '$lib/components/Illustration/Overlook.svelte';
+  import Head from '$lib/components/Head/Head.svelte';
+  import Turnstile from '$lib/components/Turnstile.svelte';
   import { useAuthSignupMutation } from '$lib/queries';
   import { type FormMutationError, handleMutation } from '$lib/factories';
   import { goto } from '$app/navigation';

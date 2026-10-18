@@ -104,6 +104,10 @@ Key properties:
   one per message. Never move this (or any realtime scheduling) onto `requestAnimationFrame` —
   rAF cadence is per-window (focus/occlusion/GPU contention) and chains receive latency to that
   window's rendering health.
+  Within a rebuild, unchanged rows keep their plain object: `docSchema.ts` caches each row's
+  object per Y.Map and drops it when that map changes (an `observeDeep` attached per doc on first
+  `getSceneSnapshot`, so the PartyKit persist path is covered too). Snapshot rows are therefore
+  shared and **must never be mutated**.
 - **Origin-tagged writers** — `write.setSceneSettings/upsertMarker/setFogMask/...` and
   `party.setActiveScene/setPaused`. Writers warn loudly when a target scene is missing rather
   than silently no-oping.

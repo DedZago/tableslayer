@@ -406,10 +406,10 @@ export class PlayTools {
   }
 
   /** Stage callback: an annotation stroke finished. */
-  onAnnotationUpdate = (layerId: string, blob: Promise<Blob>, endPosition?: { x: number; y: number }) => {
+  onAnnotationUpdate = (layerId: string, getBlob: () => Promise<Blob>, endPosition?: { x: number; y: number }) => {
     this.resetToNoneAfterDelay();
 
-    blob.then(async (resolved) => {
+    getBlob().then(async (resolved) => {
       this.tempLayerUrls[layerId] = URL.createObjectURL(resolved);
 
       const presence = this.#options.session.presence;

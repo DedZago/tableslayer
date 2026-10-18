@@ -11,28 +11,36 @@
 export function encodeRLE(data: Uint8Array): Uint8Array {
   if (data.length === 0) return new Uint8Array(0);
 
-  const runs: number[] = [];
+  const out = new Uint8Array(data.length + 1);
+  let o = 0;
   let currentValue = data[0];
   let runLength = 1;
 
   // First byte indicates the starting value (0 or 1)
-  runs.push(currentValue === 0 ? 0 : 1);
+  out[o++] = currentValue === 0 ? 0 : 1;
+
+  const writeVarint = (value: number) => {
+    while (value > 127) {
+      out[o++] = (value & 0x7f) | 0x80;
+      value >>>= 7;
+    }
+    out[o++] = value;
+  };
 
   for (let i = 1; i < data.length; i++) {
     if (data[i] === currentValue) {
       runLength++;
     } else {
-      // Store the run length
-      pushVarint(runs, runLength);
+      writeVarint(runLength);
       currentValue = data[i];
       runLength = 1;
     }
   }
 
   // Don't forget the last run
-  pushVarint(runs, runLength);
+  writeVarint(runLength);
 
-  return new Uint8Array(runs);
+  return out.slice(0, o);
 }
 
 /**
@@ -58,9 +66,7 @@ export function decodeRLE(encoded: Uint8Array, targetLength: number): Uint8Array
 
     // Fill the result array with the current value
     const end = Math.min(position + runLength, targetLength);
-    for (let i = position; i < end; i++) {
-      result[i] = currentValue;
-    }
+    result.fill(currentValue, position, end);
 
     position = end;
     // Toggle the current value
@@ -68,18 +74,6 @@ export function decodeRLE(encoded: Uint8Array, targetLength: number): Uint8Array
   }
 
   return result;
-}
-
-/**
- * Variable-length integer encoding (for efficient storage of run lengths)
- * Uses continuation bit in MSB
- */
-function pushVarint(array: number[], value: number): void {
-  while (value > 127) {
-    array.push((value & 0x7f) | 0x80);
-    value >>>= 7;
-  }
-  array.push(value & 0x7f);
 }
 
 /**

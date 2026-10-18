@@ -1,7 +1,9 @@
 <script lang="ts">
   import { Link, Text, Spacer, Title } from '@tableslayer/ui';
 
-  import { Logo, Head } from '$lib/components';
+  import Logo from '$lib/components/Illustration/Logo.svelte';
+
+  import Head from '$lib/components/Head/Head.svelte';
 </script>
 
 <Head title="Terms of service" description="Terms of service for Table Slayer" />

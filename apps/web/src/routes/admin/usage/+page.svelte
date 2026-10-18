@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto, invalidate } from '$app/navigation';
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
   import { Button, Link, RadioButton, Spacer, Table, Td, Text, Th, Title } from '@tableslayer/ui';
 
   let { data } = $props();

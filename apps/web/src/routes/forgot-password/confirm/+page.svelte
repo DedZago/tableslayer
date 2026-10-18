@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Text, Title, Spacer, Panel } from '@tableslayer/ui';
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
 </script>
 
 <Panel class="panel--forgot">

@@ -13,8 +13,8 @@ import type { WeatherLayerProps } from '../WeatherLayer/types';
 export type { CursorData } from '../CursorLayer/types';
 
 export interface Callbacks {
-  onAnnotationUpdate: (layerId: string, blob: Promise<Blob>, endPosition?: { x: number; y: number }) => void;
-  onFogUpdate: (blob: Promise<Blob>) => void;
+  onAnnotationUpdate: (layerId: string, getBlob: () => Promise<Blob>, endPosition?: { x: number; y: number }) => void;
+  onFogUpdate: (getBlob: () => Promise<Blob>) => void;
   onFogRoomAdd?: (points: { x: number; y: number }[]) => void;
   onFogRoomToggle?: (roomId: string) => void;
   onFogRoomDelete?: (roomId: string) => void;

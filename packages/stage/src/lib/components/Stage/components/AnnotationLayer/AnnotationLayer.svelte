@@ -223,7 +223,7 @@
   function onMouseUp() {
     // If we have just finished drawing, save the annotation
     if (props.activeLayer && drawing) {
-      onAnnotationUpdate(props.activeLayer, toPng(), lastScreenPos || undefined);
+      onAnnotationUpdate(props.activeLayer, toPng, lastScreenPos || undefined);
     }
 
     // Reset the drawing state
@@ -359,7 +359,7 @@
       const layer = layers.find((layer) => layer.getId() === layerId);
       if (layer) {
         layer.clear();
-        onAnnotationUpdate(layerId, toPng());
+        onAnnotationUpdate(layerId, toPng);
       }
     }
   }
@@ -461,7 +461,7 @@ and markers - the trade-off is they receive post-processing (bloom etc.) there.
         isDrawingThisLayer={() => drawing && props.activeLayer === layer.id}
         onMaskConverted={() => {
           const converted = layers.find((l) => l && l.getId() === layer.id);
-          if (converted) onAnnotationUpdate(layer.id, converted.toPng());
+          if (converted) onAnnotationUpdate(layer.id, () => converted.toPng());
         }}
       />
       <T.PlaneGeometry />

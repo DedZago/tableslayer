@@ -3,7 +3,7 @@
   import { useAuthResetPasswordMutation } from '$lib/queries';
   import { type FormMutationError, handleMutation } from '$lib/factories';
   import { goto } from '$app/navigation';
-  import { Head } from '$lib/components';
+  import Head from '$lib/components/Head/Head.svelte';
 
   let { data } = $props();
   const { userDesiringReset, resetCode } = data;

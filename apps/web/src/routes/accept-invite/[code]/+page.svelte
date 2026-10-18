@@ -1,7 +1,8 @@
 <script lang="ts">
   let { data } = $props();
   const { invite, user } = data;
-  import { PartyInviteResponse, Head } from '$lib/components';
+  import PartyInviteResponse from '$lib/components/party/PartyInviteResponse.svelte';
+  import Head from '$lib/components/Head/Head.svelte';
   import { Avatar, Button, Panel, Spacer, Title } from '@tableslayer/ui';
   import { page } from '$app/state';
 </script>

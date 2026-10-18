@@ -65,10 +65,36 @@ const setChangedFields = (map: Y.Map<unknown>, fields: Record<string, unknown>) 
   }
 };
 
+// Row objects are reused across snapshots until their Y.Map changes, so nothing may mutate them.
+const rowObjectCache = new WeakMap<Y.Map<unknown>, unknown>();
+const rowCacheTrackedDocs = new WeakSet<Y.Doc>();
+
+export const invalidateRowObject = (map: unknown) => {
+  if (map instanceof Y.Map) rowObjectCache.delete(map);
+};
+
+// Any doc that serves cached rows must invalidate them from its own observer, whatever
+// client or server code applied the change (PartyKit persists remote edits from this same read path).
+const trackRowObjects = (doc: Y.Doc) => {
+  if (rowCacheTrackedDocs.has(doc)) return;
+  rowCacheTrackedDocs.add(doc);
+  getScenesMap(doc).observeDeep((events) => {
+    for (const event of events) invalidateRowObject(event.target);
+  });
+};
+
+const rowObjectOf = <T>(row: Y.Map<unknown>): T => {
+  const cached = rowObjectCache.get(row) as T | undefined;
+  if (cached) return cached;
+  const obj = yMapToObject<T>(row);
+  rowObjectCache.set(row, obj);
+  return obj;
+};
+
 const rowsOf = <T>(scene: SceneMap | undefined, collection: RowCollection, omit?: string): T[] => {
   const rows: T[] = [];
   const map = scene?.get(collection) as Y.Map<Y.Map<unknown>> | undefined;
-  map?.forEach((row) => rows.push(yMapToObject<T>(row, omit)));
+  map?.forEach((row) => rows.push(omit === undefined ? rowObjectOf<T>(row) : yMapToObject<T>(row, omit)));
   return rows;
 };
 
@@ -82,6 +108,7 @@ export const getSceneSettings = (doc: Y.Doc, sceneId: string): SceneSettings | n
 };
 
 export const getSceneSnapshot = (doc: Y.Doc, sceneId: string): SceneSnapshot | null => {
+  trackRowObjects(doc);
   const scene = getScenesMap(doc).get(sceneId);
   const settings = scene?.get('settings') as Y.Map<unknown> | undefined;
   if (!scene || !settings) return null;

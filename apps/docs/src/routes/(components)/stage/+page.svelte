@@ -152,8 +152,8 @@
     });
   });
 
-  async function onAnnotationUpdate(layerId: string, blob: Promise<Blob>) {
-    blob.then((blob) => {
+  async function onAnnotationUpdate(layerId: string, getBlob: () => Promise<Blob>) {
+    getBlob().then((blob) => {
       const layer = stageProps.annotations.layers.find((layer) => layer.id === layerId);
       if (layer) {
         layer.url = URL.createObjectURL(blob);

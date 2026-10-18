@@ -487,7 +487,7 @@
     }
 
     if (hasFinishedDrawing) {
-      onFogUpdate(toPng());
+      onFogUpdate(toPng);
     }
 
     // Reset the drawing state
@@ -608,7 +608,7 @@
    */
   export function clearFog() {
     material?.clear();
-    onFogUpdate(toPng());
+    onFogUpdate(toPng);
   }
 
   /**
@@ -616,7 +616,7 @@
    */
   export function resetFog() {
     material?.fill();
-    onFogUpdate(toPng());
+    onFogUpdate(toPng);
   }
 
   /**

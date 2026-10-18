@@ -63,6 +63,8 @@ export interface StageInteractionProps {
   dropTargetMarkerId?: string | null;
   /** Combatant whose turn it is; draws the active-turn ring */
   activeTurnMarkerId?: string | null;
+  /** Shows the distance from the selected token to every other visible token */
+  distanceMode?: boolean;
 }
 
 export enum StageMode {

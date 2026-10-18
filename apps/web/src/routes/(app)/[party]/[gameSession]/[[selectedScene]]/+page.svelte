@@ -46,7 +46,7 @@
   import AoeTemplateManager from '$lib/components/GameSession/AoeTemplateManager.svelte';
   import SidePanelTabs, { type SidePanelTab } from '$lib/components/GameSession/SidePanelTabs.svelte';
   import TokenContextPanel from '$lib/components/GameSession/TokenContextPanel.svelte';
-  import { StatBlockQuickCard, type StatBlockRoll } from '$lib/components/StatBlock';
+  import type { StatBlockRoll } from '$lib/components/StatBlock';
   import { HandoutLivePill, HandoutPanel, type HandoutPreview } from '$lib/components/Handouts';
   import type { AssetListItem } from '$lib/queries/assets';
   import { goto } from '$app/navigation';
@@ -76,11 +76,12 @@
     buildRenderProps,
     reuseUnchanged,
     type AnnotationRow,
-    type AoeTemplateRow,
     type MarkerRow
   } from '$lib/realtime';
   import { isSameTurn, readTurnPosition, sameCombatantView, type TurnPosition } from '$lib/utils/initiative';
   import {
+    aoeFieldsFromPatch,
+    aoeRowFromTemplate,
     bindPropertyUpdatesToDoc,
     buildSceneProps,
     withoutSessionAoeFields,
@@ -633,7 +634,6 @@
   let selectedMarkerId: string | undefined = $state();
   let selectedMarkerIds: string[] = $state([]);
   let selectionRectangle: { x: number; y: number; width: number; height: number } | null = $state(null);
-  let statBlockQuickCardCollapsed = $state(getPreference('statBlockQuickCardCollapsed') ?? false);
 
   // Identity-preserving: the stage re-renders selection only when the ids actually change
   const setSelection = (ids: string[]) => {
@@ -1246,6 +1246,14 @@
     tokenPanel = { markerId: marker.id, x: event.clientX, y: event.clientY };
   };
 
+  let distanceMode = $state(false);
+
+  const toggleMarkerVisibility = (marker: Marker) =>
+    setMarkerVisibility(
+      marker.id,
+      marker.visibility === MarkerVisibility.DM ? MarkerVisibility.Always : MarkerVisibility.DM
+    );
+
   const setMarkerVisibility = (markerId: string, visibility: MarkerVisibility) => {
     updateMarkerAndSave(markerId, (m) => (m.visibility = visibility));
     // Mirrors the marker panel: DM-only markers can't stay pinned for players
@@ -1334,29 +1342,13 @@
     return { statBlock: row.statBlock, hitPoints: row.hitPoints ?? null, tempHitPoints: row.tempHitPoints ?? null };
   };
 
-  const quickCardRow = $derived.by(() => {
-    if (selectedMarkerIds.length !== 1) return undefined;
-    const row = markerRowFor(selectedMarkerIds[0]);
-    return row?.statBlock ? row : undefined;
-  });
-
   const onStatRoll = (label: string, _formula: string, roll: StatBlockRoll) =>
     addToast({ data: { title: `${label}: ${roll.total}`, body: roll.text, type: 'info' } });
-
-  const setQuickCardCollapsed = (collapsed: boolean) => {
-    statBlockQuickCardCollapsed = collapsed;
-    setPreference('statBlockQuickCardCollapsed', collapsed);
-  };
 
   const deleteTokenPanelTargets = () => {
     const ids = [...selectedMarkerIds];
     ids.forEach((id) => onMarkerDeleted(id));
     if (selectedMarkerId && ids.includes(selectedMarkerId)) selectedMarkerId = undefined;
-  };
-
-  const openFullStatBlock = (markerId: string) => {
-    selectedMarkerId = markerId;
-    markersPane?.expand();
   };
 
   // Combat -------------------------------------------------------------------------
@@ -1610,33 +1602,6 @@
 
   const AOE_SHAPE_CYCLE = [AoeShape.Circle, AoeShape.Square, AoeShape.Cone, AoeShape.Line];
 
-  const aoeRowFromTemplate = (template: AoeTemplate): AoeTemplateRow => ({
-    id: template.id,
-    sceneId: selectedSceneId,
-    shape: template.shape as AoeTemplateRow['shape'],
-    positionX: template.position.x,
-    positionY: template.position.y,
-    angle: template.angle,
-    size: template.size,
-    width: template.width,
-    effect: template.effect,
-    color: template.color,
-    opacity: template.opacity,
-    visibility: template.visibility,
-    label: template.label ?? null,
-    anchorMarkerId: null,
-    createdAt: Math.floor(Date.now() / 1000)
-  });
-
-  const aoeFieldsFromPatch = (patch: Partial<Omit<AoeTemplate, 'id'>>): Partial<AoeTemplateRow> => {
-    const { position, shape, ...rest } = patch;
-    return {
-      ...rest,
-      ...(position && { positionX: position.x, positionY: position.y }),
-      ...(shape && { shape: shape as AoeTemplateRow['shape'] })
-    };
-  };
-
   const updateAoeTemplate = (id: string, patch: Partial<Omit<AoeTemplate, 'id'>>) => {
     const layer = stageProps.aoeTemplates;
     if (!layer?.templates.some((template) => template.id === id)) return;
@@ -1675,7 +1640,7 @@
     if (!layer) return;
     layer.templates = [...layer.templates, template];
     selectAoeTemplate(template.id);
-    session.client?.write.upsertAoeTemplate(selectedSceneId, aoeRowFromTemplate(template));
+    session.client?.write.upsertAoeTemplate(selectedSceneId, aoeRowFromTemplate(selectedSceneId, template));
   };
 
   const aoeKeyCommands = {
@@ -2445,6 +2410,8 @@
             bind:this={stage}
             props={stageProps}
             {selectedMarkerIds}
+            {distanceMode}
+            onMarkerVisibilityToggle={toggleMarkerVisibility}
             dropTargetMarkerId={artworkDropTargetId}
             {activeTurnMarkerId}
             callbacks={{
@@ -2556,18 +2523,6 @@
           <AssetCatalogOverlay onClose={() => (catalogOpen = false)} />
         {/if}
         <Hints {stageProps} />
-        {#if quickCardRow?.statBlock}
-          <StatBlockQuickCard
-            statBlock={quickCardRow.statBlock}
-            hitPoints={quickCardRow.hitPoints ?? null}
-            tempHitPoints={quickCardRow.tempHitPoints ?? null}
-            collapsed={statBlockQuickCardCollapsed}
-            onCollapsedChange={setQuickCardCollapsed}
-            onHitPointsChange={(fields) => writeHitPoints(quickCardRow.id, fields)}
-            onRoll={onStatRoll}
-            onOpenFullStatBlock={() => openFullStatBlock(quickCardRow.id)}
-          />
-        {/if}
       </div>
     </Pane>
     <PaneResizer class="resizer">
@@ -2673,6 +2628,8 @@
               bind:selectedMarkerId
               {selectedMarkerIds}
               onSelectionChange={setSelection}
+              {distanceMode}
+              onDistanceModeChange={(enabled) => (distanceMode = enabled)}
               {handleSelectActiveControl}
               {updateMarkerAndSave}
               onArtworkFile={replaceTokenArtwork}

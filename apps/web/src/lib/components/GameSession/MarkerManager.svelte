@@ -62,6 +62,8 @@
     selectedMarkerId = $bindable(),
     selectedMarkerIds = [],
     onSelectionChange,
+    distanceMode = false,
+    onDistanceModeChange,
     handleSelectActiveControl,
     socketUpdate = () => {},
     updateMarkerAndSave,
@@ -81,6 +83,8 @@
     selectedMarkerId: string | undefined;
     selectedMarkerIds?: string[];
     onSelectionChange?: (ids: string[]) => void;
+    distanceMode?: boolean;
+    onDistanceModeChange?: (enabled: boolean) => void;
     partyId: string;
     handleSelectActiveControl: (control: string) => void;
     /** @deprecated no-op; sync flows through the session doc */
@@ -305,6 +309,11 @@
       <Button variant="ghost" disabled={!selectedMarkerIds.length} onclick={() => onSelectionChange?.([])}>
         Clear selection
       </Button>
+      {#if onDistanceModeChange}
+        <Button variant={distanceMode ? 'primary' : 'ghost'} onclick={() => onDistanceModeChange(!distanceMode)}>
+          Show distances
+        </Button>
+      {/if}
     </div>
   {/if}
   <div class="markerManager__content">
@@ -323,6 +332,7 @@
                 statBlock={stat.statBlock}
                 hitPoints={stat.hitPoints}
                 tempHitPoints={stat.tempHitPoints}
+                variant="compact"
                 onHitPointsChange={(fields) => onHitPointsChange?.(marker.id, fields)}
                 onRoll={onStatRoll}
               />

@@ -34,6 +34,8 @@
 
   let effectPickerOpen = $state(false);
 
+  const toolIcon = $derived(shapeOptions.find((option) => option.value === tool.shape)?.icon ?? IconCone2);
+
   const changeTool = (patch: Partial<AoeToolSettings>) => {
     onToolChange(patch);
     if (!isActive) onActivate();
@@ -61,7 +63,7 @@
         class="aoeControls__tool {isActive ? 'aoeControls__tool--isActive' : ''}"
         onclick={onToggle}
       >
-        <Icon Icon={IconCone2} size="1.5rem" stroke={2} />
+        <Icon Icon={toolIcon} size="1.5rem" stroke={2} />
         <span class="aoeControls__text">AoE</span>
       </button>
     {/snippet}

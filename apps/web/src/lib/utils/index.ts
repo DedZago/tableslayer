@@ -1,3 +1,4 @@
+export * from './aoeTemplateRows';
 export * from './buildSceneProps';
 export * from './checklistTracker';
 export * from './colors';

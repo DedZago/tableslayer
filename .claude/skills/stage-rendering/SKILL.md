@@ -75,6 +75,12 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 
 - **Selection and labels**: a tap inside a shape selects it (`templateContainsPoint`) and repeated taps on a stack of overlapping shapes cycle through it (`nextTemplateInStack`); with the tool active a press that travels past the tap slop starts a NEW shape even on top of existing ones, and moving a shape is done by its origin handle (which carries every selected shape). Selection is multi: `props.selectedIds` (`selectedId` = last/primary), `onAoeTemplatesSelected(ids)`, and `StageExports.aoeTemplates.hitTest/inRectangle` take marker-space points so the editor's Shift-click/Shift-drag marquee can add shapes alongside tokens. With no tool active (`selectable`) the layer is select-only and yields to a marker click via `markerClaimAt`, like lights. New shapes rotate smoothly (`snapAngle` defaults off; squares only snap to 90° when it is on). The dimension text ("20 ft cone") shows only on the draft and the selected shape; a custom spell name follows `showLabels`. The draft outline is dashed at 0.4 opacity in the effect colour. Effects must animate from continuous `t` — never `floor(t * n)` — and the layer calls `framePacer.markActive()` while any effect is animating.
 
+## Distances, token toggle and player AoE
+
+- `helpers/moveDistance.ts` (THREE-free, tested) counts grid steps with diagonals = 1 and multiplies by `grid.worldGridSize`. `DistanceLabel` is the shared constant-screen-size label sprite; MarkerLayer shows it for the live "ft moved" while a token (or group anchor) is dragged, and — when the `<Stage distanceMode>` interaction prop is on — from the selected token to every other visible token.
+- `<Stage onMarkerVisibilityToggle>` mounts `MarkerVisibilityToggle` (HTML eye button) above the single selected token in DM mode on the None/Marker layers.
+- AoE input is no longer DM-only: players can draw with the tool active (`selectable` passive selection stays DM-only), and group drag works in Player mode. Player shapes are written to the doc by `play/usePlayTools.svelte.ts`.
+
 ## Dev / verify workflow
 
 ```bash

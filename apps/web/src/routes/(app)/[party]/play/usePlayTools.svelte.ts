@@ -1,4 +1,5 @@
 import { base64ToUint8, uint8ToBase64, type AnnotationRow } from '$lib/realtime';
+import { aoeFieldsFromPatch, aoeRowFromTemplate } from '$lib/utils/aoeTemplateRows';
 import { devError, devLog } from '$lib/utils/debug';
 import {
   IconCircle,
@@ -17,12 +18,18 @@ import {
 } from '@tabler/icons-svelte';
 import {
   AnnotationEffect,
+  AOE_EFFECT_DEFAULT_COLORS,
+  AoeEffect,
+  AoeShape,
   DrawMode,
   getDefaultEffectProps,
   MapLayerType,
   MeasurementType,
   StageMode,
   type AnnotationLayerData,
+  type AoeTemplate,
+  type AoeToolSettings,
+  type Marker,
   type RadialMenuItemProps,
   type StageExports
 } from '@tableslayer/stage';
@@ -75,6 +82,18 @@ export class PlayTools {
   lineWidth = $state(0.25);
   fogTool = $state<{ mode: DrawMode; size: number }>({ mode: DrawMode.Erase, size: PLAYFIELD_FOG_BRUSH_SIZE });
   measurement = $state<{ type: number; coneAngle?: number; beamWidth?: number }>({ type: MeasurementType.Line });
+
+  // Touch toolbar modes (local-only): token group selection, token-to-token distances, AoE templates
+  groupSelect = $state(false);
+  distanceMode = $state(false);
+  selectedMarkerIds = $state<string[]>([]);
+  aoeTool = $state<Partial<AoeToolSettings>>({
+    shape: AoeShape.Circle,
+    effect: AoeEffect.Fire,
+    color: AOE_EFFECT_DEFAULT_COLORS[AoeEffect.Fire],
+    visibility: StageMode.Player
+  });
+  aoeSelectedIds = $state<string[]>([]);
 
   // Temporary drawing state
   currentTemporaryLayerId = $state<string | null>(null);
@@ -231,6 +250,77 @@ export class PlayTools {
         ]
       }
     ];
+  }
+
+  get isAoeActive() {
+    return this.activeLayer === MapLayerType.AoeTemplate;
+  }
+
+  toggleGroupSelect() {
+    this.groupSelect = !this.groupSelect;
+    this.distanceMode = false;
+    this.selectedMarkerIds = [];
+  }
+
+  toggleDistanceMode() {
+    this.distanceMode = !this.distanceMode;
+    this.groupSelect = false;
+    this.selectedMarkerIds = [];
+  }
+
+  toggleAoe() {
+    this.activeLayer = this.isAoeActive ? MapLayerType.None : MapLayerType.AoeTemplate;
+    this.annotationsActiveLayer = null;
+    if (!this.isAoeActive) this.aoeSelectedIds = [];
+  }
+
+  setAoeShape(shape: AoeShape) {
+    this.aoeTool = { ...this.aoeTool, shape };
+    this.activeLayer = MapLayerType.AoeTemplate;
+  }
+
+  setAoeEffect(effect: AoeEffect) {
+    this.aoeTool = { ...this.aoeTool, effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] };
+    this.activeLayer = MapLayerType.AoeTemplate;
+  }
+
+  /** Stage callback: a token was tapped; group select toggles it, distance mode makes it the origin. */
+  onMarkerSelected = (marker: Marker | null) => {
+    if (!marker) return;
+    if (this.groupSelect) {
+      this.selectedMarkerIds = this.selectedMarkerIds.includes(marker.id)
+        ? this.selectedMarkerIds.filter((id) => id !== marker.id)
+        : [...this.selectedMarkerIds, marker.id];
+    } else if (this.distanceMode) {
+      this.selectedMarkerIds = [marker.id];
+    }
+  };
+
+  selectMarkers(ids: string[]) {
+    this.selectedMarkerIds = [...new Set([...this.selectedMarkerIds, ...ids])];
+  }
+
+  /** Stage callbacks: AoE shapes drawn on this screen are written straight to the doc, like marker moves. */
+  onAoeTemplateAdded = (template: AoeTemplate) => {
+    const sceneId = this.#options.session.activeSceneId;
+    if (!sceneId) return;
+    this.aoeSelectedIds = [template.id];
+    this.#options.session.client?.write.upsertAoeTemplate(sceneId, aoeRowFromTemplate(sceneId, template));
+  };
+
+  onAoeTemplateUpdated = (id: string, patch: Partial<Omit<AoeTemplate, 'id'>>) => {
+    const sceneId = this.#options.session.activeSceneId;
+    if (sceneId) this.#options.session.client?.write.setAoeTemplateFields(sceneId, id, aoeFieldsFromPatch(patch));
+  };
+
+  onAoeTemplateDeleted = (id: string) => {
+    const sceneId = this.#options.session.activeSceneId;
+    this.aoeSelectedIds = this.aoeSelectedIds.filter((selected) => selected !== id);
+    if (sceneId) this.#options.session.client?.write.deleteAoeTemplate(sceneId, id);
+  };
+
+  deleteSelectedAoeTemplates() {
+    [...this.aoeSelectedIds].forEach(this.onAoeTemplateDeleted);
   }
 
   clearActiveTool() {

@@ -184,6 +184,17 @@
   {/if}
 {/snippet}
 
+{#snippet propList()}
+  <div class="statBlock__props">
+    {#each propRows as [label, value]}
+      <p class="statBlock__prop">
+        <span class="statBlock__propLabel">{label}</span>
+        {value}
+      </p>
+    {/each}
+  </div>
+{/snippet}
+
 {#snippet spellcastingSection(spells: StatSpellcasting[])}
   <details class="statBlock__section">
     <summary class="statBlock__sectionTitle">Spellcasting</summary>
@@ -339,40 +350,36 @@
       {/each}
     </div>
 
-    {#if variant === 'full'}
-      {#if propRows.length}
-        <div class="statBlock__props">
-          {#each propRows as [label, value]}
-            <p class="statBlock__prop">
-              <span class="statBlock__propLabel">{label}</span>
-              {value}
-            </p>
-          {/each}
-        </div>
-      {/if}
-      {@render entrySection('Traits', statBlock.traits, false)}
-      {@render entrySection('Actions', statBlock.actions, true)}
-      {@render entrySection('Bonus actions', statBlock.bonusActions, false)}
-      {@render entrySection('Reactions', statBlock.reactions, false)}
-      {#if statBlock.legendary.length}
+    {#if propRows.length}
+      {#if variant === 'compact'}
         <details class="statBlock__section">
-          <summary class="statBlock__sectionTitle">
-            Legendary actions{statBlock.legendaryCount !== undefined ? ` (${statBlock.legendaryCount})` : ''}
-          </summary>
-          {#if statBlock.legendaryHeader}
-            <StatBlockInline paragraphs={statBlock.legendaryHeader} {onRoll} />
-          {/if}
-          {#each statBlock.legendary as item}
-            {@render entry(item)}
-          {/each}
+          <summary class="statBlock__sectionTitle">Proficiencies and resistances</summary>
+          {@render propList()}
         </details>
+      {:else}
+        {@render propList()}
       {/if}
-      {@render entrySection('Mythic actions', statBlock.mythic, false)}
-      {#if statBlock.spellcasting.length}
-        {@render spellcastingSection(statBlock.spellcasting)}
-      {/if}
-    {:else}
-      {@render entrySection('Actions', statBlock.actions, true)}
+    {/if}
+    {@render entrySection('Traits', statBlock.traits, false)}
+    {@render entrySection('Actions', statBlock.actions, true)}
+    {@render entrySection('Bonus actions', statBlock.bonusActions, false)}
+    {@render entrySection('Reactions', statBlock.reactions, false)}
+    {#if statBlock.legendary.length}
+      <details class="statBlock__section">
+        <summary class="statBlock__sectionTitle">
+          Legendary actions{statBlock.legendaryCount !== undefined ? ` (${statBlock.legendaryCount})` : ''}
+        </summary>
+        {#if statBlock.legendaryHeader}
+          <StatBlockInline paragraphs={statBlock.legendaryHeader} {onRoll} />
+        {/if}
+        {#each statBlock.legendary as item}
+          {@render entry(item)}
+        {/each}
+      </details>
+    {/if}
+    {@render entrySection('Mythic actions', statBlock.mythic, false)}
+    {#if statBlock.spellcasting.length}
+      {@render spellcastingSection(statBlock.spellcasting)}
     {/if}
   {/if}
 </section>
@@ -388,6 +395,16 @@
     border-radius: var(--radius-2);
     color: var(--fg);
     font-size: 0.875rem;
+  }
+
+  .statBlock--compact {
+    gap: 0.375rem;
+    padding: 0.5rem;
+    font-size: 0.8125rem;
+  }
+
+  .statBlock--compact .statBlock__title {
+    font-size: 1rem;
   }
 
   .statBlock__header {

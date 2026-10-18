@@ -29,6 +29,7 @@
   import { IconArrowBackUp } from '@tabler/icons-svelte';
   import { onMount, untrack } from 'svelte';
   import PauseOverlay from './PauseOverlay.svelte';
+  import PlayToolbar from './PlayToolbar.svelte';
   import SleepOverlay from './SleepOverlay.svelte';
   import { PlaySession, type SessionRoute } from './usePlaySession.svelte';
   import { PlayTools } from './usePlayTools.svelte';
@@ -198,7 +199,8 @@
           lineWidth: tools.lineWidth,
           smoothingEnabled: false
         },
-        measurement: tools.measurement
+        measurement: tools.measurement,
+        aoeTemplates: { tool: tools.aoeTool, selectedIds: tools.aoeSelectedIds, showLabels: false }
       },
       data.bucketUrl
     );
@@ -423,6 +425,55 @@
   let showTouchHint = $state(false);
   let isTouchDevice = $state(false);
 
+  // Group select: dragging on empty space draws a rectangle that adds the tokens inside it
+  let selectionRectangle = $state<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  onMount(() => {
+    const element = stageElement;
+    let start: { x: number; y: number; pointerId: number } | null = null;
+    const MARQUEE_SLOP_PX = 12;
+
+    const reset = () => {
+      start = null;
+      selectionRectangle = null;
+    };
+    const down = (event: PointerEvent) => {
+      if (!tools.groupSelect || !event.isPrimary || !(event.target instanceof HTMLCanvasElement)) return;
+      if (stage?.markers.hitTest({ x: event.clientX, y: event.clientY })) return;
+      start = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    };
+    const move = (event: PointerEvent) => {
+      const bounds = element?.getBoundingClientRect();
+      if (!start || !bounds || event.pointerId !== start.pointerId) return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (!selectionRectangle && Math.hypot(dx, dy) < MARQUEE_SLOP_PX) return;
+      selectionRectangle = {
+        x: Math.min(start.x, event.clientX) - bounds.left,
+        y: Math.min(start.y, event.clientY) - bounds.top,
+        width: Math.abs(dx),
+        height: Math.abs(dy)
+      };
+    };
+    const up = (event: PointerEvent) => {
+      if (start && selectionRectangle && stage) {
+        tools.selectMarkers(stage.markers.inRectangle(start, { x: event.clientX, y: event.clientY }));
+      }
+      reset();
+    };
+
+    element?.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', reset, true);
+    return () => {
+      element?.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', reset, true);
+    };
+  });
+
   onMount(() => {
     stagePerformance.init();
 
@@ -443,7 +494,7 @@
       ? createConditionalActivityTimer(
           5000,
           () => tools.clearActiveTool(),
-          () => tools.activeLayer !== MapLayerType.None,
+          () => tools.activeLayer !== MapLayerType.None && !tools.isAoeActive,
           ['mousedown', 'mousemove', 'touchstart', 'touchmove'],
           stageElement
         )
@@ -510,6 +561,8 @@
     {hoveredMarkerId}
     {pinnedMarkerIds}
     {activeTurnMarkerId}
+    distanceMode={tools.distanceMode}
+    selectedMarkerIds={tools.groupSelect || tools.distanceMode ? tools.selectedMarkerIds : undefined}
     receivedMeasurement={latestMeasurement
       ? {
           startPoint: latestMeasurement.startPoint,
@@ -540,12 +593,17 @@
       onSceneUpdate,
       onMarkerAdded: () => {},
       onMarkerMoved,
-      onMarkerSelected: () => {},
+      onMarkerSelected: tools.onMarkerSelected,
       onMarkerContextMenu,
       onMarkerHover: () => {},
       onMeasurementStart,
       onMeasurementUpdate,
-      onMeasurementEnd
+      onMeasurementEnd,
+      onAoeTemplateAdded: tools.onAoeTemplateAdded,
+      onAoeTemplateUpdated: tools.onAoeTemplateUpdated,
+      onAoeTemplateSelected: (id) => (tools.aoeSelectedIds = id ? [id] : []),
+      onAoeTemplatesSelected: (ids) => (tools.aoeSelectedIds = ids),
+      onAoeTemplateDeleted: tools.onAoeTemplateDeleted
     }}
     cursors={cursorArray}
     trackLocalCursor={false}
@@ -560,8 +618,22 @@
     />
   {/if}
 
+  {#if selectionRectangle}
+    <div
+      class="selectionRectangle"
+      style:left="{selectionRectangle.x}px"
+      style:top="{selectionRectangle.y}px"
+      style:width="{selectionRectangle.width}px"
+      style:height="{selectionRectangle.height}px"
+    ></div>
+  {/if}
+
   <PerformanceDebugger />
 </div>
+
+{#if !gameIsPaused && !stageIsLoading}
+  <PlayToolbar {tools} />
+{/if}
 
 {#if isTouchDevice && showTouchHint && !gameIsPaused}
   <div class="touchHint" class:touchHint--hidden={!showTouchHint}>
@@ -609,6 +681,14 @@
     display: none;
     visibility: hidden;
     opacity: 0;
+  }
+
+  .selectionRectangle {
+    position: absolute;
+    z-index: 4;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--fgPrimary) 20%, transparent);
+    border: 1px dashed var(--fgPrimary);
   }
 
   .touchHint {

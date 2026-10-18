@@ -13,6 +13,8 @@
   import { SceneLayer } from '../Scene/types';
   import { MapLayerType } from '../MapLayer/types';
   import { v4 as uuidv4 } from 'uuid';
+  import DistanceLabel from '../DistanceLabel/DistanceLabel.svelte';
+  import { formatFeet, getMoveDistanceFeet } from '../../helpers/moveDistance';
 
   interface Props extends ThrelteProps<typeof THREE.Mesh> {
     props: StageProps;
@@ -34,6 +36,7 @@
     selectedMarkerIds?: string[];
     dropTargetMarkerId?: string | null;
     activeTurnMarkerId?: string | null;
+    distanceMode?: boolean;
     markerClaimAt: number;
   }>('stage');
   const {
@@ -67,6 +70,8 @@
     lastDelta: THREE.Vector2 | null;
   };
   let groupDrag: GroupDrag | null = null;
+  // Where the dragged token started, for the live "ft moved" label
+  let dragStart: { id: string; x: number; y: number } | null = $state.raw(null);
 
   // A drag that actually started must not pop the selection tooltip on release; a
   // simple tap still does, and a tooltip already open before the drag survives it
@@ -176,6 +181,7 @@
       // Allow dragging in both DM and Player mode, except for pin-shaped markers (locked)
       if (!isDoubleClick && closestMarker.shape !== MarkerShape.Pin && clientPoint) {
         pendingDrag = { clientX: clientPoint.x, clientY: clientPoint.y, isTouch: isTouchEvent };
+        dragStart = { id: closestMarker.id, x: closestMarker.position.x, y: closestMarker.position.y };
         groupDrag = createGroupDrag(closestMarker, gridCoords);
         // Clear tooltip when a drag may start
         hoveredMarkerDelayed = null;
@@ -292,7 +298,7 @@
 
   function createGroupDrag(anchor: Marker, cursor: THREE.Vector2): GroupDrag | null {
     const selection = currentSelection();
-    if (stage.mode !== StageMode.DM || selection.length < 2 || !selection.includes(anchor.id)) return null;
+    if (selection.length < 2 || !selection.includes(anchor.id)) return null;
 
     const members = props.marker.markers
       .filter((m) => selection.includes(m.id) && m.shape !== MarkerShape.Pin && isTokenInteractable(m))
@@ -428,6 +434,7 @@
     }
     endGroupDrag(false);
     pendingDrag = null;
+    dragStart = null;
     if (isDragging && selectedMarker) {
       isDragging = false;
       tooltipSuppressed = dragMoved && !tooltipWasOpenAtDown;
@@ -482,6 +489,7 @@
     endGroupDrag(false);
     dragMoved = false;
     pendingDrag = null;
+    dragStart = null;
     stopListeningForRelease();
 
     if (hoverTimer) {
@@ -493,6 +501,42 @@
       hideTimer = null;
     }
   }
+
+  const cellPx = $derived(getGridCellSize(grid, display));
+  const labelRotation = $derived(props.scene.rotation);
+
+  const movedLabel = $derived.by(() => {
+    if (!isDragging || !dragStart) return null;
+    const marker = props.marker.markers.find((m) => m.id === dragStart?.id);
+    if (!marker) return null;
+    return {
+      id: marker.id,
+      x: marker.position.x,
+      y: marker.position.y,
+      lift: (cellPx * marker.size) / 2 + cellPx * 0.4,
+      text: formatFeet(getMoveDistanceFeet(dragStart, marker.position, grid, display))
+    };
+  });
+
+  const distanceOrigin = $derived.by(() => {
+    if (!stage.distanceMode) return null;
+    const id = stage.selectedMarkerIds?.at(-1) ?? selectedMarker?.id;
+    return props.marker.markers.find((m) => m.id === id && isTokenInteractable(m)) ?? null;
+  });
+
+  const distanceLabels = $derived.by(() => {
+    const origin = distanceOrigin;
+    if (!origin) return [];
+    return props.marker.markers
+      .filter((m) => m.id !== origin.id && isTokenVisible(m))
+      .map((m) => ({
+        id: m.id,
+        x: m.position.x,
+        y: m.position.y,
+        lift: (cellPx * m.size) / 2 + cellPx * 0.4,
+        text: formatFeet(getMoveDistanceFeet(origin.position, m.position, grid, display))
+      }));
+  });
 
   // Once the parent passes its selection in, a stale local pick must not stay highlighted
   $effect(() => {
@@ -587,6 +631,32 @@
       />
     {/if}
   {/each}
+
+  {#each distanceLabels as label (label.id)}
+    <DistanceLabel
+      text={label.text}
+      x={label.x}
+      y={label.y}
+      lift={label.lift}
+      sceneZoom={props.scene.zoom}
+      {localScale}
+      sceneRotation={labelRotation}
+      {mapRotation}
+    />
+  {/each}
+
+  {#if movedLabel}
+    <DistanceLabel
+      text={movedLabel.text}
+      x={movedLabel.x}
+      y={movedLabel.y}
+      lift={movedLabel.lift}
+      sceneZoom={props.scene.zoom}
+      {localScale}
+      sceneRotation={labelRotation}
+      {mapRotation}
+    />
+  {/if}
 
   <!-- Only show the ghost marker when the marker layer is active -->
   {#if isActive && stage.mode === StageMode.DM && props.activeLayer === MapLayerType.Marker}

@@ -121,7 +121,7 @@
 
   $effect(() => {
     const canvas = renderer.domElement;
-    if (!isActive || mode !== StageMode.DM) return;
+    if (!isActive) return;
     canvas.style.cursor = 'crosshair';
     return () => {
       canvas.style.cursor = '';
@@ -377,7 +377,7 @@
     if (hasDraft()) interaction = { kind: 'idle' };
   };
 
-  const inputIsActive = $derived((isActive || selectable) && mode === StageMode.DM);
+  const inputIsActive = $derived(isActive || (selectable && mode === StageMode.DM));
 </script>
 
 <LayerInput
@@ -406,8 +406,8 @@
   />
 {/each}
 
-{#if mode === StageMode.DM}
-  {#each drawnTemplates as template (template.id)}
+{#each drawnTemplates as template (template.id)}
+  {#if mode === StageMode.DM || selectedSet.has(template.id) || draft?.id === template.id}
     <AoeTemplateHandles
       {template}
       {ftToPx}
@@ -420,5 +420,5 @@
       isDraft={draft?.id === template.id}
       showLabel={props.showLabels}
     />
-  {/each}
-{/if}
+  {/if}
+{/each}

@@ -9,8 +9,10 @@
   import { hasActivePostProcessing } from '../../helpers/postProcessing';
   import { PerfMonitor } from '@threlte/extras';
   import { MarkerTooltip } from '../../../MarkerTooltip';
+  import { MarkerVisibilityToggle } from '../../../MarkerVisibilityToggle';
 
   import type { CursorData } from './types';
+  import { MarkerVisibility, type Marker } from '../MarkerLayer/types';
 
   /**
    * Creates a custom WebGL renderer with high-performance settings.
@@ -66,6 +68,8 @@
     hoveredMarkerId?: string | null;
     pinnedMarkerIds?: string[];
     onPinToggle?: (markerId: string, pinned: boolean) => void;
+    /** Shows an eye button above the single selected token (editor only) */
+    onMarkerVisibilityToggle?: (marker: Marker) => void;
   }
 
   let {
@@ -79,7 +83,9 @@
     selectedMarkerIds = undefined,
     dropTargetMarkerId = undefined,
     activeTurnMarkerId = null,
-    onPinToggle
+    distanceMode = false,
+    onPinToggle,
+    onMarkerVisibilityToggle
   }: Props = $props();
 
   let sceneRef = $state<SceneExports>();
@@ -118,6 +124,7 @@
     selectedMarkerIds: undefined as string[] | undefined,
     dropTargetMarkerId: undefined as string | null | undefined,
     activeTurnMarkerId: null as string | null,
+    distanceMode: false,
     performanceTier: props.performanceTier ?? 'high',
     // Set by MarkerLayer when a pointer-down hits a marker; other layers use
     // it to yield shared gestures (e.g. fog-room double-tap) to the marker
@@ -136,6 +143,7 @@
     stageContext.selectedMarkerIds = selectedMarkerIds;
     stageContext.dropTargetMarkerId = dropTargetMarkerId;
     stageContext.activeTurnMarkerId = activeTurnMarkerId;
+    stageContext.distanceMode = distanceMode;
     stageContext.performanceTier = props.performanceTier ?? 'high';
     stageContext.mainPassUsesComposer = hasActivePostProcessing(props.postProcessing, props.performanceTier);
   });
@@ -283,6 +291,21 @@
     }
   });
 
+  const selectedToggleMarker = $derived.by(() => {
+    if (props.mode !== 0 || !onMarkerVisibilityToggle || selectedMarkerIds?.length !== 1) return null;
+    if (props.activeLayer !== 0 && props.activeLayer !== 2) return null;
+    return props.marker.markers.find((marker) => marker.id === selectedMarkerIds[0]) ?? null;
+  });
+
+  let visibilityTogglePosition = $state<{ x: number; y: number; diameter: number } | null>(null);
+
+  $effect(() => {
+    const marker = selectedToggleMarker;
+    const position = marker && sceneRef?.getMarkerScreenPosition?.(marker);
+    const diameter = marker && sceneRef?.getMarkerSizeInScreenSpace?.(marker.size || 1);
+    visibilityTogglePosition = position && diameter ? { ...position, diameter } : null;
+  });
+
   $effect(() => {
     let markerForTooltip = null;
 
@@ -382,6 +405,15 @@
       }}
     />
   {/each}
+
+  {#if selectedToggleMarker && visibilityTogglePosition && onMarkerVisibilityToggle}
+    <MarkerVisibilityToggle
+      position={visibilityTogglePosition}
+      diameter={visibilityTogglePosition.diameter}
+      hidden={selectedToggleMarker.visibility === MarkerVisibility.DM}
+      onToggle={() => selectedToggleMarker && onMarkerVisibilityToggle(selectedToggleMarker)}
+    />
+  {/if}
 
   {#if hoveredMarkerData}
     <MarkerTooltip

@@ -26,14 +26,3 @@ export type StatBlockInlineProps = {
   rollLabel?: string;
   onRoll?: StatBlockRollHandler;
 };
-
-export type StatBlockQuickCardProps = {
-  statBlock: StatBlock;
-  hitPoints?: number | null;
-  tempHitPoints?: number | null;
-  collapsed?: boolean;
-  onCollapsedChange?: (collapsed: boolean) => void;
-  onHitPointsChange?: (fields: HitPointsFields) => void;
-  onRoll?: StatBlockRollHandler;
-  onOpenFullStatBlock?: () => void;
-};

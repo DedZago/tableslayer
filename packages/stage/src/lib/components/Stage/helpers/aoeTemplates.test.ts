@@ -126,9 +126,10 @@ describe('angleFromCursor', () => {
     expect(angleFromCursor(origin, { x: 0, y: -10 }, AoeShape.Line, false)).toBeCloseTo(270);
   });
 
-  it('snaps squares to 90 degrees regardless of the angle snap setting', () => {
-    expect(angleFromCursor(origin, { x: 10, y: 3 }, AoeShape.Square, false)).toBe(0);
-    expect(angleFromCursor(origin, { x: 3, y: 10 }, AoeShape.Square, false)).toBe(90);
+  it('snaps squares to 90 degrees only when asked', () => {
+    expect(angleFromCursor(origin, { x: 10, y: 3 }, AoeShape.Square, true)).toBe(0);
+    expect(angleFromCursor(origin, { x: 3, y: 10 }, AoeShape.Square, true)).toBe(90);
+    expect(angleFromCursor(origin, { x: 10, y: 3 }, AoeShape.Square, false)).toBeCloseTo(16.7, 1);
   });
 });
 
@@ -149,6 +150,11 @@ describe('getTemplateOutline', () => {
 });
 
 describe('formatTemplateLabel', () => {
+  it('omits dimensions on request', () => {
+    expect(formatTemplateLabel(makeTemplate({ label: 'Fireball' }), false)).toBe('Fireball');
+    expect(formatTemplateLabel(makeTemplate(), false)).toBe('');
+  });
+
   it('describes each shape in feet', () => {
     expect(formatTemplateLabel(makeTemplate({ size: 20 }))).toBe('20 ft radius');
     expect(formatTemplateLabel(makeTemplate({ shape: AoeShape.Square, size: 10 }))).toBe('10 ft cube');

@@ -1,5 +1,6 @@
 import { handleMutation } from '$lib/factories';
 import type { MarkerRow, SceneSettings, SessionDocClient } from '$lib/realtime';
+import { MarkerVisibility } from '@tableslayer/stage';
 
 export const ASSET_DRAG_TYPE = 'application/x-tableslayer-asset';
 export const MAX_PLACEMENT_QUANTITY = 20;
@@ -16,6 +17,7 @@ export type PlaceAssetOptions = {
   client: SessionDocClient | null;
   mutate: (action: PlaceAction) => Promise<PlaceResult | undefined>;
   snap?: (point: PlacementPoint) => PlacementPoint;
+  visibility?: MarkerVisibility;
   onLoadingChange?: (loading: boolean) => void;
 };
 
@@ -60,6 +62,7 @@ export const placeAsset = async ({
   client,
   mutate,
   snap,
+  visibility = MarkerVisibility.Always,
   onLoadingChange
 }: PlaceAssetOptions) => {
   if (!client?.scene(sceneId)) return;
@@ -78,6 +81,7 @@ export const placeAsset = async ({
     markers.forEach((marker, index) =>
       client.write.upsertMarker(sceneId, {
         ...marker,
+        visibility,
         positionX: positions[index].x,
         positionY: positions[index].y
       })

@@ -6,10 +6,13 @@
     IconArrowLeft,
     IconDots,
     IconDownload,
+    IconEye,
+    IconEyeOff,
     IconPlus,
     IconPresentation,
     IconSearch
   } from '@tabler/icons-svelte';
+  import { MarkerVisibility } from '@tableslayer/stage';
   import { handleMutation } from '$lib/factories';
   import { createAssetsQuery, useAssetMutation } from '$lib/queries/assets';
   import { generateR2Url } from '$lib/utils/generateR2Url';
@@ -32,6 +35,7 @@
     onPreviewArtwork,
     onOpenCatalog,
     quantity = $bindable(1),
+    visibility = $bindable(MarkerVisibility.Always),
     getViewportCenter,
     snapPosition
   }: AssetLibraryProps = $props();
@@ -101,9 +105,13 @@
       client,
       mutate: (action) => mutation.mutateAsync(action),
       snap: snapPosition,
+      visibility,
       onLoadingChange: (value) => (loading = value)
     });
   };
+
+  const isGmOnly = $derived(visibility === MarkerVisibility.DM);
+  const toggleVisibility = () => (visibility = isGmOnly ? MarkerVisibility.Always : MarkerVisibility.DM);
 
   const openDetail = (asset: AssetListItem) => {
     detailAsset = asset;
@@ -236,6 +244,23 @@
         <span aria-hidden="true">×</span>
         <Input type="number" aria-label="Quantity" min={1} max={MAX_PLACEMENT_QUANTITY} bind:value={quantity} />
       </label>
+      <ToolTip positioning={{ placement: 'bottom' }} openDelay={500} closeOnPointerDown disableHoverableContent>
+        {#snippet children()}
+          <IconButton
+            variant="ghost"
+            aria-label={isGmOnly ? 'Placed tokens are hidden from players' : 'Placed tokens are visible to players'}
+            aria-pressed={isGmOnly}
+            onclick={toggleVisibility}
+          >
+            <Icon Icon={isGmOnly ? IconEyeOff : IconEye} size="1.125rem" />
+          </IconButton>
+        {/snippet}
+        {#snippet toolTipContent()}
+          {isGmOnly
+            ? 'Placed tokens: GM only. Click to show to players.'
+            : 'Placed tokens: visible to players. Click to hide.'}
+        {/snippet}
+      </ToolTip>
       <ToolTip positioning={{ placement: 'bottom' }} openDelay={500} closeOnPointerDown disableHoverableContent>
         {#snippet children()}
           <IconButton variant="ghost" aria-label="New asset" onclick={() => openEditor(null)}>

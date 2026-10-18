@@ -119,9 +119,10 @@ export const convertPropsToSceneDetails = (
     details.edgeScale = isNaN(scale) ? 2.0 : scale;
   }
 
-  // Ensure grid spacing is an integer (database constraint)
+  // Fractional inches are valid; a cleared or invalid input keeps the smallest usable cell
   if (details.gridSpacing !== undefined) {
-    details.gridSpacing = Math.round(Number(details.gridSpacing));
+    const spacing = Number(details.gridSpacing);
+    details.gridSpacing = Number.isFinite(spacing) && spacing > 0 ? spacing : 0.1;
   }
 
   // Ensure weather values are proper numbers

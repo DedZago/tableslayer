@@ -73,6 +73,8 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 - `AoeTemplateLayer` (`components/AoeTemplateLayer/`) renders spell templates (circle, square, cone, line) between lights and markers: `SceneLayerOrder.AoeTemplate = 35.5`; active when `activeLayer === MapLayerType.AoeTemplate`. Sizes are in **feet**; `helpers/aoeTemplates.ts` (THREE-free, unit-tested) holds the SDFs, bounds, handle points and feet↔layer conversion.
 - The fill shader follows the annotation rule: **effect is a compile-time `EFFECT_TYPE` define**, the program links via `compileAsync` before the material becomes visible, and all template materials share one `uTime` uniform object. Templates come in through `props.aoeTemplates` and go out through `onAoeTemplateAdded/Updated/Selected/Deleted`; the in-progress draft is local and cleared via `StageExports.aoeTemplates.cancelDraft()` (the consumer calls it on scene change).
 
+- **Selection and labels**: a click inside any shape selects it (`templateContainsPoint`); clicking the selected shape's body drags it. With no tool active (`selectable`) the layer is select-only and yields to a marker click via `markerClaimAt`, like lights. New shapes rotate smoothly (`snapAngle` defaults off; squares only snap to 90° when it is on). The dimension text ("20 ft cone") shows only on the draft and the selected shape; a custom spell name follows `showLabels`. The draft outline is dashed at 0.4 opacity in the effect colour. Effects must animate from continuous `t` — never `floor(t * n)` — and the layer calls `framePacer.markActive()` while any effect is animating.
+
 ## Dev / verify workflow
 
 ```bash

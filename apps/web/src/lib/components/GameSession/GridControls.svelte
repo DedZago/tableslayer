@@ -108,6 +108,17 @@
     return null;
   };
 
+  const MIN_GRID_SPACING = 0.1;
+  const MAX_GRID_SLIDER_SPACING = 4;
+  const GRID_SPACING_STEP = 0.05;
+
+  // Spacing is a per-scene setting, so each map keeps its own cell size
+  const setGridSpacing = (value: number) => {
+    if (!Number.isFinite(value) || value < MIN_GRID_SPACING) return;
+    queuePropertyUpdate(stageProps, ['grid', 'spacing'], value, 'control');
+    relockMapZoom(stageProps, stage);
+  };
+
   // Hex or Square grid toggle
   const handleGridTypeChange = (gridType: number) => {
     queuePropertyUpdate(stageProps, ['grid', 'gridType'], gridType, 'control');
@@ -263,19 +274,27 @@
       <Input
         {...inputProps}
         type="number"
-        min={0}
-        step={0.25}
+        min={MIN_GRID_SPACING}
+        step={GRID_SPACING_STEP}
         value={stageProps.grid.spacing}
-        oninput={(e) => {
-          queuePropertyUpdate(stageProps, ['grid', 'spacing'], parseFloat(e.currentTarget.value), 'control');
-          relockMapZoom(stageProps, stage);
-        }}
+        oninput={(e) => setGridSpacing(parseFloat(e.currentTarget.value))}
       />
     {/snippet}
     {#snippet end()}
       in.
     {/snippet}
   </FormControl>
+  <div class="gridControls__spacingSlider">
+    <input
+      type="range"
+      aria-label="Grid size slider"
+      min={MIN_GRID_SPACING}
+      max={MAX_GRID_SLIDER_SPACING}
+      step={GRID_SPACING_STEP}
+      value={stageProps.grid.spacing}
+      oninput={(e) => setGridSpacing(parseFloat(e.currentTarget.value))}
+    />
+  </div>
   <FormControl label="Line thickness" name="gridLineThickness" {errors}>
     {#snippet end()}
       px
@@ -365,6 +384,34 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1rem;
+  }
+  .gridControls__spacingSlider {
+    grid-column: 1 / -1;
+    margin-top: -0.5rem;
+  }
+  .gridControls__spacingSlider input[type='range'] {
+    width: 100%;
+    height: 0.5rem;
+    appearance: none;
+    background: var(--contrastLow);
+    border-radius: var(--radius-1);
+    cursor: pointer;
+  }
+  .gridControls__spacingSlider input[type='range']::-webkit-slider-thumb {
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    background: var(--fg);
+    border-radius: 50%;
+    cursor: grab;
+  }
+  .gridControls__spacingSlider input[type='range']::-moz-range-thumb {
+    width: 1rem;
+    height: 1rem;
+    background: var(--fg);
+    border: none;
+    border-radius: 50%;
+    cursor: grab;
   }
   :global(.radioGroup.gridModeRadio) {
     width: 100%;

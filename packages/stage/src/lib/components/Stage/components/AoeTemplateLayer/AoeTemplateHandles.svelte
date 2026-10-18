@@ -92,7 +92,8 @@
       ftPerPx
     );
   });
-  const labelText = $derived(showLabel ? formatTemplateLabel(template) : '');
+  const showDimensions = $derived(isSelected || isDraft);
+  const labelText = $derived(showLabel || showDimensions ? formatTemplateLabel(template, showDimensions) : '');
   const labelScale = $derived(LABEL_SCALE / (sceneZoom * localScale));
   const labelRotation = $derived(((sceneRotation - mapRotation) * Math.PI) / 180);
   const dashSize = $derived(handleRadius * 0.6);
@@ -137,12 +138,12 @@
       attach="material"
       color={outlineColor}
       transparent
-      opacity={0.9}
+      opacity={0.4}
       {dashSize}
       gapSize={dashSize}
     />
   {:else}
-    <T.LineBasicMaterial attach="material" color={outlineColor} transparent opacity={0.9} />
+    <T.LineBasicMaterial attach="material" color={outlineColor} transparent opacity={isSelected ? 0.9 : 0.6} />
   {/if}
 </T.Line>
 
@@ -167,7 +168,7 @@
   </T.Mesh>
 {/if}
 
-{#if showLabel && label}
+{#if labelText && label}
   <T.Group
     position={[labelPoint.x, labelPoint.y, 0]}
     rotation={[0, 0, labelRotation]}

@@ -5,6 +5,7 @@
   import { v4 as uuidv4 } from 'uuid';
   import LayerInput from '../LayerInput/LayerInput.svelte';
   import { type Callbacks, StageMode, type DisplayProps, type PerformanceTier } from '../Stage/types';
+  import type { FramePacer } from '../../helpers/framePacing';
   import type { GridLayerProps } from '../GridLayer/types';
   import { SceneLayer } from '../Scene/types';
   import { getGridCellSize, snapToGrid } from '../../helpers/grid';
@@ -13,9 +14,16 @@
     angleFromCursor,
     getTemplateHandlePoints,
     sizeFromCursor,
+    templateContainsPoint,
     type TemplatePoint
   } from '../../helpers/aoeTemplates';
-  import { AoeShape, type AoeTemplate, type AoeTemplateLayerExports, type AoeTemplateLayerProps } from './types';
+  import {
+    AoeEffect,
+    AoeShape,
+    type AoeTemplate,
+    type AoeTemplateLayerExports,
+    type AoeTemplateLayerProps
+  } from './types';
   import AoeTemplateMesh from './AoeTemplateMesh.svelte';
   import AoeTemplateHandles from './AoeTemplateHandles.svelte';
 
@@ -23,6 +31,8 @@
     props: AoeTemplateLayerProps;
     mode: StageMode;
     isActive: boolean;
+    /** Select-only input while no tool is active, so shapes can be picked and deleted */
+    selectable?: boolean;
     grid: GridLayerProps;
     /** Anchored display: map-space in MapDefined mode, the real display otherwise */
     display: DisplayProps;
@@ -33,10 +43,23 @@
     mapRotation: number;
   }
 
-  const { props, mode, isActive, grid, display, sceneZoom, localScale, sceneRotation, mapRotation }: Props = $props();
+  const {
+    props,
+    mode,
+    isActive,
+    selectable = false,
+    grid,
+    display,
+    sceneZoom,
+    localScale,
+    sceneRotation,
+    mapRotation
+  }: Props = $props();
 
   const { renderer } = useThrelte();
-  const stage = getContext<{ performanceTier: PerformanceTier }>('stage');
+  const stage = getContext<{ performanceTier: PerformanceTier; markerClaimAt: number }>('stage');
+  const framePacer = getContext<FramePacer | undefined>('framePacer');
+  const MARKER_CLAIM_WINDOW_MS = 100;
   const { onAoeTemplateAdded, onAoeTemplateUpdated, onAoeTemplateSelected } = getContext<Callbacks>('callbacks');
 
   const EDIT_EMIT_INTERVAL_MS = 50;
@@ -57,6 +80,7 @@
   const sharedTime = { value: 0 };
   useTask((delta) => {
     sharedTime.value += delta;
+    if (animatedTemplateCount > 0) framePacer?.markActive();
   });
 
   const cellPx = $derived(getGridCellSize(grid, display));
@@ -72,6 +96,9 @@
     visibleTemplates.map((template) => (edit?.id === template.id ? { ...template, ...edit.patch } : template))
   );
   const drawnTemplates = $derived(draft ? [...editedTemplates, draft] : editedTemplates);
+  const animatedTemplateCount = $derived(
+    drawnTemplates.filter((template) => template.effect !== AoeEffect.None).length
+  );
 
   $effect(() => {
     if (!isActive) untrack(() => endInteraction());
@@ -99,8 +126,10 @@
 
   const isNear = (a: TemplatePoint, b: TemplatePoint) => Math.hypot(a.x - b.x, a.y - b.y) <= handleRadius;
 
-  const findTemplateByOrigin = (point: TemplatePoint) =>
-    [...editedTemplates].reverse().find((template) => isNear(point, template.position));
+  const findTemplateAt = (point: TemplatePoint) =>
+    [...editedTemplates]
+      .reverse()
+      .find((template) => isNear(point, template.position) || templateContainsPoint(template, point, ftPerPx));
 
   const findSelectedTemplate = () => editedTemplates.find((template) => template.id === props.selectedId);
 
@@ -166,6 +195,17 @@
     const point = toLayerPoint(coords);
     const disableSnap = e instanceof MouseEvent && e.altKey;
 
+    if (!isActive) {
+      const hit = findTemplateAt(point);
+      if (!hit || hit.id === props.selectedId) return;
+      // A token or light under the same click wins; markers stamp the claim on their own mouse-down
+      setTimeout(() => {
+        if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
+        onAoeTemplateSelected?.(hit.id);
+      }, 0);
+      return;
+    }
+
     if (interaction.kind === 'aiming') {
       commitDraft(updateDraft(interaction.draft, point, disableSnap));
       return;
@@ -185,9 +225,13 @@
       }
     }
 
-    const hit = findTemplateByOrigin(point);
+    const hit = findTemplateAt(point);
     if (hit) {
-      onAoeTemplateSelected?.(hit.id);
+      if (hit.id === props.selectedId) {
+        startEdit(hit.id, 'moving', { x: point.x - hit.position.x, y: point.y - hit.position.y });
+      } else {
+        onAoeTemplateSelected?.(hit.id);
+      }
       return;
     }
     startDraft(point, disableSnap);
@@ -265,7 +309,7 @@
     if (hasDraft()) interaction = { kind: 'idle' };
   };
 
-  const inputIsActive = $derived(isActive && mode === StageMode.DM);
+  const inputIsActive = $derived((isActive || selectable) && mode === StageMode.DM);
 </script>
 
 <LayerInput

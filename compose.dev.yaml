@@ -13,10 +13,10 @@ services:
         - CMD
         - node
         - -e
-        - "const net = require('node:net'); Promise.all([5173, 5174, 1999].map(port => new Promise((resolve, reject) => { const socket = net.connect(port, '127.0.0.1', () => { socket.end(); resolve(); }); socket.setTimeout(2000, () => socket.destroy(new Error('Connection timed out'))); socket.on('error', reject); }))).catch(() => process.exit(1));"
+        - "const net = require('node:net'); if (!require('node:fs').existsSync('/tmp/tableslayer-warm')) process.exit(1); Promise.all([5173, 5174, 1999].map(port => new Promise((resolve, reject) => { const socket = net.connect(port, '127.0.0.1', () => { socket.end(); resolve(); }); socket.setTimeout(2000, () => socket.destroy(new Error('Connection timed out'))); socket.on('error', reject); }))).catch(() => process.exit(1));"
       interval: 3s
       timeout: 5s
-      start_period: 120s
+      start_period: 300s
       retries: 10
     environment:
       ENV_NAME: dev

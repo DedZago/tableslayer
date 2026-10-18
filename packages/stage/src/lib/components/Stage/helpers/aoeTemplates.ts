@@ -115,6 +115,10 @@ export const templateLocalToLayer = (template: AoeTemplate, localFt: TemplatePoi
   };
 };
 
+/** Whether a layer-local point (px) falls inside the template's shape */
+export const templateContainsPoint = (template: AoeTemplate, point: TemplatePoint, ftPerPx: number): boolean =>
+  templateSdf(template, worldToTemplateLocal(template, point, ftPerPx)) <= 0;
+
 /** Origin and far-edge handle positions in layer-local px; the end handle sits at (size, 0) for every shape */
 export const getTemplateHandlePoints = (
   template: AoeTemplate,
@@ -176,7 +180,7 @@ export const sizeFromCursor = (
   return Math.max(TEMPLATE_MIN_SIZE_FT, sized);
 };
 
-/** Direction in degrees (CCW from +x). Squares snap to 90 degrees; cones and lines to 45 when snapping. */
+/** Direction in degrees (CCW from +x), smooth unless snapping: squares snap to 90 degrees; cones and lines to 45. */
 export const angleFromCursor = (
   origin: TemplatePoint,
   cursor: TemplatePoint,
@@ -185,10 +189,9 @@ export const angleFromCursor = (
 ): number => {
   if (shape === AoeShape.Circle) return 0;
   const raw = (Math.atan2(cursor.y - origin.y, cursor.x - origin.x) * 180) / Math.PI;
-  if (shape === AoeShape.Square) {
-    return normalizeAngle(Math.round(raw / SQUARE_ANGLE_SNAP_DEG) * SQUARE_ANGLE_SNAP_DEG);
-  }
-  return normalizeAngle(snapAngle ? Math.round(raw / ANGLE_SNAP_DEG) * ANGLE_SNAP_DEG : raw);
+  if (!snapAngle) return normalizeAngle(raw);
+  const step = shape === AoeShape.Square ? SQUARE_ANGLE_SNAP_DEG : ANGLE_SNAP_DEG;
+  return normalizeAngle(Math.round(raw / step) * step);
 };
 
 /** Normalizes an angle to [0, 360); squares keep a face on the grid, so they snap to 90 degrees */
@@ -206,12 +209,13 @@ export const rotateTemplateAngle = (shape: AoeShape, angleDeg: number, deltaDeg:
       )
     : normalizeAngle(angleDeg + deltaDeg);
 
-export const formatTemplateLabel = (template: AoeTemplate): string => {
+export const formatTemplateLabel = (template: AoeTemplate, includeDimensions = true): string => {
+  const label = template.label?.trim();
+  if (!includeDimensions) return label ?? '';
   const dimensions =
     template.shape === AoeShape.Line
       ? `${template.size} × ${template.width} ft line`
       : `${template.size} ft ${SHAPE_NOUNS[template.shape]}`;
-  const label = template.label?.trim();
   return label ? `${label} · ${dimensions}` : dimensions;
 };
 

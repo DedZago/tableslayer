@@ -138,10 +138,12 @@ vec4 effect(vec2 p, vec2 c, float d, float depth, float inside, float t) {
   return vec4(col, max(0.25 * inside, arc));
 
 #elif EFFECT_TYPE == 3
-  vec2 v = voronoi(c * 2.0, 0.0);
+  vec2 v = voronoi(c * 2.0, t * 0.35);
   float facets = 0.6 + 0.4 * v.x;
   float cracks = 1.0 - smoothstep(0.0, 0.05, v.y);
-  float sparkle = step(0.985, hash12(floor(c * 16.0) + vec2(floor(t * 3.0))));
+  vec2 sparkleCell = floor(c * 16.0);
+  float twinkle = pow(max(sin(t * 2.5 + hash12(sparkleCell) * 6.2831853), 0.0), 12.0);
+  float sparkle = step(0.93, hash12(sparkleCell + 7.0)) * twinkle;
   vec3 ice = vec3(0.6, 0.9, 1.0) * facets * mix(1.0, 0.7, depth);
   vec3 col = ice + vec3(cracks * 0.6) + vec3(sparkle);
   return vec4(col, clamp(inside * 0.5 + cracks * 0.4 + sparkle, 0.0, 1.0));
@@ -155,7 +157,10 @@ vec4 effect(vec2 p, vec2 c, float d, float depth, float inside, float t) {
   float g = fbm(c * 0.8 + vec2(t * 0.15, t * 0.07)) * fbm(c * 1.6 - vec2(t * 0.1));
   float bubble = 0.0;
 #if EFFECT_TYPE == 17
-  bubble = step(0.97, hash12(floor(c * 6.0) + vec2(floor(t * 2.0))));
+  vec2 bubbleCoord = c * 5.0 + vec2(0.0, -t * 1.2);
+  vec2 bubbleCell = floor(bubbleCoord);
+  float bubbleDist = length(fract(bubbleCoord) - (0.25 + 0.5 * hash22(bubbleCell)));
+  bubble = step(0.65, hash12(bubbleCell)) * (1.0 - smoothstep(0.08, 0.16, bubbleDist));
 #endif
   float a = smoothstep(-2.5, 0.0, -d) * (0.35 + 0.5 * g);
   return vec4(gasColor + bubble * 0.3, clamp(a + bubble * 0.3, 0.0, 1.0));

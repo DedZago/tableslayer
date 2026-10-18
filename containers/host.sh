@@ -28,7 +28,7 @@ compose=(docker compose --env-file .env -f "$compose_file")
 case "$command" in
   up)
     if [[ "$mode" == development ]]; then
-      "${compose[@]}" up -d --build --wait --wait-timeout 180
+      "${compose[@]}" up -d --build --wait --wait-timeout 900
     else
       "${compose[@]}" up -d --build
     fi

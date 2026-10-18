@@ -83,6 +83,7 @@
   import {
     bindPropertyUpdatesToDoc,
     buildSceneProps,
+    withoutSessionAoeFields,
     convertMarkerToDbFormat,
     extractLocationFromUrl,
     flushQueuedPropertyUpdates,
@@ -346,7 +347,9 @@
     props.light.snapToGrid = getPreference('lightSnapToGrid') ?? false;
     props.performanceTier = stagePerformance.effectiveTier;
     props.display.maxPixelRatio = stagePerformance.maxPixelRatio;
-    if (props.aoeTemplates) props.aoeTemplates.tool = { ...props.aoeTemplates.tool, ...getPreference('aoeTool') };
+    if (props.aoeTemplates) {
+      props.aoeTemplates.tool = { ...props.aoeTemplates.tool, ...withoutSessionAoeFields(getPreference('aoeTool')) };
+    }
     return props;
   });
 
@@ -547,6 +550,7 @@
   // Asset library tiles drag onto the map as copies (see assetPlacement.ts)
   const assetMutation = useAssetMutation();
   let libraryQuantity = $state(1);
+  let libraryVisibility = $state(MarkerVisibility.Always);
   let catalogOpen = $state(false);
   const isAssetDrag = (dataTransfer: DataTransfer | null) => !!dataTransfer?.types.includes(ASSET_DRAG_TYPE);
   const getViewportCenter = (): PlacementPoint | null => stage?.markers.viewportCenter() ?? null;
@@ -558,7 +562,8 @@
       sceneId: selectedSceneId,
       client: session.client,
       mutate: (action) => assetMutation.mutateAsync(action),
-      snap: snapPlacement
+      snap: snapPlacement,
+      visibility: libraryVisibility
     });
   const snapPlacement = (point: PlacementPoint) => stage?.markers.snapPosition(point) ?? point;
 
@@ -1654,7 +1659,7 @@
     const layer = stageProps.aoeTemplates;
     if (!layer) return;
     layer.tool = { ...layer.tool, ...patch };
-    setPreference('aoeTool', layer.tool);
+    setPreference('aoeTool', withoutSessionAoeFields(layer.tool));
   };
 
   const onAoeTemplateAdded = (template: AoeTemplate) => {
@@ -2074,6 +2079,11 @@
     if (selectedLightId && [MapLayerType.None, MapLayerType.Light].includes(layer)) {
       onLightDeleted(selectedLightId);
       selectedLightId = undefined;
+      return true;
+    }
+    const aoeId = stageProps.aoeTemplates?.selectedId;
+    if (aoeId && layer === MapLayerType.None) {
+      removeAoeTemplate(aoeId);
       return true;
     }
     return false;
@@ -2673,6 +2683,7 @@
             onPreviewArtwork={canPresentHandouts ? previewAssetHandout : undefined}
             onOpenCatalog={() => (catalogOpen = true)}
             bind:quantity={libraryQuantity}
+            bind:visibility={libraryVisibility}
             {getViewportCenter}
             snapPosition={snapPlacement}
           />

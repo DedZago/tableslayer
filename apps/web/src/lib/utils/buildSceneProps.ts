@@ -46,9 +46,16 @@ const DEFAULT_AOE_TOOL: AoeToolSettings = {
   opacity: 0.6,
   lineWidth: 5,
   snapToGrid: true,
-  snapAngle: true,
-  visibility: StageMode.DM
+  snapAngle: false,
+  visibility: StageMode.Player
 };
+
+// Visibility and angle snapping start fresh each session: shapes are player-visible and rotate smoothly
+export const withoutSessionAoeFields = ({
+  visibility: _visibility,
+  snapAngle: _snapAngle,
+  ...saved
+}: Partial<AoeToolSettings> = {}) => saved;
 
 let gradientMemo: { key: string; value: ReturnType<typeof generateGradientColors> } | null = null;
 const gradientColorsFor = (color: string) => {

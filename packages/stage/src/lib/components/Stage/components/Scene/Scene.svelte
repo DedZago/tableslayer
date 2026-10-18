@@ -803,6 +803,7 @@
         props={props.aoeTemplates}
         mode={props.mode}
         isActive={props.activeLayer === MapLayerType.AoeTemplate}
+        selectable={props.activeLayer === MapLayerType.None}
         grid={props.grid}
         display={anchoredDisplay}
         sceneZoom={props.scene.zoom}

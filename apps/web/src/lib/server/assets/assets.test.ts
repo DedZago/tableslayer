@@ -69,13 +69,13 @@ describe('personal asset ownership and placement', () => {
     expect(params).toEqual(['scene', 'viewer', 'admin', 'editor']);
   });
 
-  it('places unique independent snapshots with private visibility', async () => {
+  it('places unique independent snapshots visible to players by default', async () => {
     get.mockResolvedValueOnce({ partyId: 'party' }).mockResolvedValueOnce(asset);
     const first = await assetPlacements('owner', 'asset', 'scene', 2, 10, 20);
     expect(first[0].id).not.toBe(first[1].id);
     expect(first[0]).toMatchObject({
       title: 'Wolf',
-      visibility: 1,
+      visibility: 0,
       imageLocation: 'originals/token.png',
       imageScale: 1.5,
       pinnedTooltip: false,

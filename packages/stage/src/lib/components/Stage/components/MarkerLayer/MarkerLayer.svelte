@@ -214,7 +214,7 @@
         imageScale: 1.0,
         label: 'A1',
         imageUrl: null,
-        visibility: MarkerVisibility.DM,
+        visibility: MarkerVisibility.Always,
         note: null
       };
       selectedMarker = newMarker;

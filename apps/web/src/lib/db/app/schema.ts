@@ -475,8 +475,10 @@ export const sceneTable = sqliteTable(
 export type InsertScene = typeof sceneTable.$inferInsert;
 export type SelectScene = typeof sceneTable.$inferSelect;
 export const selectSceneSchema = createSelectSchema(sceneTable);
-export const insertSceneSchema = createInsertSchema(sceneTable);
-export const updateSceneSchema = createUpdateSchema(sceneTable);
+// The column has integer affinity, which still stores fractional inches; cells smaller than 1 inch are valid
+const gridSpacingRefinement = { gridSpacing: () => z.number().positive().max(100) };
+export const insertSceneSchema = createInsertSchema(sceneTable, gridSpacingRefinement);
+export const updateSceneSchema = createUpdateSchema(sceneTable, gridSpacingRefinement);
 
 // MARKERS
 // MARKERS

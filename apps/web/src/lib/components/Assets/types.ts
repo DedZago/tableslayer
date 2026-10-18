@@ -2,6 +2,7 @@ import type { SelectAsset } from '$lib/db/app/schema';
 import type { AssetListItem } from '$lib/queries/assets';
 import type { SessionDocClient } from '$lib/realtime';
 import type { FiveToolsImportItem, FiveToolsImportResult } from '$lib/server/assets/fivetools/types';
+import type { MarkerVisibility } from '@tableslayer/stage';
 import type { PlacementPoint } from './assetPlacement';
 
 export interface AssetLibraryProps {
@@ -12,6 +13,7 @@ export interface AssetLibraryProps {
   onPreviewArtwork?: (asset: AssetListItem) => void;
   onOpenCatalog?: () => void;
   quantity?: number;
+  visibility?: MarkerVisibility;
   getViewportCenter?: () => PlacementPoint | null;
   snapPosition?: (point: PlacementPoint) => PlacementPoint;
 }

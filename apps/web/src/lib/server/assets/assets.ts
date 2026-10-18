@@ -204,7 +204,7 @@ export const assetPlacements = async (
     shape: asset.shape,
     shapeColor: asset.shapeColor,
     size: asset.size,
-    visibility: 1,
+    visibility: 0,
     note: null,
     pinnedTooltip: false,
     statBlock: asset.statBlock ?? null,

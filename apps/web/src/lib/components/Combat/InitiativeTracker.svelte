@@ -83,7 +83,7 @@
 
 <!--
 @component
-  GM-side initiative tracker (the Combat tab). It renders and emits only; the page runs the actions.
+  GM-side initiative tracker (the combat column beside the side panel tabs). It renders and emits only; the page runs the actions.
 -->
 
 <div class="initiativeTracker">

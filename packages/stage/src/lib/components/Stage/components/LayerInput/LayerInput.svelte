@@ -54,10 +54,6 @@
   raycaster.layers.enable(SceneLayer.Main);
   raycaster.layers.enable(SceneLayer.Input);
 
-  function isTouchDevice() {
-    return window.matchMedia('(any-pointer: coarse)').matches;
-  }
-
   // Track pending touch to detect multi-touch gestures
   let touchStartTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingTouchEvent: TouchEvent | null = null;
@@ -79,7 +75,7 @@
     if (onMouseDown) renderer.domElement.addEventListener('touchstart', handleTouchStart);
     if (onMouseMove) renderer.domElement.addEventListener('touchmove', handleTouchMove);
     if (onMouseUp) renderer.domElement.addEventListener('touchend', handleTouchEnd);
-    if (onMouseLeave) renderer.domElement.addEventListener('touchcancel', handleTouchCancel);
+    if (onMouseUp || onMouseLeave) renderer.domElement.addEventListener('touchcancel', handleTouchCancel);
     if (onDoubleTap) renderer.domElement.addEventListener('touchstart', handleDoubleTapTouchStart);
   });
 
@@ -103,7 +99,7 @@
     if (onMouseDown) renderer.domElement.removeEventListener('touchstart', handleTouchStart);
     if (onMouseMove) renderer.domElement.removeEventListener('touchmove', handleTouchMove);
     if (onMouseUp) renderer.domElement.removeEventListener('touchend', handleTouchEnd);
-    if (onMouseLeave) renderer.domElement.removeEventListener('touchcancel', handleTouchCancel);
+    if (onMouseUp || onMouseLeave) renderer.domElement.removeEventListener('touchcancel', handleTouchCancel);
     if (onDoubleTap) renderer.domElement.removeEventListener('touchstart', handleDoubleTapTouchStart);
   });
 
@@ -227,28 +223,39 @@
   }
 
   function handleTouchEnd(event: TouchEvent) {
-    if (onMouseUp && isActive && isTouchDevice()) {
+    if (onMouseUp && isActive) {
       event.preventDefault();
 
-      // Cancel any pending touch start
+      const touch = event.changedTouches[0];
+      const coords = touch ? touchToCanvasCoords(touch) : null;
+
+      // A tap shorter than the multi-touch wait still counts. Its release waits a tick so
+      // layers that defer their press (to let a token claim it) see press before release
       if (touchStartTimer) {
         clearTimeout(touchStartTimer);
         touchStartTimer = null;
+        const pressEvent = pendingTouchEvent;
+        const pressCoords = pendingTouchCoords;
         pendingTouchEvent = null;
         pendingTouchCoords = null;
+        if (onMouseDown && pressEvent && pressCoords && event.touches.length === 0) {
+          onMouseDown(pressEvent, pressCoords);
+          setTimeout(() => onMouseUp(event, coords), 0);
+        }
+        return;
       }
 
       // Only trigger mouse up if we were actually drawing
       if (isDrawing) {
-        const touch = event.changedTouches[0];
-        onMouseUp(event, touch ? touchToCanvasCoords(touch) : null);
+        onMouseUp(event, coords);
         isDrawing = false;
       }
     }
   }
 
   function handleTouchMove(event: TouchEvent) {
-    if (onMouseMove && isActive && isTouchDevice()) {
+    // Not gated on a coarse pointer: touchscreen TVs often report a fine one, which stranded drags mid-gesture
+    if (onMouseMove && isActive) {
       // Stop drawing if multiple touches detected (pinch/zoom gesture)
       if (event.touches.length > 1) {
         // Cancel any pending touch
@@ -275,7 +282,7 @@
     }
   }
 
-  function handleTouchCancel() {
+  function handleTouchCancel(event: TouchEvent) {
     // Clean up any pending or ongoing touch operations
     if (touchStartTimer) {
       clearTimeout(touchStartTimer);
@@ -284,8 +291,10 @@
       pendingTouchCoords = null;
     }
 
+    // The browser took the touch (system gesture, palm rejection): end the gesture so no layer stays mid-drag
     if (isDrawing) {
       isDrawing = false;
+      onMouseUp?.(event, null);
     }
 
     if (onMouseLeave && isActive) {

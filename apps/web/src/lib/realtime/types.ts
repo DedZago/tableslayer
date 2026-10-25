@@ -113,6 +113,8 @@ export interface MarkerRow {
   initiativeBonus?: number | null;
   /** Higher acts first among equal initiatives */
   initiativeTiebreak?: number;
+  /** Rows sharing a group move together; optional until every doc carries it */
+  groupId?: string | null;
 }
 
 export interface LightRow {
@@ -125,6 +127,8 @@ export interface LightRow {
   style: string;
   pulse: number;
   opacity: number;
+  /** Rows sharing a group move together; optional until every doc carries it */
+  groupId?: string | null;
 }
 
 export interface AnnotationRow {
@@ -154,6 +158,8 @@ export interface AoeTemplateRow {
   visibility: number;
   label: string | null;
   anchorMarkerId: string | null;
+  /** Rows sharing a group move together; optional until every doc carries it */
+  groupId?: string | null;
   /** Unix seconds, like the DB column; used for stable ordering */
   createdAt: number;
 }

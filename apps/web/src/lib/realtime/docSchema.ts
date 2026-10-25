@@ -42,6 +42,7 @@ export const UNDO_CAPTURE_TIMEOUT_MS = 500;
 
 type SceneMap = Y.Map<unknown>;
 type RowCollection = 'markers' | 'lights' | 'annotations' | 'aoeTemplates';
+const ROW_COLLECTIONS: readonly RowCollection[] = ['markers', 'lights', 'aoeTemplates', 'annotations'];
 
 export const getMeta = (doc: Y.Doc) => doc.getMap<unknown>('meta');
 export const getScenesMap = (doc: Y.Doc) => doc.getMap<SceneMap>('scenes');
@@ -91,11 +92,33 @@ const rowObjectOf = <T>(row: Y.Map<unknown>): T => {
   return obj;
 };
 
+// A row without its id is a fragment (a field patch that outlived its row); readers skip it
+const isRowFragment = (row: Y.Map<unknown>) => typeof row.get('id') !== 'string';
+
 const rowsOf = <T>(scene: SceneMap | undefined, collection: RowCollection, omit?: string): T[] => {
   const rows: T[] = [];
   const map = scene?.get(collection) as Y.Map<Y.Map<unknown>> | undefined;
-  map?.forEach((row) => rows.push(omit === undefined ? rowObjectOf<T>(row) : yMapToObject<T>(row, omit)));
+  map?.forEach((row) => {
+    if (isRowFragment(row)) return;
+    rows.push(omit === undefined ? rowObjectOf<T>(row) : yMapToObject<T>(row, omit));
+  });
   return rows;
+};
+
+/** Deletes row fragments left by older clients; returns the ids of the scenes it repaired */
+export const pruneRowFragments = (doc: Y.Doc, origin: unknown): string[] => {
+  const repaired = new Set<string>();
+  doc.transact(() => {
+    getScenesMap(doc).forEach((scene, sceneId) => {
+      for (const collection of ROW_COLLECTIONS) {
+        const map = scene.get(collection) as Y.Map<Y.Map<unknown>> | undefined;
+        const fragmentIds = [...(map?.entries() ?? [])].filter(([, row]) => isRowFragment(row)).map(([id]) => id);
+        for (const id of fragmentIds) map?.delete(id);
+        if (fragmentIds.length > 0) repaired.add(sceneId);
+      }
+    });
+  }, origin);
+  return [...repaired];
 };
 
 // ---------------------------------------------------------------------------
@@ -179,8 +202,26 @@ export const orderBetween = (prev: number | null, next: number | null): number =
 // Writes — bound to a doc + transaction origin so every local mutation is tagged
 // ---------------------------------------------------------------------------
 
+const GROUPED_COLLECTIONS = ['markers', 'lights', 'aoeTemplates'] as const;
+type GroupedCollection = (typeof GROUPED_COLLECTIONS)[number];
+
+/** `detached`: the row moves on its own, leaving the rest of its group where it is */
+export type MoveOptions = { detached?: boolean };
+
 export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
-  const transact = (fn: () => void) => doc.transact(fn, origin);
+  // Rows positioned explicitly in the open transaction; group moves never shift them,
+  // so dragging several members of a group together moves each one exactly once
+  const placedThisTransaction = new Set<string>();
+  let transactDepth = 0;
+  const transact = (fn: () => void) => {
+    transactDepth++;
+    try {
+      doc.transact(fn, origin);
+    } finally {
+      transactDepth--;
+      if (transactDepth === 0) placedThisTransaction.clear();
+    }
+  };
   const scenes = () => getScenesMap(doc);
 
   // A write against a missing scene is a caller bug (stale id, not-yet-hydrated
@@ -192,7 +233,49 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
   const collectionOf = (sceneId: string, collection: RowCollection) =>
     scenes().get(sceneId)?.get(collection) as Y.Map<Y.Map<unknown>> | undefined;
 
-  const upsertRow = (sceneId: string, collection: RowCollection, id: string, fields: Record<string, unknown>) => {
+  // The rest of the group keeps its offset to the moved row
+  const shiftGroup = (sceneId: string, groupId: string, dx: number, dy: number) => {
+    for (const collection of GROUPED_COLLECTIONS) {
+      collectionOf(sceneId, collection)?.forEach((row, id) => {
+        if (row.get('groupId') !== groupId || placedThisTransaction.has(`${collection}:${id}`)) return;
+        row.set('positionX', ((row.get('positionX') as number) ?? 0) + dx);
+        row.set('positionY', ((row.get('positionY') as number) ?? 0) + dy);
+      });
+    }
+  };
+
+  const writeRowFields = (
+    sceneId: string,
+    collection: RowCollection,
+    id: string,
+    row: Y.Map<unknown>,
+    fields: Record<string, unknown>,
+    options?: MoveOptions
+  ) => {
+    const isGrouped = (GROUPED_COLLECTIONS as readonly string[]).includes(collection);
+    const placesRow = isGrouped && (fields.positionX !== undefined || fields.positionY !== undefined);
+    if (!placesRow) {
+      setChangedFields(row, fields);
+      return;
+    }
+    const fromX = row.get('positionX') as number | undefined;
+    const fromY = row.get('positionY') as number | undefined;
+    placedThisTransaction.add(`${collection as GroupedCollection}:${id}`);
+    setChangedFields(row, fields);
+    const groupId = row.get('groupId');
+    if (options?.detached || typeof groupId !== 'string' || fromX === undefined || fromY === undefined) return;
+    const dx = ((row.get('positionX') as number) ?? fromX) - fromX;
+    const dy = ((row.get('positionY') as number) ?? fromY) - fromY;
+    if (dx !== 0 || dy !== 0) shiftGroup(sceneId, groupId, dx, dy);
+  };
+
+  const upsertRow = (
+    sceneId: string,
+    collection: RowCollection,
+    id: string,
+    fields: Record<string, unknown>,
+    options?: MoveOptions
+  ) => {
     transact(() => {
       const map = collectionOf(sceneId, collection);
       if (!map) {
@@ -201,10 +284,12 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
       }
       let row = map.get(id);
       if (!row) {
+        // Only a whole row creates one: a field patch for a row deleted or undone elsewhere is dropped
+        if (fields.id !== id) return;
         row = new Y.Map();
         map.set(id, row);
       }
-      setChangedFields(row, fields);
+      writeRowFields(sceneId, collection, id, row, fields, options);
     });
   };
 
@@ -287,18 +372,18 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
       });
     },
 
-    upsertMarker(sceneId: string, marker: MarkerRow) {
-      upsertRow(sceneId, 'markers', marker.id, marker as unknown as Record<string, unknown>);
+    upsertMarker(sceneId: string, marker: MarkerRow, options?: MoveOptions) {
+      upsertRow(sceneId, 'markers', marker.id, marker as unknown as Record<string, unknown>, options);
     },
-    setMarkerFields(sceneId: string, markerId: string, fields: Partial<MarkerRow>) {
-      upsertRow(sceneId, 'markers', markerId, fields as Record<string, unknown>);
+    setMarkerFields(sceneId: string, markerId: string, fields: Partial<MarkerRow>, options?: MoveOptions) {
+      upsertRow(sceneId, 'markers', markerId, fields as Record<string, unknown>, options);
     },
-    setExistingMarkerFields(sceneId: string, markerId: string, fields: Partial<MarkerRow>) {
+    setExistingMarkerFields(sceneId: string, markerId: string, fields: Partial<MarkerRow>, options?: MoveOptions) {
       let updated = false;
       transact(() => {
         const row = collectionOf(sceneId, 'markers')?.get(markerId);
         if (!row) return;
-        setChangedFields(row, fields as Record<string, unknown>);
+        writeRowFields(sceneId, 'markers', markerId, row, fields as Record<string, unknown>, options);
         updated = true;
       });
       return updated;
@@ -306,22 +391,31 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
     deleteMarker(sceneId: string, markerId: string) {
       deleteRow(sceneId, 'markers', markerId);
     },
-
-    upsertLight(sceneId: string, light: LightRow) {
-      upsertRow(sceneId, 'lights', light.id, light as unknown as Record<string, unknown>);
+    /** Puts rows in a group (or takes them out with null); positions stay where they are */
+    setGroup(sceneId: string, members: Array<{ collection: GroupedCollection; id: string }>, groupId: string | null) {
+      transact(() => {
+        for (const { collection, id } of members) {
+          const row = collectionOf(sceneId, collection)?.get(id);
+          if (row) setChangedFields(row, { groupId });
+        }
+      });
     },
-    setLightFields(sceneId: string, lightId: string, fields: Partial<LightRow>) {
-      upsertRow(sceneId, 'lights', lightId, fields as Record<string, unknown>);
+
+    upsertLight(sceneId: string, light: LightRow, options?: MoveOptions) {
+      upsertRow(sceneId, 'lights', light.id, light as unknown as Record<string, unknown>, options);
+    },
+    setLightFields(sceneId: string, lightId: string, fields: Partial<LightRow>, options?: MoveOptions) {
+      upsertRow(sceneId, 'lights', lightId, fields as Record<string, unknown>, options);
     },
     deleteLight(sceneId: string, lightId: string) {
       deleteRow(sceneId, 'lights', lightId);
     },
 
-    upsertAoeTemplate(sceneId: string, template: AoeTemplateRow) {
-      upsertRow(sceneId, 'aoeTemplates', template.id, template as unknown as Record<string, unknown>);
+    upsertAoeTemplate(sceneId: string, template: AoeTemplateRow, options?: MoveOptions) {
+      upsertRow(sceneId, 'aoeTemplates', template.id, template as unknown as Record<string, unknown>, options);
     },
-    setAoeTemplateFields(sceneId: string, templateId: string, fields: Partial<AoeTemplateRow>) {
-      upsertRow(sceneId, 'aoeTemplates', templateId, fields as Record<string, unknown>);
+    setAoeTemplateFields(sceneId: string, templateId: string, fields: Partial<AoeTemplateRow>, options?: MoveOptions) {
+      upsertRow(sceneId, 'aoeTemplates', templateId, fields as Record<string, unknown>, options);
     },
     deleteAoeTemplate(sceneId: string, templateId: string) {
       deleteRow(sceneId, 'aoeTemplates', templateId);

@@ -1,5 +1,5 @@
 <script module lang="ts">
-  export type SidePanelTab = 'tokens' | 'library' | 'handout' | 'combat';
+  export type SidePanelTab = 'tokens' | 'library' | 'handout';
 </script>
 
 <script lang="ts">
@@ -11,6 +11,8 @@
     onSelect,
     handoutLive,
     combatLive,
+    combatOpen,
+    onCombatToggle,
     showLibrary,
     showHandout
   }: {
@@ -18,6 +20,9 @@
     onSelect: (tab: SidePanelTab) => void;
     handoutLive: boolean;
     combatLive: boolean;
+    /** The combat column sits beside the tabs; this button only shows or hides it */
+    combatOpen: boolean;
+    onCombatToggle: () => void;
     showLibrary: boolean;
     showHandout: boolean;
   } = $props();
@@ -26,8 +31,7 @@
   const tabs: TabItem[] = $derived([
     { id: 'tokens', label: 'Tokens', icon: IconUsers, live: false },
     ...(showLibrary ? [{ id: 'library' as const, label: 'Library', icon: IconBooks, live: false }] : []),
-    ...(showHandout ? [{ id: 'handout' as const, label: 'Handout', icon: IconPhoto, live: handoutLive }] : []),
-    { id: 'combat' as const, label: 'Combat', icon: IconSwords, live: combatLive }
+    ...(showHandout ? [{ id: 'handout' as const, label: 'Handout', icon: IconPhoto, live: handoutLive }] : [])
   ]);
 
   const onKeydown = (event: KeyboardEvent) => {
@@ -41,8 +45,8 @@
   };
 </script>
 
-{#if tabs.length > 1}
-  <div class="sidePanelTabs" role="tablist" aria-label="Side panel" tabindex="-1" onkeydown={onKeydown}>
+<div class="sidePanelTabs">
+  <div class="sidePanelTabs__list" role="tablist" aria-label="Side panel" tabindex="-1" onkeydown={onKeydown}>
     {#each tabs as tab (tab.id)}
       <button
         type="button"
@@ -52,17 +56,34 @@
         aria-selected={selected === tab.id}
         tabindex={selected === tab.id ? 0 : -1}
         class={['sidePanelTabs__tab', selected === tab.id && 'sidePanelTabs__tab--isActive']}
+        aria-label={tab.label}
+        title={tab.label}
         onclick={() => onSelect(tab.id)}
       >
         <Icon Icon={tab.icon} size="14px" />
-        <span>{tab.label}</span>
+        <span class="sidePanelTabs__label">{tab.label}</span>
         {#if tab.live}
           <span class="sidePanelTabs__liveDot" role="img" aria-label="{tab.label} is live"></span>
         {/if}
       </button>
     {/each}
   </div>
-{/if}
+  <button
+    type="button"
+    class={['sidePanelTabs__tab', 'sidePanelTabs__combat', combatOpen && 'sidePanelTabs__tab--isActive']}
+    aria-label="Combat"
+    aria-pressed={combatOpen}
+    aria-controls="combatColumn"
+    title={combatOpen ? 'Hide the initiative column' : 'Show the initiative column'}
+    onclick={onCombatToggle}
+  >
+    <Icon Icon={IconSwords} size="14px" />
+    <span class="sidePanelTabs__label">Combat</span>
+    {#if combatLive}
+      <span class="sidePanelTabs__liveDot" role="img" aria-label="Combat is live"></span>
+    {/if}
+  </button>
+</div>
 
 <style>
   .sidePanelTabs {
@@ -75,6 +96,16 @@
     top: 0;
     background: var(--bg);
     z-index: 1;
+    container-type: inline-size;
+  }
+  .sidePanelTabs__list {
+    flex: 1;
+    display: flex;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+  .sidePanelTabs__combat {
+    flex: 0 0 auto;
   }
   .sidePanelTabs__tab {
     flex: 1;
@@ -89,6 +120,18 @@
     color: var(--fgMuted);
     font-size: 0.875rem;
     cursor: pointer;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .sidePanelTabs__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* A narrow panel keeps only the icons (names stay as tooltips) so tabs never overlap the combat toggle */
+  @container (max-width: 380px) {
+    .sidePanelTabs__label {
+      display: none;
+    }
   }
   .sidePanelTabs__tab:hover {
     background: var(--menuItemHover);

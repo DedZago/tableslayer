@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Icon } from '@tableslayer/ui';
-  import { AOE_EFFECT_LABELS, AoeShape } from '@tableslayer/stage';
+  import { AOE_EFFECT_LABELS, AoeShape, type AoeEffect } from '@tableslayer/stage';
   import {
     IconCircle,
     IconCone2,
@@ -16,7 +16,17 @@
   import { AOE_EFFECT_ORDER, AOE_EFFECT_SWATCHES } from '$lib/utils/aoeEffectSwatches';
   import type { PlayTools } from './usePlayTools.svelte';
 
-  let { tools, showFit = false, onFit }: { tools: PlayTools; showFit?: boolean; onFit?: () => void } = $props();
+  let {
+    tools,
+    templates = [],
+    showFit = false,
+    onFit
+  }: {
+    tools: PlayTools;
+    templates?: Array<{ id: string; effect: AoeEffect }>;
+    showFit?: boolean;
+    onFit?: () => void;
+  } = $props();
 
   const shapes = [
     { value: AoeShape.Circle, label: 'Circle', icon: IconCircle },
@@ -25,6 +35,7 @@
     { value: AoeShape.Line, label: 'Line', icon: IconRectangleVertical }
   ];
 
+  const swatchEffect = $derived(tools.aoeSwatchEffect(templates));
   const aoeIcon = $derived(shapes.find((shape) => shape.value === tools.aoeTool.shape)?.icon ?? IconCone2);
 </script>
 
@@ -47,10 +58,10 @@
         {#each AOE_EFFECT_ORDER as effect (effect)}
           <button
             type="button"
-            class={['playToolbar__swatch', tools.aoeTool.effect === effect && 'playToolbar__swatch--active']}
+            class={['playToolbar__swatch', swatchEffect === effect && 'playToolbar__swatch--active']}
             style:background={AOE_EFFECT_SWATCHES[effect]}
             aria-label={AOE_EFFECT_LABELS[effect]}
-            aria-pressed={tools.aoeTool.effect === effect}
+            aria-pressed={swatchEffect === effect}
             onclick={() => tools.setAoeEffect(effect)}
           ></button>
         {/each}

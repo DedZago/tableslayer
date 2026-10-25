@@ -82,6 +82,7 @@
     hoveredMarkerId = null,
     pinnedMarkerIds = [],
     selectedMarkerIds = undefined,
+    selectedLightIds = undefined,
     dropTargetMarkerId = undefined,
     activeTurnMarkerId = null,
     distanceMode = false,
@@ -123,6 +124,7 @@
     pinnedMarkerIds,
     // Synced from props by the effect below
     selectedMarkerIds: undefined as string[] | undefined,
+    selectedLightIds: undefined as string[] | undefined,
     dropTargetMarkerId: undefined as string | null | undefined,
     activeTurnMarkerId: null as string | null,
     distanceMode: false,
@@ -145,6 +147,7 @@
     stageContext.hoveredMarkerId = hoveredMarkerId;
     stageContext.pinnedMarkerIds = pinnedMarkerIds;
     stageContext.selectedMarkerIds = selectedMarkerIds;
+    stageContext.selectedLightIds = selectedLightIds;
     stageContext.dropTargetMarkerId = dropTargetMarkerId;
     stageContext.activeTurnMarkerId = activeTurnMarkerId;
     stageContext.distanceMode = distanceMode;
@@ -220,7 +223,10 @@
     },
     get isDraggingLight() {
       return sceneRef?.lights?.isDraggingLight ?? false;
-    }
+    },
+    hitTest: (point: { x: number; y: number }) => sceneRef?.lights.hitTest(point) ?? null,
+    inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>
+      sceneRef?.lights.inRectangle(start, end) ?? []
   };
 
   export const measurement = {

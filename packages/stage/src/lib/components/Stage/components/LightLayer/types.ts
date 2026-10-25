@@ -55,6 +55,8 @@ export interface LightLayerExports {
     selectedLight: Light | null;
   };
   onSceneChange: () => void;
+  hitTest: (point: { x: number; y: number }) => string | null;
+  inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) => string[];
 }
 
 /**

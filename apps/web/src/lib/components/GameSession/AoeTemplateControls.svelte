@@ -16,14 +16,25 @@
     isActive,
     onToggle,
     onActivate,
-    onToolChange
+    onToolChange,
+    selectionCount = 0,
+    selectionEffect,
+    onSelectionEffectChange
   }: {
     tool: AoeToolSettings;
     isActive: boolean;
     onToggle: () => void;
     onActivate: () => void;
     onToolChange: (patch: Partial<AoeToolSettings>) => void;
+    /** With templates selected the effect picker recolors them and leaves the tool alone */
+    selectionCount?: number;
+    /** The selection's shared effect, undefined when mixed */
+    selectionEffect?: AoeEffect;
+    onSelectionEffectChange?: (effect: AoeEffect) => void;
   } = $props();
+
+  const editsSelection = $derived(selectionCount > 0 && onSelectionEffectChange !== undefined);
+  const shownEffect = $derived(editsSelection ? selectionEffect : tool.effect);
 
   const shapeOptions = [
     { label: 'Circle', value: AoeShape.Circle, icon: IconCircle },
@@ -45,13 +56,22 @@
 
   const handleEffectChange = (effect: AoeEffect) => {
     effectPickerOpen = false;
-    changeTool({ effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] });
+    if (editsSelection) onSelectionEffectChange?.(effect);
+    else changeTool({ effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] });
   };
 
   const toggleVisibility = () =>
     changeTool({ visibility: tool.visibility === StageMode.DM ? StageMode.Player : StageMode.DM });
 
   const isGmOnly = $derived(tool.visibility === StageMode.DM);
+
+  const effectLabel = $derived.by(() => {
+    if (!editsSelection) return `Effect: ${AOE_EFFECT_LABELS[tool.effect]}`;
+    const target = selectionCount === 1 ? 'selected AoE' : `${selectionCount} selected AoEs`;
+    return shownEffect === undefined
+      ? `Effect of ${target}: mixed`
+      : `Effect of ${target}: ${AOE_EFFECT_LABELS[shownEffect]}`;
+  });
 </script>
 
 <div class="aoeControls">
@@ -95,13 +115,13 @@
       <ToolTip positioning={{ placement: 'bottom' }} openDelay={500} closeOnPointerDown disableHoverableContent>
         {#snippet children()}
           <span
-            class="aoeControls__swatch"
-            style:background={AOE_EFFECT_SWATCHES[tool.effect]}
-            aria-label="Effect: {AOE_EFFECT_LABELS[tool.effect]}"
+            class={['aoeControls__swatch', editsSelection && 'aoeControls__swatch--selection']}
+            style:background={shownEffect === undefined ? 'var(--contrastMedium)' : AOE_EFFECT_SWATCHES[shownEffect]}
+            aria-label={effectLabel}
           ></span>
         {/snippet}
         {#snippet toolTipContent()}
-          Effect: {AOE_EFFECT_LABELS[tool.effect]}
+          {effectLabel}
         {/snippet}
       </ToolTip>
     {/snippet}
@@ -110,7 +130,7 @@
         {#each AOE_EFFECT_ORDER as effect (effect)}
           <button
             type="button"
-            class="aoeControls__effectSwatch {tool.effect === effect ? 'aoeControls__effectSwatch--selected' : ''}"
+            class="aoeControls__effectSwatch {shownEffect === effect ? 'aoeControls__effectSwatch--selected' : ''}"
             style:background={AOE_EFFECT_SWATCHES[effect]}
             title={AOE_EFFECT_LABELS[effect]}
             aria-label={AOE_EFFECT_LABELS[effect]}
@@ -178,6 +198,11 @@
     border-radius: 50%;
     border: var(--sceneControlItemBorder);
     cursor: pointer;
+  }
+
+  .aoeControls__swatch--selection {
+    outline: 2px solid var(--fgPrimary);
+    outline-offset: 1px;
   }
 
   .aoeControls__effectGrid {

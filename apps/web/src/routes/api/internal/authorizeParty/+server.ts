@@ -18,8 +18,8 @@ export const POST = apiFactory(
       .from(partyMemberTable)
       .where(and(eq(partyMemberTable.userId, userId), eq(partyMemberTable.partyId, body.partyId)))
       .get();
-    if (!member) throw new Error('Unauthorized');
-    return { userId, readOnly: member.role === 'viewer' };
+    // Non-members get full TV access; only explicit viewer members stay read-only
+    return { userId, readOnly: member?.role === 'viewer' };
   },
   { validationSchema: z.object({ partyId: z.string().min(1), token: z.string().min(1).max(2048) }) }
 );

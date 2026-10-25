@@ -78,9 +78,22 @@
     buildRenderProps,
     reuseUnchanged,
     type AnnotationRow,
-    type MarkerRow
+    type MarkerRow,
+    type MoveOptions
   } from '$lib/realtime';
   import { isSameTurn, readTurnPosition, sameCombatantView, type TurnPosition } from '$lib/utils/initiative';
+  import {
+    cycleGroupSelection,
+    expandToGroups,
+    groupIdOf,
+    groupMembers,
+    planGroupToggle,
+    toggleGroupInSelection,
+    type GroupCollection,
+    type GroupMember,
+    type GroupedRows
+  } from '$lib/utils/assetGroups';
+  import { v4 as uuidv4 } from 'uuid';
   import {
     aoeFieldsFromPatch,
     aoeRowFromTemplate,
@@ -224,6 +237,21 @@
   const openSidePanelTab = (tab: SidePanelTab) => {
     sidePanelTab = tab;
     if (isMarkersCollapsed) markersPane?.expand();
+  };
+
+  // The initiative column sits beside the tabs so tools and token panels never hide it
+  let isCombatColumnOpen = $state(false);
+  const COMBAT_PANE_MIN_PX = 640;
+  const openCombatColumn = () => {
+    isCombatColumnOpen = true;
+    if (isMarkersCollapsed) markersPane?.expand();
+    if (isMobile || !markersPane) return;
+    const wanted = Math.min(50, Math.ceil((COMBAT_PANE_MIN_PX / innerWidth) * 100));
+    if (markersPane.getSize() < wanted) markersPane.resize(wanted);
+  };
+  const toggleCombatColumn = () => {
+    if (isCombatColumnOpen && !isMarkersCollapsed) isCombatColumnOpen = false;
+    else openCombatColumn();
   };
   const previewAssetHandout = (asset: AssetListItem) => {
     const artworkLocation = asset.artworkLocation || asset.tokenArtworkLocation;
@@ -425,6 +453,7 @@
                 autoFit: prev.scene.autoFit
               },
           markerPositions: drags,
+          detachedMarkerId,
           fogTool: isSceneSwitch
             ? { size: clampFogBrush(getPreference('brushSizeGridUnits') || 2) }
             : { type: prev.fogOfWar.tool.type, size: prev.fogOfWar.tool.size, mode: prev.fogOfWar.tool.mode },
@@ -799,7 +828,81 @@
   };
 
   let selectedLightId: string | undefined = $state();
+  // Lights drawn as selected; selectedLightId is the one the light panel edits
+  let selectedLightIds: string[] = $state([]);
   let selectedAnnotationId: string | undefined = $state();
+
+  $effect(() => {
+    const id = selectedLightId;
+    untrack(() => {
+      if (!id) {
+        if (selectedLightIds.length > 0) selectedLightIds = [];
+      } else if (!selectedLightIds.includes(id)) selectedLightIds = [id];
+    });
+  });
+
+  // Map selection across tokens, lights and AoEs ------------------------------------
+
+  const selectedItems = (): GroupMember[] => [
+    ...selectedMarkerIds.map((id) => ({ collection: 'markers' as const, id })),
+    ...selectedLightIds.map((id) => ({ collection: 'lights' as const, id })),
+    ...(stageProps.aoeTemplates?.selectedIds ?? []).map((id) => ({ collection: 'aoeTemplates' as const, id }))
+  ];
+
+  const selectItems = (items: GroupMember[]) => {
+    const idsIn = (collection: GroupCollection) =>
+      items.filter((item) => item.collection === collection).map((item) => item.id);
+    setSelection(idsIn('markers'));
+    const lightIds = idsIn('lights');
+    if (lightIds.length !== selectedLightIds.length || lightIds.some((id, i) => id !== selectedLightIds[i])) {
+      selectedLightIds = lightIds;
+    }
+    selectedLightId = lightIds[0];
+    const templateIds = idsIn('aoeTemplates');
+    const selectedTemplateIds = stageProps.aoeTemplates?.selectedIds ?? [];
+    if (
+      templateIds.length !== selectedTemplateIds.length ||
+      templateIds.some((id, i) => id !== selectedTemplateIds[i])
+    ) {
+      selectAoeTemplates(templateIds);
+    }
+  };
+
+  // A plain click selects the item's whole group; clicking the group again walks its members
+  const pickItem = (item: GroupMember) => selectItems(cycleGroupSelection(groupRows(), item, selectedItems()));
+
+  // A move of the one member picked out of its group leaves the rest of the group in place
+  const isDetachedMove = (collection: GroupCollection, id: string) => {
+    const items = selectedItems();
+    if (items.length !== 1 || items[0].collection !== collection || items[0].id !== id) return false;
+    const rows = groupRows();
+    const groupId = groupIdOf(rows, items[0]);
+    return !!groupId && groupMembers(rows, groupId).length > 1;
+  };
+
+  // Every layer hears a press; an empty-space report from one layer is ignored when another layer's item was hit
+  let lastPressPoint: { x: number; y: number } | null = null;
+  const pressHitsItem = () => {
+    if (!lastPressPoint || !stage) return false;
+    if (stage.markers.hitTest(lastPressPoint)) return true;
+    const point = stage.markers.clientToPosition(lastPressPoint);
+    return !!point && (!!stage.lights.hitTest(point) || !!stage.aoeTemplates.hitTest(point));
+  };
+
+  $effect(() => {
+    const element = stageElement;
+    if (!element) return;
+    const press = (event: PointerEvent) => (lastPressPoint = { x: event.clientX, y: event.clientY });
+    const release = () => setTimeout(() => (lastPressPoint = null), 0);
+    element.addEventListener('pointerdown', press, true);
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    return () => {
+      element.removeEventListener('pointerdown', press, true);
+      window.removeEventListener('pointerup', release, true);
+      window.removeEventListener('pointercancel', release, true);
+    };
+  });
   let innerWidth: number = $state(1000);
   let hoveredMarker: HoveredMarker | null = $state(null);
 
@@ -1138,9 +1241,16 @@
     trackChecklistItemLocal('place-marker');
   };
 
-  const writeMarkerPosition = throttle((markerId: string, position: { x: number; y: number }) => {
-    session.client?.write.setMarkerFields(selectedSceneId, markerId, { positionX: position.x, positionY: position.y });
+  const writeMarkerPosition = throttle((markerId: string, position: { x: number; y: number }, detached: boolean) => {
+    session.client?.write.setMarkerFields(
+      selectedSceneId,
+      markerId,
+      { positionX: position.x, positionY: position.y },
+      { detached }
+    );
   }, 50);
+  // The live preview moves a dragged token's group along, except for a token picked out of its group
+  let detachedMarkerId: string | null = null;
   const dragClearTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const onMarkerMoved = (marker: Marker, position: { x: number; y: number }) => {
@@ -1150,17 +1260,21 @@
     // effect that reads it (notably the token's canvas/texture redraw) on
     // each pointermove
     target.position = { x: position.x, y: position.y };
+    const detached = isDetachedMove('markers', marker.id);
+    detachedMarkerId = detached ? marker.id : null;
     dragPositions[marker.id] = position;
-    writeMarkerPosition(marker.id, position);
+    writeMarkerPosition(marker.id, position, detached);
 
     clearTimeout(dragClearTimers.get(marker.id));
     dragClearTimers.set(
       marker.id,
       setTimeout(() => {
-        session.client?.write.setMarkerFields(selectedSceneId, marker.id, {
-          positionX: position.x,
-          positionY: position.y
-        });
+        session.client?.write.setMarkerFields(
+          selectedSceneId,
+          marker.id,
+          { positionX: position.x, positionY: position.y },
+          { detached }
+        );
         delete dragPositions[marker.id];
         dragClearTimers.delete(marker.id);
       }, 300)
@@ -1226,9 +1340,19 @@
   const onMarkersMoveEnd = ({ cancelled }: { ids: string[]; cancelled: boolean }) =>
     finishGroupDrag({ discard: cancelled });
 
+  // A token click shows its details and stat block, whichever tab was open
+  // A plain click starts a new selection; Shift+click (the page gesture) adds to it
   const onMarkerSelected = (marker: Marker | null) => {
-    selectedMarkerId = marker?.id || undefined;
-    setSelection(marker ? [marker.id] : []);
+    if (!marker) {
+      if (pressHitsItem()) return;
+      selectedMarkerId = undefined;
+      selectItems([]);
+      return;
+    }
+    selectedMarkerId = marker.id;
+    pickItem({ collection: 'markers', id: marker.id });
+    sidePanelTab = 'tokens';
+    forceShowChecklist = false;
   };
 
   // Double-clicking a marker opens its editing panel even when collapsed
@@ -1398,6 +1522,18 @@
     });
   });
 
+  // Combat starting anywhere (another GM, undo) opens the column; ending it closes it
+  let wasCombatRunning = untrack(() => combatRunning);
+  $effect(() => {
+    const running = combatRunning;
+    if (running === wasCombatRunning) return;
+    wasCombatRunning = running;
+    untrack(() => {
+      if (running) openCombatColumn();
+      else isCombatColumnOpen = false;
+    });
+  });
+
   const reportRolls = (lines: string[]) => {
     if (lines.length === 0) return;
     if (lines.length <= 3) {
@@ -1415,7 +1551,8 @@
     const followIds = turn.lairStep || !turn.activeId ? [] : [turn.activeId];
     selectedMarkerId = followIds[0];
     setSelection(followIds);
-    if (sidePanelTab === 'combat') return;
+    if (followIds.length > 0) sidePanelTab = 'tokens';
+    if (isCombatColumnOpen && !isMarkersCollapsed) return;
     const activeTitle = session.client?.scene(selectedSceneId)?.markers.find((m) => m.id === turn.activeId)?.title;
     const body = turn.lairStep ? 'Lair action' : `${activeTitle || 'Next'}'s turn`;
     addToast({ data: { title: `Round ${turn.round} · ${body}`, type: 'info' } });
@@ -1430,7 +1567,7 @@
     switch (action.type) {
       case 'start':
         startCombat(write, sceneId, snapshot, action.ids);
-        openSidePanelTab('combat');
+        openCombatColumn();
         break;
       case 'add':
         addCombatants(write, sceneId, snapshot, action.ids);
@@ -1476,7 +1613,23 @@
       addToast({ data: { title: 'Select tokens to add to combat', type: 'info' } });
       return;
     }
-    handleCombatAction({ type: combatRunning ? 'add' : 'start', ids: [...selectedMarkerIds] });
+    const joining = selectedMarkerIds.filter((id) => !combatantIds.has(id));
+    if (joining.length === 0) {
+      openCombatColumn();
+      addToast({ data: { title: 'Already in combat. Shift+I removes them', type: 'info' } });
+      return;
+    }
+    handleCombatAction({ type: combatRunning ? 'add' : 'start', ids: joining });
+    openCombatColumn();
+  };
+
+  const removeSelectedFromCombat = () => {
+    const leaving = selectedMarkerIds.filter((id) => combatantIds.has(id));
+    if (leaving.length === 0) {
+      addToast({ data: { title: 'Select tokens in combat to remove them', type: 'info' } });
+      return;
+    }
+    handleCombatAction({ type: 'remove', ids: leaving });
   };
 
   const advanceCombat = () => {
@@ -1556,18 +1709,23 @@
 
   // Lights ---------------------------------------------------------------------
 
-  const writeLightRow = (light: Light) => {
-    session.client?.write.setLightFields(selectedSceneId, light.id, {
-      id: light.id,
-      sceneId: selectedSceneId,
-      positionX: light.position.x,
-      positionY: light.position.y,
-      radius: light.radius,
-      color: light.color,
-      style: light.style,
-      pulse: light.pulse,
-      opacity: light.opacity ?? 1
-    });
+  const writeLightRow = (light: Light, options?: MoveOptions) => {
+    session.client?.write.setLightFields(
+      selectedSceneId,
+      light.id,
+      {
+        id: light.id,
+        sceneId: selectedSceneId,
+        positionX: light.position.x,
+        positionY: light.position.y,
+        radius: light.radius,
+        color: light.color,
+        style: light.style,
+        pulse: light.pulse,
+        opacity: light.opacity ?? 1
+      },
+      options
+    );
   };
 
   const onLightAdded = (light: Light) => {
@@ -1581,15 +1739,22 @@
     const index = stageProps.light.lights.findIndex((l: Light) => l.id === light.id);
     if (index === -1) return;
     stageProps.light.lights[index] = { ...light, position: { x: position.x, y: position.y } };
-    writeLightRow(stageProps.light.lights[index]);
+    writeLightRow(stageProps.light.lights[index], { detached: isDetachedMove('lights', light.id) });
   };
 
   const onLightSelected = (light: Light | null) => {
-    selectedLightId = light?.id || undefined;
+    if (light) {
+      pickItem({ collection: 'lights', id: light.id });
+      return;
+    }
+    if (pressHitsItem()) return;
+    selectedLightId = undefined;
   };
 
   const onLightDeleted = (lightId: string) => {
     stageProps.light.lights = stageProps.light.lights.filter((l) => l.id !== lightId);
+    if (selectedLightIds.includes(lightId)) selectedLightIds = selectedLightIds.filter((id) => id !== lightId);
+    if (selectedLightId === lightId) selectedLightId = selectedLightIds[0];
     session.client?.write.deleteLight(selectedSceneId, lightId);
   };
 
@@ -1611,7 +1776,9 @@
     const layer = stageProps.aoeTemplates;
     if (!layer?.templates.some((template) => template.id === id)) return;
     layer.templates = layer.templates.map((template) => (template.id === id ? { ...template, ...patch } : template));
-    session.client?.write.setAoeTemplateFields(selectedSceneId, id, aoeFieldsFromPatch(patch));
+    session.client?.write.setAoeTemplateFields(selectedSceneId, id, aoeFieldsFromPatch(patch), {
+      detached: isDetachedMove('aoeTemplates', id)
+    });
   };
 
   const removeAoeTemplate = (id: string) => {
@@ -1630,6 +1797,24 @@
   };
 
   const selectAoeTemplate = (id: string | null) => selectAoeTemplates(id ? [id] : []);
+
+  // A plain click on a shape starts a new selection, like a token click does
+  const selectAoeTemplatesFromMap = (ids: string[]) => {
+    if (ids.length === 0) {
+      selectAoeTemplates([]);
+      return;
+    }
+    selectedMarkerId = undefined;
+    if (ids.length === 1) pickItem({ collection: 'aoeTemplates', id: ids[0] });
+    else
+      selectItems(
+        expandToGroups(
+          groupRows(),
+          ids.map((id) => ({ collection: 'aoeTemplates' as const, id }))
+        )
+      );
+  };
+  const selectAoeTemplateFromMap = (id: string | null) => selectAoeTemplatesFromMap(id ? [id] : []);
 
   const removeSelectedAoeTemplates = () => [...(stageProps.aoeTemplates?.selectedIds ?? [])].forEach(removeAoeTemplate);
 
@@ -1652,6 +1837,22 @@
 
   const changeAoeMenuEffect = (effect: AoeEffect) =>
     aoeMenu?.ids.forEach((id) => updateAoeTemplate(id, { effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] }));
+
+  const selectedAoeTemplates = $derived(
+    (stageProps.aoeTemplates?.templates ?? []).filter((template) =>
+      stageProps.aoeTemplates?.selectedIds?.includes(template.id)
+    )
+  );
+  const selectedAoeEffect = $derived.by(() => {
+    const effects = new Set(selectedAoeTemplates.map((template) => template.effect));
+    return effects.size === 1 ? [...effects][0] : undefined;
+  });
+
+  // The toolbar picker recolors the selection only; the tool keeps its effect for the next shape
+  const changeSelectedAoeEffect = (effect: AoeEffect) =>
+    selectedAoeTemplates.forEach((template) =>
+      updateAoeTemplate(template.id, { effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] })
+    );
 
   const changeAoeMenuField = (patch: Partial<Pick<AoeTemplate, 'opacity' | 'visibility'>>) =>
     aoeMenu?.ids.forEach((id) => updateAoeTemplate(id, patch));
@@ -1685,6 +1886,56 @@
       const tool = stageProps.aoeTemplates?.tool;
       if (!tool) return;
       changeAoeTool({ shape: AOE_SHAPE_CYCLE[(AOE_SHAPE_CYCLE.indexOf(tool.shape) + 1) % AOE_SHAPE_CYCLE.length] });
+    }
+  };
+
+  // Asset groups -------------------------------------------------------------------
+  // B groups the selected tokens, lights and AoEs so they move together; see planGroupToggle
+
+  const groupRows = (): GroupedRows => {
+    const snapshot = session.client?.scene(selectedSceneId);
+    return {
+      markers: snapshot?.markers ?? [],
+      lights: snapshot?.lights ?? [],
+      aoeTemplates: snapshot?.aoeTemplates ?? []
+    };
+  };
+
+  const describeMember = (member: GroupMember) => {
+    if (member.collection === 'markers') return markerRowFor(member.id)?.title || 'The token';
+    return member.collection === 'lights' ? 'The light' : 'The AoE';
+  };
+
+  const toggleGroup = () => {
+    const plan = planGroupToggle(groupRows(), selectedItems(), uuidv4);
+    switch (plan.kind) {
+      case 'empty':
+        addToast({ data: { title: 'Select tokens, lights or AoEs to group', type: 'info' } });
+        return;
+      case 'single':
+        addToast({ data: { title: 'Select at least two items to group', type: 'info' } });
+        return;
+      case 'ungroup':
+        session.client?.write.setGroup(selectedSceneId, plan.members, null);
+        addToast({
+          data: {
+            title: plan.whole
+              ? `Ungrouped ${plan.members.length} items`
+              : `${describeMember(plan.members[0])} left the group`,
+            type: 'info'
+          }
+        });
+        return;
+      case 'group':
+        session.client?.write.setGroup(selectedSceneId, plan.members, plan.groupId);
+        selectItems(plan.members);
+        addToast({
+          data: {
+            title: `Grouped ${plan.members.length} items`,
+            body: 'Click again to pick one item. B ungroups the group, or takes the picked item out',
+            type: 'success'
+          }
+        });
     }
   };
 
@@ -2070,20 +2321,21 @@
   // Removes whatever the active tool has selected; AoE templates and fog rooms are handled by stageKeyCommands
   const deleteSelectionForKey = (): boolean => {
     const layer = stageProps.activeLayer;
+    let deleted = false;
     if (selectedMarkerIds.length > 0 && [MapLayerType.None, MapLayerType.Marker].includes(layer)) {
       deleteTokenPanelTargets();
-      return true;
+      deleted = true;
     }
-    if (selectedLightId && [MapLayerType.None, MapLayerType.Light].includes(layer)) {
-      onLightDeleted(selectedLightId);
+    if (selectedLightIds.length > 0 && [MapLayerType.None, MapLayerType.Light].includes(layer)) {
+      [...selectedLightIds].forEach(onLightDeleted);
       selectedLightId = undefined;
-      return true;
+      deleted = true;
     }
     if ((stageProps.aoeTemplates?.selectedIds?.length ?? 0) > 0 && layer === MapLayerType.None) {
       removeSelectedAoeTemplates();
-      return true;
+      deleted = true;
     }
-    return false;
+    return deleted;
   };
 
   const handleKeydown = (event: KeyboardEvent) => {
@@ -2100,14 +2352,15 @@
     }
 
     if (event.key === 'Escape' && !event.defaultPrevented && !stage?.markers?.isDraggingMarker) {
-      if (stageProps.activeLayer === MapLayerType.None) setSelection([]);
+      if (stageProps.activeLayer === MapLayerType.None) selectItems([]);
     }
 
     if (!event.ctrlKey && !event.metaKey && !event.altKey && !catalogOpen) {
       const key = event.key.toLowerCase();
-      if ((key === 'i' || key === 'n') && event.repeat) return;
-      if (key === 'i') return startOrAddCombat();
+      if ((key === 'i' || key === 'n' || key === 'b') && event.repeat) return;
+      if (key === 'i') return event.shiftKey ? removeSelectedFromCombat() : startOrAddCombat();
       if (key === 'n') return event.shiftKey ? rewindCombat() : advanceCombat();
+      if (key === 'b' && !event.shiftKey) return toggleGroup();
     }
 
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
@@ -2194,8 +2447,7 @@
     let gesture: {
       start: { x: number; y: number };
       sceneId: string;
-      initialIds: string[];
-      initialAoeIds: string[];
+      initialItems: GroupMember[];
     } | null = null;
     const cancel = () => {
       gesture = null;
@@ -2208,7 +2460,10 @@
         event.ctrlKey ||
         event.metaKey ||
         !(event.target instanceof HTMLCanvasElement) ||
-        ![MapLayerType.None, MapLayerType.Marker, MapLayerType.AoeTemplate].includes(stageProps.activeLayer)
+        // The light tool allows it too, so a light and a token can be selected together
+        ![MapLayerType.None, MapLayerType.Marker, MapLayerType.AoeTemplate, MapLayerType.Light].includes(
+          stageProps.activeLayer
+        )
       )
         return;
       event.preventDefault();
@@ -2216,8 +2471,7 @@
       gesture = {
         start: { x: event.clientX, y: event.clientY },
         sceneId: selectedSceneId,
-        initialIds: [...selectedMarkerIds],
-        initialAoeIds: [...(stageProps.aoeTemplates?.selectedIds ?? [])]
+        initialItems: selectedItems()
       };
     };
     const move = (event: MouseEvent) => {
@@ -2246,27 +2500,42 @@
         const end = { x: event.clientX, y: event.clientY };
         const point = stage?.markers.clientToPosition(end, true);
         if (point) clipboardPointer = { sceneId: selectedSceneId, point };
-        const selectsMarkers = stageProps.activeLayer !== MapLayerType.AoeTemplate;
-        const selectsShapes = stageProps.activeLayer !== MapLayerType.Marker;
+        const layer = stageProps.activeLayer;
+        const selectsMarkers = layer !== MapLayerType.AoeTemplate;
+        const selectsLights = layer === MapLayerType.None || layer === MapLayerType.Light;
+        const selectsShapes = ![MapLayerType.Marker, MapLayerType.Light].includes(layer);
         const isClick = Math.hypot(end.x - gesture.start.x, end.y - gesture.start.y) < 5;
-        const toggled = (ids: string[], id: string) =>
-          ids.includes(id) ? ids.filter((selected) => selected !== id) : [...ids, id];
-        const shapeStart = stage?.markers.clientToPosition(gesture.start);
-        const shapeEnd = stage?.markers.clientToPosition(end);
+        const layerStart = stage?.markers.clientToPosition(gesture.start);
+        const layerEnd = stage?.markers.clientToPosition(end);
+        const rows = groupRows();
         if (isClick) {
-          const markerId = selectsMarkers ? stage?.markers.hitTest(end) : null;
-          const shapeId = !markerId && selectsShapes && shapeEnd ? stage?.aoeTemplates.hitTest(shapeEnd) : null;
-          if (markerId) setSelection(toggled(gesture.initialIds, markerId));
-          else if (shapeId) selectAoeTemplates(toggled(gesture.initialAoeIds, shapeId));
+          // Shift+click adds a token even with the AoE tool on, so a shape and its token can be selected together
+          const markerId = stage?.markers.hitTest(end) ?? null;
+          const lightId = !markerId && selectsLights && layerEnd ? stage?.lights.hitTest(layerEnd) : null;
+          const shapeId =
+            !markerId && !lightId && selectsShapes && layerEnd ? stage?.aoeTemplates.hitTest(layerEnd) : null;
+          const clicked: GroupMember | null = markerId
+            ? { collection: 'markers', id: markerId }
+            : lightId
+              ? { collection: 'lights', id: lightId }
+              : shapeId
+                ? { collection: 'aoeTemplates', id: shapeId }
+                : null;
+          if (clicked) selectItems(toggleGroupInSelection(rows, clicked, gesture.initialItems));
         } else {
+          const boxed: GroupMember[] = [];
           if (selectsMarkers) {
-            setSelection([...new Set([...gesture.initialIds, ...stage.markers.inRectangle(gesture.start, end)])]);
+            for (const id of stage.markers.inRectangle(gesture.start, end)) boxed.push({ collection: 'markers', id });
           }
-          if (selectsShapes && shapeStart && shapeEnd) {
-            selectAoeTemplates([
-              ...new Set([...gesture.initialAoeIds, ...stage.aoeTemplates.inRectangle(shapeStart, shapeEnd)])
-            ]);
+          if (selectsLights && layerStart && layerEnd) {
+            for (const id of stage.lights.inRectangle(layerStart, layerEnd)) boxed.push({ collection: 'lights', id });
           }
+          if (selectsShapes && layerStart && layerEnd) {
+            for (const id of stage.aoeTemplates.inRectangle(layerStart, layerEnd)) {
+              boxed.push({ collection: 'aoeTemplates', id });
+            }
+          }
+          selectItems(expandToGroups(rows, [...gesture.initialItems, ...boxed]));
         }
       }
       cancel();
@@ -2438,6 +2707,7 @@
             bind:this={stage}
             props={stageProps}
             {selectedMarkerIds}
+            {selectedLightIds}
             {distanceMode}
             onMarkerVisibilityToggle={toggleMarkerVisibility}
             dropTargetMarkerId={artworkDropTargetId}
@@ -2468,8 +2738,8 @@
               onMeasurementEnd,
               onAoeTemplateAdded,
               onAoeTemplateUpdated: updateAoeTemplate,
-              onAoeTemplateSelected: selectAoeTemplate,
-              onAoeTemplatesSelected: selectAoeTemplates,
+              onAoeTemplateSelected: selectAoeTemplateFromMap,
+              onAoeTemplatesSelected: selectAoeTemplatesFromMap,
               onAoeTemplateDeleted: removeAoeTemplate,
               onAoeTemplateMenu,
               onCursorMove: handleCursorMove
@@ -2560,6 +2830,9 @@
           onFogClear={clearFogAndRooms}
           aoeTool={stageProps.aoeTemplates?.tool}
           onAoeToolChange={changeAoeTool}
+          aoeSelectionCount={selectedAoeTemplates.length}
+          aoeSelectionEffect={selectedAoeEffect}
+          onAoeSelectionEffectChange={changeSelectedAoeEffect}
         />
         <SceneZoom {stage} {handleSceneFit} {handleMapFill} {stageProps} />
         <Shortcuts />
@@ -2603,173 +2876,195 @@
         }
       }}
     >
-      <div class="editor-tools">
-        <SidePanelTabs
-          selected={sidePanelTab}
-          onSelect={(tab) => (sidePanelTab = tab)}
-          handoutLive={!!liveHandout}
-          combatLive={combatRunning}
-          showLibrary={canEditAssets}
-          showHandout={canPresentHandouts}
-        />
-        <div
-          class="editor-tools__content"
-          id="sidePanel-tokens"
-          role="tabpanel"
-          aria-labelledby="sidePanelTab-tokens"
-          hidden={sidePanelTab !== 'tokens'}
-        >
-          {#if activeControl === 'aoe' && stageProps.aoeTemplates}
-            <AoeTemplateManager
-              templates={stageProps.aoeTemplates.templates}
-              selectedId={stageProps.aoeTemplates.selectedId}
-              onSelect={selectAoeTemplate}
-              onUpdate={updateAoeTemplate}
-              onDelete={removeAoeTemplate}
-              onActivateTool={() => handleSelectActiveControl('aoe', { toggle: false })}
-              isToolActive={activeControl === 'aoe'}
-            />
-          {:else if activeControl === 'annotation'}
-            {#key selectedAnnotationId}
-              <AnnotationManager
-                {stageProps}
-                bind:selectedAnnotationId
-                {onAnnotationDeleted}
-                {onAnnotationUpdated}
-                {onAnnotationCreated}
-                bind:handleOpacityChange
-                bind:handleBrushSizeChange
-                bind:handleColorChange
-                bind:handleEffectChange
-                annotationMasks={data.selectedSceneAnnotationMasks}
-                smoothingEnabled={stageProps.annotations.smoothingEnabled}
-                onSmoothingChange={(enabled) => {
-                  stageProps.annotations.smoothingEnabled = enabled;
-                  setPreference('annotationSmoothing', enabled);
-                }}
+      <div class={['sidePanel', isMobile && 'sidePanel--stacked']}>
+        <div class="editor-tools">
+          <SidePanelTabs
+            selected={sidePanelTab}
+            onSelect={(tab) => (sidePanelTab = tab)}
+            handoutLive={!!liveHandout}
+            combatLive={combatRunning}
+            combatOpen={isCombatColumnOpen}
+            onCombatToggle={toggleCombatColumn}
+            showLibrary={canEditAssets}
+            showHandout={canPresentHandouts}
+          />
+          <div
+            class="editor-tools__content"
+            id="sidePanel-tokens"
+            role="tabpanel"
+            aria-labelledby="sidePanelTab-tokens"
+            hidden={sidePanelTab !== 'tokens'}
+          >
+            {#if activeControl === 'aoe' && stageProps.aoeTemplates}
+              <AoeTemplateManager
+                templates={stageProps.aoeTemplates.templates}
+                selectedId={stageProps.aoeTemplates.selectedId}
+                onSelect={selectAoeTemplate}
+                onUpdate={updateAoeTemplate}
+                onDelete={removeAoeTemplate}
+                onActivateTool={() => handleSelectActiveControl('aoe', { toggle: false })}
+                isToolActive={activeControl === 'aoe'}
               />
-            {/key}
-          {:else if activeControl === 'light'}
-            {#key selectedLightId}
-              <LightManager
+            {:else if activeControl === 'annotation'}
+              {#key selectedAnnotationId}
+                <AnnotationManager
+                  {stageProps}
+                  bind:selectedAnnotationId
+                  {onAnnotationDeleted}
+                  {onAnnotationUpdated}
+                  {onAnnotationCreated}
+                  bind:handleOpacityChange
+                  bind:handleBrushSizeChange
+                  bind:handleColorChange
+                  bind:handleEffectChange
+                  annotationMasks={data.selectedSceneAnnotationMasks}
+                  smoothingEnabled={stageProps.annotations.smoothingEnabled}
+                  onSmoothingChange={(enabled) => {
+                    stageProps.annotations.smoothingEnabled = enabled;
+                    setPreference('annotationSmoothing', enabled);
+                  }}
+                />
+              {/key}
+            {:else if activeControl === 'light'}
+              {#key selectedLightId}
+                <LightManager
+                  partyId={party.id}
+                  sceneId={selectedSceneId}
+                  {stageProps}
+                  bind:selectedLightId
+                  {handleSelectActiveControl}
+                  {updateLightAndSave}
+                  {onLightDeleted}
+                />
+              {/key}
+            {:else if showChecklist}
+              <Checklist
+                completedItems={checklistCompletedItems}
+                onComplete={handleChecklistItemComplete}
+                onDismiss={handleChecklistDismiss}
+              />
+            {:else if !isMarkersCollapsed}
+              {#if canEditAssets && selectedMarkerId === undefined}
+                <SavedTokens
+                  client={session.client}
+                  sceneId={selectedSceneId}
+                  bucketUrl={data.bucketUrl}
+                  visibility={libraryVisibility}
+                  {getViewportCenter}
+                  snapPosition={snapPlacement}
+                />
+              {/if}
+              <MarkerManager
                 partyId={party.id}
-                sceneId={selectedSceneId}
                 {stageProps}
-                bind:selectedLightId
+                bind:selectedMarkerId
+                {selectedMarkerIds}
+                onSelectionChange={setSelection}
+                {distanceMode}
+                onDistanceModeChange={(enabled) => (distanceMode = enabled)}
                 {handleSelectActiveControl}
-                {updateLightAndSave}
-                {onLightDeleted}
-              />
-            {/key}
-          {:else if showChecklist}
-            <Checklist
-              completedItems={checklistCompletedItems}
-              onComplete={handleChecklistItemComplete}
-              onDismiss={handleChecklistDismiss}
-            />
-          {:else if !isMarkersCollapsed}
-            {#if canEditAssets && selectedMarkerId === undefined}
-              <SavedTokens
-                client={session.client}
+                {updateMarkerAndSave}
+                onArtworkFile={replaceTokenArtwork}
+                onHandoutPreview={canPresentHandouts ? previewTokenHandout : undefined}
+                {onMarkerDeleted}
+                {pinnedMarkerIds}
+                {onPinToggle}
+                conditionPickerFor={(markerId) => conditionPickerFor([markerId])}
+                {statBlockFor}
+                onHitPointsChange={writeHitPoints}
+                {onStatRoll}
                 sceneId={selectedSceneId}
-                bucketUrl={data.bucketUrl}
-                visibility={libraryVisibility}
-                {getViewportCenter}
-                snapPosition={snapPlacement}
+                onNoteSave={(sceneId, markerId, note) =>
+                  session.client?.write.setExistingMarkerFields(sceneId, markerId, { note })}
               />
             {/if}
-            <MarkerManager
-              partyId={party.id}
-              {stageProps}
-              bind:selectedMarkerId
-              {selectedMarkerIds}
-              onSelectionChange={setSelection}
-              {distanceMode}
-              onDistanceModeChange={(enabled) => (distanceMode = enabled)}
-              {handleSelectActiveControl}
-              {updateMarkerAndSave}
-              onArtworkFile={replaceTokenArtwork}
-              onHandoutPreview={canPresentHandouts ? previewTokenHandout : undefined}
-              {onMarkerDeleted}
-              {pinnedMarkerIds}
-              {onPinToggle}
-              conditionPickerFor={(markerId) => conditionPickerFor([markerId])}
-              {statBlockFor}
-              onHitPointsChange={writeHitPoints}
-              {onStatRoll}
-              sceneId={selectedSceneId}
-              onNoteSave={(sceneId, markerId, note) =>
-                session.client?.write.setExistingMarkerFields(sceneId, markerId, { note })}
-            />
-          {/if}
-        </div>
-        <div
-          class="editor-tools__content"
-          id="sidePanel-library"
-          role="tabpanel"
-          aria-labelledby="sidePanelTab-library"
-          hidden={sidePanelTab !== 'library'}
-        >
-          <AssetLibrary
-            client={session.client}
-            sceneId={selectedSceneId}
-            {selectedMarkerId}
-            bucketUrl={data.bucketUrl}
-            onPreviewArtwork={canPresentHandouts ? previewAssetHandout : undefined}
-            onOpenCatalog={() => (catalogOpen = true)}
-            bind:quantity={libraryQuantity}
-            bind:visibility={libraryVisibility}
-            {getViewportCenter}
-            snapPosition={snapPlacement}
-          />
-        </div>
-        <div
-          class="editor-tools__content"
-          id="sidePanel-handout"
-          role="tabpanel"
-          aria-labelledby="sidePanelTab-handout"
-          hidden={sidePanelTab !== 'handout'}
-        >
-          {#if canPresentHandouts}
-            <HandoutPanel
-              partyId={party.id}
+          </div>
+          <div
+            class="editor-tools__content"
+            id="sidePanel-library"
+            role="tabpanel"
+            aria-labelledby="sidePanelTab-library"
+            hidden={sidePanelTab !== 'library'}
+          >
+            <AssetLibrary
               client={session.client}
+              sceneId={selectedSceneId}
+              {selectedMarkerId}
               bucketUrl={data.bucketUrl}
-              preview={handoutPreview}
-              onPreviewChange={(preview) => (handoutPreview = preview)}
+              onPreviewArtwork={canPresentHandouts ? previewAssetHandout : undefined}
+              onOpenCatalog={() => (catalogOpen = true)}
+              bind:quantity={libraryQuantity}
+              bind:visibility={libraryVisibility}
+              {getViewportCenter}
+              snapPosition={snapPlacement}
             />
-          {/if}
+          </div>
+          <div
+            class="editor-tools__content"
+            id="sidePanel-handout"
+            role="tabpanel"
+            aria-labelledby="sidePanelTab-handout"
+            hidden={sidePanelTab !== 'handout'}
+          >
+            {#if canPresentHandouts}
+              <HandoutPanel
+                partyId={party.id}
+                client={session.client}
+                bucketUrl={data.bucketUrl}
+                preview={handoutPreview}
+                onPreviewChange={(preview) => (handoutPreview = preview)}
+              />
+            {/if}
+          </div>
         </div>
-        <div
-          class="editor-tools__content"
-          id="sidePanel-combat"
-          role="tabpanel"
-          aria-labelledby="sidePanelTab-combat"
-          hidden={sidePanelTab !== 'combat'}
-        >
-          <InitiativeTracker
-            {combatants}
-            position={turnPosition}
-            lairActions={combatSnapshot?.settings.combatLairActions ?? false}
-            showOnTv={combatSnapshot?.settings.combatShowOnTv ?? true}
-            {selectedMarkerIds}
-            bucketUrl={data.bucketUrl}
-            onAction={handleCombatAction}
-            onSelectMarker={(id) => {
-              selectedMarkerId = id;
-              setSelection([id]);
-            }}
-            onBonusChange={onInitiativeBonusChange}
-            onSettingsChange={(fields) => session.client?.systemWrite.setSceneSettings(selectedSceneId, fields)}
-          />
-        </div>
+        {#if isCombatColumnOpen}
+          <section class="sidePanel__combat" id="combatColumn" aria-label="Initiative">
+            <InitiativeTracker
+              {combatants}
+              position={turnPosition}
+              lairActions={combatSnapshot?.settings.combatLairActions ?? false}
+              showOnTv={combatSnapshot?.settings.combatShowOnTv ?? true}
+              {selectedMarkerIds}
+              bucketUrl={data.bucketUrl}
+              onAction={handleCombatAction}
+              onSelectMarker={(id) => {
+                selectedMarkerId = id;
+                setSelection([id]);
+              }}
+              onBonusChange={onInitiativeBonusChange}
+              onSettingsChange={(fields) => session.client?.systemWrite.setSceneSettings(selectedSceneId, fields)}
+            />
+          </section>
+        {/if}
       </div>
     </Pane>
   </PaneGroup>
 </div>
 
 <style>
+  .sidePanel {
+    height: 100%;
+    display: flex;
+    min-height: 0;
+  }
+  .sidePanel--stacked {
+    flex-direction: column-reverse;
+  }
+  .sidePanel__combat {
+    flex: 0 0 min(320px, 50%);
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    border-left: var(--borderThin);
+  }
+  .sidePanel--stacked .sidePanel__combat {
+    flex-basis: 45%;
+    border-left: none;
+    border-bottom: var(--borderThin);
+  }
   .editor-tools {
+    flex: 1;
+    min-width: 0;
     height: 100%;
     display: flex;
     flex-direction: column;

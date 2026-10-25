@@ -45,6 +45,16 @@ Key properties:
   `stage.fogOfWar.fromRLE` / `stage.annotations.loadMask`.
 - Scene ordering uses **fractional `order` values** (`orderBetween`); a reorder is one field
   write. SQLite stores fractional values in the integer column without complaint.
+- **Grouped rows move together in the writer.** `groupId` on markers, lights and AoE templates
+  names the group a row belongs to. Positions stay absolute; a position write on any member shifts
+  the rest of its group by the same delta inside the same transaction (rows placed explicitly in
+  that transaction are left alone). A write with `{ detached: true }` moves only that row.
+- **Only a whole row creates a row.** The `set*Fields` writers create a missing row only when the
+  fields carry its `id`; a patch for a row deleted or undone elsewhere (a stale selection) is
+  dropped. Readers skip id-less fragments, and the game session room prunes any it finds
+  (`pruneRowFragments`) when it loads its doc, then re-saves the repaired scene. A fragment used to
+  break every snapshot of its scene: moves stopped rendering, the TV fell back to an empty board,
+  and the scene could no longer persist.
 - **Own-update detection is transaction identity, not timing**: local writes are tagged with the
   client's origin, and `classifySceneEvents` reports `remote = !transaction.local`. There are no
   echo windows or protection timers anywhere in the system.

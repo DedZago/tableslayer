@@ -6,6 +6,7 @@
     type StageProps,
     MapLayerType,
     type StageExports,
+    type AoeEffect,
     type AoeToolSettings
   } from '@tableslayer/stage';
   import {
@@ -65,7 +66,10 @@
     isCompact = false,
     onFogClear,
     aoeTool = undefined,
-    onAoeToolChange = undefined
+    aoeSelectionCount = 0,
+    aoeSelectionEffect = undefined,
+    onAoeToolChange = undefined,
+    onAoeSelectionEffectChange = undefined
   }: {
     handleSelectActiveControl: (control: string, opts?: { toggle?: boolean }) => void;
     activeControl: string;
@@ -83,6 +87,10 @@
     onFogClear?: () => void;
     aoeTool?: AoeToolSettings;
     onAoeToolChange?: (patch: Partial<AoeToolSettings>) => void;
+    /** Selected templates; while any are selected the effect picker recolors them instead of the tool */
+    aoeSelectionCount?: number;
+    aoeSelectionEffect?: AoeEffect;
+    onAoeSelectionEffectChange?: (effect: AoeEffect) => void;
   } = $props();
 
   type SceneControl = {
@@ -449,6 +457,9 @@
             onToggle={() => handleSelectActiveControl('aoe')}
             onActivate={() => handleSelectActiveControl('aoe', { toggle: false })}
             onToolChange={onAoeToolChange}
+            selectionCount={aoeSelectionCount}
+            selectionEffect={aoeSelectionEffect}
+            onSelectionEffectChange={onAoeSelectionEffectChange}
           />
         </div>
       {/if}

@@ -257,3 +257,48 @@ describe('buildSceneProps aoe templates', () => {
     expect(first.aoeTemplates?.tool).not.toBe(second.aoeTemplates?.tool);
   });
 });
+
+describe('buildRenderProps drag preview of groups', () => {
+  const groupedSnapshot = () =>
+    ({
+      id: 'scene-1',
+      settings: { ...baseScene, mapCoordVersion: 1 },
+      markers: [
+        { ...marker, groupId: 'g1' },
+        { ...marker, id: 'familiar', positionX: 320, groupId: 'g1' },
+        { ...marker, id: 'dragged-too', positionX: 340, groupId: 'g1' }
+      ],
+      lights: [{ ...light, groupId: 'g1' }],
+      aoeTemplates: [aoeRow({ groupId: 'g1' }), aoeRow({ id: 'aoe-2' })],
+      annotations: []
+    }) as unknown as Parameters<typeof import('$lib/realtime/buildRenderProps').buildRenderProps>[0];
+  const positionOf = (items: Array<{ id: string; position: { x: number; y: number } }>, id: string) =>
+    items.find((item) => item.id === id)!.position;
+
+  it('moves the rest of a dragged token group by its live delta', async () => {
+    const { buildRenderProps } = await import('$lib/realtime/buildRenderProps');
+    const props = buildRenderProps(groupedSnapshot(), {
+      mode: 'editor',
+      markerPositions: { 'marker-1': { x: 310, y: 160 }, 'dragged-too': { x: 0, y: 0 } }
+    });
+
+    expect(positionOf(props.marker.markers, 'familiar')).toEqual({ x: 330, y: 160 });
+    expect(positionOf(props.marker.markers, 'dragged-too')).toEqual({ x: 0, y: 0 });
+    expect(positionOf(props.light.lights, 'light-1')).toEqual({ x: 310, y: 160 });
+    expect(positionOf(props.aoeTemplates!.templates, 'aoe-1')).toEqual({ x: 310, y: 160 });
+    expect(positionOf(props.aoeTemplates!.templates, 'aoe-2')).toEqual({ x: 300, y: 150 });
+  });
+
+  it('leaves the group in place while a detached token is dragged', async () => {
+    const { buildRenderProps } = await import('$lib/realtime/buildRenderProps');
+    const props = buildRenderProps(groupedSnapshot(), {
+      mode: 'editor',
+      markerPositions: { 'marker-1': { x: 310, y: 160 } },
+      detachedMarkerId: 'marker-1'
+    });
+
+    expect(positionOf(props.marker.markers, 'marker-1')).toEqual({ x: 310, y: 160 });
+    expect(positionOf(props.marker.markers, 'familiar')).toEqual({ x: 320, y: 150 });
+    expect(positionOf(props.light.lights, 'light-1')).toEqual({ x: 300, y: 150 });
+  });
+});

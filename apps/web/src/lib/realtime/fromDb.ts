@@ -17,6 +17,7 @@ export const aoeTemplateRowFromDb = (template: SelectAoeTemplate): AoeTemplateRo
 });
 export const aoeTemplateRowToDb = (template: AoeTemplateRow): SelectAoeTemplate => ({
   ...template,
+  groupId: template.groupId ?? null,
   createdAt: new Date(template.createdAt * 1000)
 });
 export const annotationRowFromDb = (annotation: SelectAnnotation): AnnotationRow => {

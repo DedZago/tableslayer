@@ -17,6 +17,7 @@ export {
   isDocHydrated,
   listScenes,
   orderBetween,
+  type MoveOptions,
   type PartyWriter,
   type SessionWriter
 } from './docSchema';

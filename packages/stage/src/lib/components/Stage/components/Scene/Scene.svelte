@@ -665,7 +665,10 @@
     },
     onSceneChange: () => {
       lightLayer?.onSceneChange?.();
-    }
+    },
+    hitTest: (point: { x: number; y: number }) => lightLayer?.hitTest(point) ?? null,
+    inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>
+      lightLayer?.inRectangle(start, end) ?? []
   };
 
   export const aoeTemplates = {

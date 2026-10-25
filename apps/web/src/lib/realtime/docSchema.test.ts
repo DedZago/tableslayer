@@ -16,7 +16,8 @@ import {
   isDocHydrated,
   listScenes,
   openUndoCaptureGroup,
-  orderBetween
+  orderBetween,
+  pruneRowFragments
 } from './docSchema';
 import type { AnnotationRow, AoeTemplateRow, LightRow, MarkerRow, SceneChange, SceneSettings } from './types';
 
@@ -773,5 +774,163 @@ describe('row object cache', () => {
     expect(markerIn(after, 'm1').positionX).toBe(9);
     expect(markerIn(after, 'm1')).not.toBe(markerIn(first, 'm1'));
     expect(markerIn(after, 'm2')).toBe(markerIn(first, 'm2'));
+  });
+});
+
+describe('asset groups', () => {
+  const groupedDoc = () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t1', { positionX: 3, positionY: 4 }));
+    writer.setGroup(
+      's1',
+      [
+        { collection: 'markers', id: 'm1' },
+        { collection: 'lights', id: 'l1' },
+        { collection: 'aoeTemplates', id: 't1' },
+        { collection: 'markers', id: 'm2' }
+      ],
+      'g1'
+    );
+    return { doc, writer };
+  };
+  const scene = (doc: Y.Doc) => getSceneSnapshot(doc, 's1')!;
+  const positionOf = (rows: Array<{ id: string; positionX: number; positionY: number }>, id: string) => {
+    const row = rows.find((r) => r.id === id)!;
+    return { x: row.positionX, y: row.positionY };
+  };
+
+  it('moves the whole group with a token, keeping offsets', () => {
+    const { doc, writer } = groupedDoc();
+    writer.setMarkerFields('s1', 'm1', { positionX: 2, positionY: -1 });
+
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 7, y: 4 });
+    expect(positionOf(scene(doc).aoeTemplates, 't1')).toEqual({ x: 5, y: 3 });
+    expect(positionOf(scene(doc).markers, 'm2')).toEqual({ x: 12, y: -1 });
+  });
+
+  it('moves the whole group with a light or an AoE too', () => {
+    const { doc, writer } = groupedDoc();
+    writer.setLightFields('s1', 'l1', { positionX: 6 });
+    writer.setAoeTemplateFields('s1', 't1', { positionY: 6 });
+
+    expect(positionOf(scene(doc).markers, 'm1')).toEqual({ x: 1, y: 2 });
+    expect(positionOf(scene(doc).markers, 'm2')).toEqual({ x: 11, y: 2 });
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 6, y: 7 });
+    expect(positionOf(scene(doc).aoeTemplates, 't1')).toEqual({ x: 4, y: 6 });
+  });
+
+  it('moves a detached member alone', () => {
+    const { doc, writer } = groupedDoc();
+    writer.setAoeTemplateFields('s1', 't1', { positionX: 9 }, { detached: true });
+
+    expect(positionOf(scene(doc).aoeTemplates, 't1')).toEqual({ x: 9, y: 4 });
+    expect(positionOf(scene(doc).markers, 'm1')).toEqual({ x: 0, y: 0 });
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 5, y: 5 });
+  });
+
+  it('lets an explicit position in the same transaction win over the shift', () => {
+    const { doc, writer } = groupedDoc();
+    writer.transaction(() => {
+      writer.setExistingMarkerFields('s1', 'm2', { positionX: 13 });
+      writer.setExistingMarkerFields('s1', 'm1', { positionX: 3 });
+    });
+    expect(positionOf(scene(doc).markers, 'm1')).toEqual({ x: 3, y: 0 });
+    expect(positionOf(scene(doc).markers, 'm2')).toEqual({ x: 13, y: 0 });
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 8, y: 5 });
+
+    writer.transaction(() => {
+      writer.setExistingMarkerFields('s1', 'm1', { positionX: 4 });
+      writer.setExistingMarkerFields('s1', 'm2', { positionX: 14 });
+    });
+    expect(positionOf(scene(doc).markers, 'm2')).toEqual({ x: 14, y: 0 });
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 9, y: 5 });
+  });
+
+  it('leaves ungrouped rows, other groups and non-position edits alone', () => {
+    const { doc, writer } = groupedDoc();
+    writer.setGroup('s1', [{ collection: 'lights', id: 'l1' }], null);
+    writer.setGroup('s1', [{ collection: 'markers', id: 'm2' }], 'g2');
+    writer.setMarkerFields('s1', 'm1', { positionX: 2, title: 'Moved' });
+    writer.setMarkerFields('s1', 'm1', { title: 'Renamed' });
+
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 5, y: 5 });
+    expect(positionOf(scene(doc).markers, 'm2')).toEqual({ x: 10, y: 0 });
+    expect(positionOf(scene(doc).aoeTemplates, 't1')).toEqual({ x: 5, y: 4 });
+  });
+
+  it('keeps the rest of the group in place when a member is deleted', () => {
+    const { doc, writer } = groupedDoc();
+    writer.deleteMarker('s1', 'm1');
+
+    expect(scene(doc).lights[0].groupId).toBe('g1');
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 5, y: 5 });
+  });
+
+  it('undoes a group move in one step', () => {
+    const { doc, writer } = groupedDoc();
+    const undoManager = new Y.UndoManager(doc.getMap('scenes').get('s1') as Y.Map<unknown>, {
+      trackedOrigins: new Set(['me'])
+    });
+    writer.setMarkerFields('s1', 'm1', { positionX: 8 });
+    undoManager.undo();
+
+    expect(positionOf(scene(doc).markers, 'm1')).toEqual({ x: 0, y: 0 });
+    expect(positionOf(scene(doc).lights, 'l1')).toEqual({ x: 5, y: 5 });
+    expect(positionOf(scene(doc).markers, 'm2')).toEqual({ x: 10, y: 0 });
+  });
+});
+
+describe('row fragments', () => {
+  const plantFragment = (doc: Y.Doc) => {
+    const templates = getScenesMap(doc).get('s1')!.get('aoeTemplates') as Y.Map<Y.Map<unknown>>;
+    const fragment = new Y.Map<unknown>();
+    templates.set('gone', fragment);
+    fragment.set('effect', 1);
+    fragment.set('color', '#ff6a1a');
+  };
+
+  it('drops a field patch for a row that no longer exists', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.setAoeTemplateFields('s1', 'gone', { effect: 1, color: '#ff6a1a' });
+    writer.setLightFields('s1', 'gone', { positionX: 1 });
+    writer.setMarkerFields('s1', 'gone', { positionX: 1, positionY: 2 });
+
+    const snapshot = getSceneSnapshot(doc, 's1')!;
+    expect(snapshot.aoeTemplates).toHaveLength(0);
+    expect(snapshot.lights.map((light) => light.id)).toEqual(['l1']);
+    expect(snapshot.markers.map((marker) => marker.id).sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('still creates a row from a whole row', () => {
+    const doc = hydratedDoc();
+    createSessionWriter(doc, 'me').setMarkerFields('s1', 'm3', makeMarker('m3', 's1'));
+    expect(getSceneSnapshot(doc, 's1')!.markers.map((marker) => marker.id)).toContain('m3');
+  });
+
+  it('reads a scene that holds a fragment', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t1'));
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t2'));
+    plantFragment(doc);
+
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates.map((template) => template.id)).toEqual(['t1', 't2']);
+  });
+
+  it('prunes fragments and reports the repaired scenes', () => {
+    const doc = hydratedDoc();
+    createSessionWriter(doc, 'me').upsertAoeTemplate('s1', makeAoeTemplate('t1'));
+    plantFragment(doc);
+
+    expect(pruneRowFragments(doc, 'server')).toEqual(['s1']);
+    const snapshot = getSceneSnapshot(doc, 's1')!;
+    expect(snapshot.aoeTemplates.map((template) => template.id)).toEqual(['t1']);
+    expect(snapshot.markers).toHaveLength(2);
+    expect(snapshot.lights).toHaveLength(1);
+    expect(snapshot.annotations).toHaveLength(2);
+    expect((getScenesMap(doc).get('s1')!.get('aoeTemplates') as Y.Map<unknown>).has('gone')).toBe(false);
+    expect(pruneRowFragments(doc, 'server')).toEqual([]);
   });
 });

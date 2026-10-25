@@ -26,6 +26,8 @@ export interface LocalView {
   };
   /** In-progress marker drags by id (committed to the doc on drop). */
   markerPositions?: Record<string, { x: number; y: number }>;
+  /** A dragged token that moves without the rest of its group */
+  detachedMarkerId?: string | null;
   /** Snap-to-grid is a per-user preference, not a shared scene setting. */
   marker?: { snapToGrid?: boolean };
   light?: { snapToGrid?: boolean };
@@ -47,6 +49,43 @@ export interface LocalView {
     playerSelectable?: boolean;
   };
 }
+
+type Point = { x: number; y: number };
+
+// The rest of a dragged token's group follows its live position before the drag's writes land
+const applyDragPositions = (
+  props: StageProps,
+  snapshot: SceneSnapshot,
+  overrides: Record<string, Point>,
+  detachedMarkerId: string | null | undefined
+) => {
+  const groupOfMarker = new Map(snapshot.markers.map((marker) => [marker.id, marker.groupId ?? null]));
+  const groupDeltas = new Map<string, Point>();
+  for (const marker of props.marker.markers) {
+    const override = overrides[marker.id];
+    if (!override) continue;
+    const groupId = groupOfMarker.get(marker.id);
+    if (groupId && marker.id !== detachedMarkerId && !groupDeltas.has(groupId)) {
+      groupDeltas.set(groupId, { x: override.x - marker.position.x, y: override.y - marker.position.y });
+    }
+    marker.position = override;
+  }
+  if (groupDeltas.size === 0) return;
+
+  const shifted = (position: Point, groupId: string | null | undefined) => {
+    const delta = groupId ? groupDeltas.get(groupId) : undefined;
+    return delta ? { x: position.x + delta.x, y: position.y + delta.y } : position;
+  };
+  for (const marker of props.marker.markers) {
+    if (!overrides[marker.id]) marker.position = shifted(marker.position, groupOfMarker.get(marker.id));
+  }
+  const lightGroups = new Map(snapshot.lights.map((light) => [light.id, light.groupId]));
+  for (const light of props.light.lights) light.position = shifted(light.position, lightGroups.get(light.id));
+  const templateGroups = new Map(snapshot.aoeTemplates.map((template) => [template.id, template.groupId]));
+  for (const template of props.aoeTemplates?.templates ?? []) {
+    template.position = shifted(template.position, templateGroups.get(template.id));
+  }
+};
 
 /**
  * Pure derivation: shared snapshot + local view -> StageProps. The result is a
@@ -75,12 +114,7 @@ export const buildRenderProps = (snapshot: SceneSnapshot, view: LocalView, bucke
   if (view.mapTransform?.offset) props.map.offset = view.mapTransform.offset;
   if (view.mapTransform?.zoom !== undefined) props.map.zoom = view.mapTransform.zoom;
 
-  if (view.markerPositions) {
-    for (const marker of props.marker.markers) {
-      const override = view.markerPositions[marker.id];
-      if (override) marker.position = override;
-    }
-  }
+  if (view.markerPositions) applyDragPositions(props, snapshot, view.markerPositions, view.detachedMarkerId);
 
   if (view.marker?.snapToGrid !== undefined) props.marker.snapToGrid = view.marker.snapToGrid;
   if (view.light?.snapToGrid !== undefined) props.light.snapToGrid = view.light.snapToGrid;

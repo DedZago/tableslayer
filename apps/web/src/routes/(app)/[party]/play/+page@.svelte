@@ -223,6 +223,16 @@
     renderedSceneId = snapshot.id;
   });
 
+  // Shapes deleted or undone elsewhere leave the selection, so the swatches go back to the tool
+  $effect(() => {
+    const templates = session.activeScene?.aoeTemplates;
+    if (!templates) return;
+    untrack(() => {
+      const kept = tools.aoeSelectedIds.filter((id) => templates.some((template) => template.id === id));
+      if (kept.length !== tools.aoeSelectedIds.length) tools.aoeSelectedIds = kept;
+    });
+  });
+
   // Apply performance tier changes (watchdog step-downs or remote selection)
   // between prop rebuilds; rebuilds pick the tier up at build time
   $effect(() => {
@@ -650,7 +660,7 @@
 </div>
 
 {#if !gameIsPaused && !stageIsLoading}
-  <PlayToolbar {tools} showFit={viewZoomed} onFit={resetView} />
+  <PlayToolbar {tools} templates={renderedProps.aoeTemplates?.templates ?? []} showFit={viewZoomed} onFit={resetView} />
 {/if}
 
 {#if tools.aoeMenu && tools.aoeSelectedIds.length}

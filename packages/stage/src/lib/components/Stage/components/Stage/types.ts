@@ -62,6 +62,8 @@ export interface Callbacks {
  */
 export interface StageInteractionProps {
   selectedMarkerIds?: string[];
+  /** Lights drawn as selected; without it the light layer highlights the light it last picked */
+  selectedLightIds?: string[];
   dropTargetMarkerId?: string | null;
   /** Combatant whose turn it is; draws the active-turn ring */
   activeTurnMarkerId?: string | null;
@@ -226,6 +228,10 @@ export interface StageExports {
   lights: {
     isHoveringLight: boolean;
     isDraggingLight: boolean;
+    /** The light under a layer-local point (see `markers.clientToPosition`) */
+    hitTest: (point: { x: number; y: number }) => string | null;
+    /** Lights whose center lies inside a layer-local rectangle */
+    inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) => string[];
   };
   aoeTemplates: AoeTemplateLayerExports;
   measurement: {

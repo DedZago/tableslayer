@@ -517,7 +517,9 @@ export const markerTable = sqliteTable(
     inCombat: integer('in_combat', { mode: 'boolean' }).notNull().default(false),
     initiative: real('initiative'),
     initiativeBonus: integer('initiative_bonus'),
-    initiativeTiebreak: real('initiative_tiebreak').notNull().default(0)
+    initiativeTiebreak: real('initiative_tiebreak').notNull().default(0),
+    // Tokens, lights and AoEs sharing a group move together; positions stay absolute
+    groupId: text('group_id')
   },
   (table) => [
     index('idx_marker_scene_id').on(table.sceneId),
@@ -652,7 +654,8 @@ export const lightTable = sqliteTable(
     color: text('color').notNull().default('#FFA500'), // Default lantern orange
     style: text('style', { enum: VALID_LIGHT_STYLES }).notNull().default('lantern'),
     pulse: integer('pulse').notNull().default(0), // 0=none, 1=slow, 2=medium, 3=fast
-    opacity: real('opacity').notNull().default(1.0) // 0.0 to 1.0
+    opacity: real('opacity').notNull().default(1.0), // 0.0 to 1.0
+    groupId: text('group_id') // Moves together with the rest of its group
   },
   (table) => [
     index('idx_light_scene_id').on(table.sceneId),
@@ -699,6 +702,7 @@ export const aoeTemplateTable = sqliteTable(
     visibility: integer('visibility').notNull().default(1), // StageMode enum (0=DM, 1=Player)
     label: text('label'),
     anchorMarkerId: text('anchor_marker_id'), // Reserved for token-anchored emanations
+    groupId: text('group_id'), // Moves together with the rest of its group
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .$defaultFn(() => new Date())

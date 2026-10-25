@@ -1,7 +1,13 @@
 import type * as Party from 'partykit/server';
 import { onConnect, unstable_getYDoc, type YPartyKitOptions } from 'y-partykit';
 import type * as Y from 'yjs';
-import { classifySceneEvents, getScenesMap, hydrateGameSessionDoc, isDocHydrated } from '../src/lib/realtime/docSchema';
+import {
+  classifySceneEvents,
+  getScenesMap,
+  hydrateGameSessionDoc,
+  isDocHydrated,
+  pruneRowFragments
+} from '../src/lib/realtime/docSchema';
 import type { ScenePart } from '../src/lib/realtime/types';
 import {
   hydrationDataFromWire,
@@ -97,6 +103,10 @@ export default class GameSessionServer implements Party.Server {
         hydrateGameSessionDoc(doc, hydrationDataFromWire(snapshot), HYDRATION_ORIGIN);
       }
     }
+
+    // Older clients could leave id-less row fragments that broke every read of their scene;
+    // drop them and re-save the scene, whose edits could not persist while the fragment was there
+    for (const sceneId of pruneRowFragments(doc, HYDRATION_ORIGIN)) this.#markDirty(sceneId, ALL_PARTS);
 
     return doc;
   }

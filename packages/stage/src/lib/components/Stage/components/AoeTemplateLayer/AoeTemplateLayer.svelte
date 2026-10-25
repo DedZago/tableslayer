@@ -70,6 +70,8 @@
   const TAP_SLOP_PX = 10;
   const LONG_PRESS_MS = 500;
   const LONG_PRESS_SLOP_PX = 12;
+  // A fingertip covers far more than a mouse pointer, so touch grabs handles from further away
+  const TOUCH_GRAB_SCALE = 2;
 
   type Interaction =
     | { kind: 'idle' }
@@ -84,6 +86,8 @@
   let edit: { patches: Record<string, Partial<AoeTemplate>> } | null = $state(null);
   let lastEmitAt = 0;
   let longPress: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
+  /** The shape just drawn keeps its handles until a press lands elsewhere, so it can be resized right away */
+  let justDrawnId = $state<string | null>(null);
 
   // Shared time for every fill; each template's uTime is this same object
   const sharedTime = { value: 0 };
@@ -104,6 +108,7 @@
   );
   const selectedIds = $derived(props.selectedIds ?? (props.selectedId ? [props.selectedId] : []));
   const selectedSet = $derived(new Set(selectedIds));
+  const hasHandles = (id: string) => selectedSet.has(id) || id === justDrawnId;
 
   const visibleTemplates = $derived(
     props.templates.filter((template) => mode === StageMode.DM || template.visibility !== StageMode.DM)
@@ -142,7 +147,8 @@
     return { x: snapped.x, y: snapped.y };
   };
 
-  const isNear = (a: TemplatePoint, b: TemplatePoint) => Math.hypot(a.x - b.x, a.y - b.y) <= handleRadius;
+  const isNear = (a: TemplatePoint, b: TemplatePoint, radius = handleRadius) =>
+    Math.hypot(a.x - b.x, a.y - b.y) <= radius;
 
   // Topmost first: later templates draw over earlier ones
   const findTemplatesAt = (point: TemplatePoint) =>
@@ -155,11 +161,11 @@
     else onAoeTemplateSelected?.(ids.at(-1) ?? null);
   };
 
-  // Tapping a stack of overlapping shapes walks down it, one shape per tap
+  // Tapping a stack of overlapping shapes walks down it, one shape per tap. A tap on the only
+  // selected shape is still reported, so the consumer can cycle through a group it belongs to
   const cycleSelection = (stack: string[]) => {
     const next = nextTemplateInStack(stack, props.selectedId);
-    if (!next || (selectedIds.length === 1 && selectedIds[0] === next)) return;
-    selectTemplates([next]);
+    if (next) selectTemplates([next]);
   };
 
   const updateDraft = (current: AoeTemplate, point: TemplatePoint, disableSnap: boolean): AoeTemplate => {
@@ -211,6 +217,7 @@
 
   const commitDraft = (template: AoeTemplate) => {
     onAoeTemplateAdded?.(template);
+    justDrawnId = template.id;
     interaction = { kind: 'idle' };
   };
 
@@ -234,22 +241,31 @@
     edit = { patches: {} };
   };
 
-  // Grabbing a selected shape's origin moves the selection; grabbing its far end resizes it
-  const grabHandle = (point: TemplatePoint): boolean => {
-    const handles = editedTemplates
-      .filter((template) => selectedSet.has(template.id))
-      .map((template) => ({ template, ...getTemplateHandlePoints(template, ftPerPx) }));
-    const grabbedOrigin = handles.find((handle) => isNear(point, handle.origin));
-    if (grabbedOrigin) {
-      startMove(grabbedOrigin.template, point);
-      return true;
-    }
-    const grabbedEnd = handles.find((handle) => isNear(point, handle.end));
-    if (grabbedEnd) {
-      startResize(grabbedEnd.template.id);
-      return true;
-    }
-    return false;
+  // TouchEvent is undefined in some desktop browsers, so `instanceof TouchEvent` can throw
+  const isTouchEvent = (e: MouseEvent | TouchEvent): e is TouchEvent => 'touches' in e;
+
+  // The closest origin or end handle of a shape that shows its handles
+  const findHandle = (point: TemplatePoint, isTouch: boolean) => {
+    const radius = isTouch ? handleRadius * TOUCH_GRAB_SCALE : handleRadius;
+    return editedTemplates
+      .filter((template) => hasHandles(template.id))
+      .flatMap((template) => {
+        const { origin, end } = getTemplateHandlePoints(template, ftPerPx);
+        return [
+          { template, kind: 'origin' as const, at: origin },
+          { template, kind: 'end' as const, at: end }
+        ];
+      })
+      .filter((handle) => isNear(point, handle.at, radius))
+      .sort(
+        (a, b) => Math.hypot(point.x - a.at.x, point.y - a.at.y) - Math.hypot(point.x - b.at.x, point.y - b.at.y)
+      )[0];
+  };
+
+  // Grabbing a shape's origin moves the selection; grabbing its far end resizes and rotates it
+  const startGrab = (handle: NonNullable<ReturnType<typeof findHandle>>, point: TemplatePoint) => {
+    if (handle.kind === 'origin') startMove(handle.template, point);
+    else startResize(handle.template.id);
   };
 
   const cancelLongPress = () => {
@@ -298,22 +314,33 @@
   const onMouseDown = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
     if (!coords) return;
     if (e instanceof MouseEvent && e.button !== 0) return;
-    if (e instanceof TouchEvent && e.touches.length !== 1) return;
+    if (isTouchEvent(e) && e.touches.length !== 1) return;
 
     const point = toLayerPoint(coords);
     const disableSnap = e instanceof MouseEvent && e.altKey;
 
     cancelLongPress();
 
+    const isTouch = isTouchEvent(e);
+    const handle = findHandle(point, isTouch);
+    if (!handle) justDrawnId = null;
+
     if (!isActive) {
-      if (grabHandle(point)) return;
+      if (handle) {
+        // A token under the handle wins, as with selection below
+        setTimeout(() => {
+          if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
+          startGrab(handle, point);
+        }, 0);
+        return;
+      }
 
       const stack = findTemplatesAt(point).map((template) => template.id);
       if (stack.length === 0) {
         if (props.playerSelectable && selectedIds.length > 0) selectTemplates([]);
         return;
       }
-      if (e instanceof TouchEvent) armLongPress(e, stack);
+      if (isTouchEvent(e)) armLongPress(e, stack);
       // A token or light under the same click wins; markers stamp the claim on their own mouse-down
       setTimeout(() => {
         if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
@@ -328,12 +355,15 @@
     }
     if (interaction.kind !== 'idle') return;
 
-    if (grabHandle(point)) return;
+    if (handle) {
+      startGrab(handle, point);
+      return;
+    }
 
     // Starts a new shape even on top of existing ones; a short tap instead selects the shape under it
     const stack = findTemplatesAt(point).map((template) => template.id);
     startDraft(point, disableSnap, stack);
-    if (e instanceof TouchEvent) armLongPress(e, stack);
+    if (isTouchEvent(e)) armLongPress(e, stack);
   };
 
   const onMouseMove = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
@@ -341,7 +371,7 @@
     const point = toLayerPoint(coords);
     const disableSnap = e instanceof MouseEvent && e.altKey;
 
-    if (longPress && e instanceof TouchEvent) {
+    if (longPress && isTouchEvent(e)) {
       const client = touchClientPoint(e);
       if (client && Math.hypot(client.x - longPress.x, client.y - longPress.y) > LONG_PRESS_SLOP_PX) cancelLongPress();
     }
@@ -418,6 +448,9 @@
           cycleSelection(tapStack);
         } else if (movedPx >= cellPx) {
           commitDraft(current);
+        } else if (isTouchEvent(e)) {
+          // Touch has no hover to aim with, so a short tap would leave a stranded ghost shape
+          interaction = { kind: 'idle' };
         } else {
           interaction = { kind: 'aiming', draft: current };
         }
@@ -442,6 +475,15 @@
   export const cancelDraft = () => {
     if (hasDraft()) interaction = { kind: 'idle' };
   };
+
+  // Leaving the tool drops any half-drawn shape so it can't follow later gestures
+  $effect(() => {
+    if (!isActive)
+      untrack(() => {
+        cancelDraft();
+        justDrawnId = null;
+      });
+  });
 
   const inputIsActive = $derived(isActive || (selectable && (mode === StageMode.DM || !!props.playerSelectable)));
 </script>
@@ -475,7 +517,7 @@
 {/each}
 
 {#each drawnTemplates as template (template.id)}
-  {#if mode === StageMode.DM || selectedSet.has(template.id) || draft?.id === template.id}
+  {#if mode === StageMode.DM || hasHandles(template.id) || draft?.id === template.id}
     <AoeTemplateHandles
       {template}
       {ftToPx}
@@ -484,7 +526,7 @@
       {localScale}
       {sceneRotation}
       {mapRotation}
-      isSelected={selectedSet.has(template.id)}
+      isSelected={hasHandles(template.id)}
       isDraft={draft?.id === template.id}
       showLabel={props.showLabels}
     />

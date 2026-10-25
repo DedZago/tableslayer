@@ -233,7 +233,8 @@ export const POST = async ({ request, locals }: RequestEvent) => {
             color: lightData.color,
             style: lightData.style,
             pulse: lightData.pulse,
-            opacity: lightData.opacity ?? 1
+            opacity: lightData.opacity ?? 1,
+            groupId: lightData.groupId ?? null
           };
 
           await db

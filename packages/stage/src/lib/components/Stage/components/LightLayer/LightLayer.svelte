@@ -25,7 +25,7 @@
 
   const { props, isActive, display, grid, localScale = 1 }: Props = $props();
 
-  const stage = getContext<{ mode: StageMode; markerClaimAt: number }>('stage');
+  const stage = getContext<{ mode: StageMode; markerClaimAt: number; selectedLightIds?: string[] }>('stage');
   const { onLightAdded, onLightMoved, onLightSelected } = getContext<Callbacks>('callbacks');
 
   const MARKER_CLAIM_WINDOW_MS = 100;
@@ -37,6 +37,22 @@
   let selectedLight: Light | null = $state(null);
   let isDragging = $state(false);
   let hoveredLight: Light | null = $state(null);
+  // A press on an already selected light reports it on release, unless the press became a drag
+  let pressedSelected: { light: Light; from: THREE.Vector2 } | null = null;
+  let dragMoved = false;
+
+  const isLightSelected = (light: Light) =>
+    stage.selectedLightIds ? stage.selectedLightIds.includes(light.id) : selectedLight?.id === light.id;
+
+  const pressLight = (light: Light) => {
+    selectedLight = light;
+    isDragging = true;
+    dragMoved = false;
+    pressedSelected = isLightSelected(light)
+      ? { light, from: new THREE.Vector2(light.position.x, light.position.y) }
+      : null;
+    if (!pressedSelected) onLightSelected?.(light);
+  };
 
   const ghostLight: Light = $state({
     id: uuidv4(),
@@ -95,14 +111,10 @@
       // Markers share this click; the marker layer stamps its claim during the same dispatch
       setTimeout(() => {
         if (performance.now() - stage.markerClaimAt < MARKER_CLAIM_WINDOW_MS) return;
-        selectedLight = closestLight;
-        isDragging = true;
-        onLightSelected?.(closestLight);
+        pressLight(closestLight);
       }, 0);
     } else if (closestLight !== undefined) {
-      selectedLight = closestLight;
-      isDragging = true;
-      onLightSelected?.(selectedLight);
+      pressLight(closestLight);
     } else {
       // In player mode, clicking empty space clears selection
       if (stage.mode === StageMode.Player) {
@@ -155,11 +167,14 @@
     }
 
     if (isDragging && selectedLight) {
+      if (pressedSelected && !snapPosition.equals(pressedSelected.from)) dragMoved = true;
       onLightMoved?.(selectedLight, snapPosition);
     }
   };
 
   const onMouseUp = () => {
+    if (pressedSelected && !dragMoved) onLightSelected?.(pressedSelected.light);
+    pressedSelected = null;
     if (isDragging && selectedLight) {
       isDragging = false;
     }
@@ -176,6 +191,20 @@
     selectedLight = null;
     isDragging = false;
     hoveredLight = null;
+    pressedSelected = null;
+  };
+
+  /** The light under a layer-local point */
+  export const hitTest = (point: { x: number; y: number }) =>
+    findClosestLight(new THREE.Vector2(point.x, point.y))?.id ?? null;
+
+  /** Lights whose center lies inside a layer-local rectangle */
+  export const inRectangle = (start: { x: number; y: number }, end: { x: number; y: number }) => {
+    const [minX, maxX] = [Math.min(start.x, end.x), Math.max(start.x, end.x)];
+    const [minY, maxY] = [Math.min(start.y, end.y), Math.max(start.y, end.y)];
+    return props.light.lights
+      .filter(({ position }) => position.x >= minX && position.x <= maxX && position.y >= minY && position.y <= maxY)
+      .map((light) => light.id);
   };
 
   // Export reactive state for hover and drag
@@ -220,7 +249,7 @@
       {grid}
       {display}
       opacity={1.0}
-      isSelected={selectedLight?.id === light.id}
+      isSelected={isLightSelected(light)}
       isHovered={hoveredLight?.id === light.id}
     />
   {/each}

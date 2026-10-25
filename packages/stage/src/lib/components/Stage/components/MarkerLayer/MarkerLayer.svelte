@@ -77,6 +77,7 @@
   // simple tap still does, and a tooltip already open before the drag survives it
   let tooltipWasOpenAtDown = false;
   let dragMoved = false;
+  let pressedSelected = false;
   let tooltipSuppressed = $state(false);
 
   function getClientPoint(e: Event): { x: number; y: number } | null {
@@ -188,9 +189,10 @@
         clearHoverTimer();
         listenForRelease();
       }
-      // A press on a group member keeps the selection until the press resolves:
-      // a click collapses it to the token, a drag moves the group
-      if (!groupDrag) {
+      // A press on a selected token keeps the selection until the press resolves:
+      // a click reports the token (collapsing or cycling the selection), a drag moves what is selected
+      pressedSelected = pendingDrag !== null && currentSelection().includes(closestMarker.id);
+      if (!pressedSelected) {
         onMarkerSelected(selectedMarker);
       }
       if (isDoubleClick) {
@@ -429,9 +431,10 @@
 
   function onMouseUp() {
     stopListeningForRelease();
-    if (groupDrag && !dragMoved && selectedMarker) {
+    if (pressedSelected && !dragMoved && selectedMarker) {
       onMarkerSelected(selectedMarker);
     }
+    pressedSelected = false;
     endGroupDrag(false);
     pendingDrag = null;
     dragStart = null;
@@ -488,6 +491,7 @@
     tooltipSuppressed = false;
     endGroupDrag(false);
     dragMoved = false;
+    pressedSelected = false;
     pendingDrag = null;
     dragStart = null;
     stopListeningForRelease();

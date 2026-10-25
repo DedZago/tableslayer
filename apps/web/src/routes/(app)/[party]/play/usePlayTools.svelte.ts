@@ -235,10 +235,21 @@ export class PlayTools {
     this.activeLayer = MapLayerType.AoeTemplate;
   }
 
+  // With shapes selected a swatch recolors only them; the tool keeps its effect for the next drawing
   setAoeEffect(effect: AoeEffect) {
+    if (this.aoeSelectedIds.length) {
+      this.setSelectedAoeEffect(effect);
+      return;
+    }
     this.aoeTool = { ...this.aoeTool, effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] };
     this.activeLayer = MapLayerType.AoeTemplate;
-    if (this.aoeSelectedIds.length) this.setSelectedAoeEffect(effect);
+  }
+
+  /** The effect the swatches act on: the selection's shared effect, else the tool's */
+  aoeSwatchEffect(templates: Array<{ id: string; effect: AoeEffect }>): AoeEffect | undefined {
+    if (!this.aoeSelectedIds.length) return this.aoeTool.effect;
+    const effects = new Set(templates.filter((t) => this.aoeSelectedIds.includes(t.id)).map((t) => t.effect));
+    return effects.size === 1 ? [...effects][0] : undefined;
   }
 
   /** Stage callback: a token was tapped; group select toggles it, distance mode makes it the origin. */
@@ -257,11 +268,14 @@ export class PlayTools {
     this.selectedMarkerIds = [...new Set([...this.selectedMarkerIds, ...ids])];
   }
 
-  /** Stage callbacks: AoE shapes drawn on this screen are written straight to the doc, like marker moves. */
+  /**
+   * Stage callbacks: AoE shapes drawn on this screen are written straight to the doc, like marker moves.
+   * A new shape is not auto-selected, so the toolbar swatches pick the next shape's effect
+   * instead of recoloring the last one; tap a shape to select and edit it.
+   */
   onAoeTemplateAdded = (template: AoeTemplate) => {
     const sceneId = this.#options.session.activeSceneId;
     if (!sceneId) return;
-    this.aoeSelectedIds = [template.id];
     this.#options.session.client?.write.upsertAoeTemplate(sceneId, aoeRowFromTemplate(sceneId, template));
   };
 

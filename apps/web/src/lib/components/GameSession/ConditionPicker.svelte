@@ -1,7 +1,14 @@
 <script lang="ts">
   import { Button, Icon, IconButton, Input } from '@tableslayer/ui';
   import { IconEyeOff, IconMinus, IconPlus, IconX } from '@tabler/icons-svelte';
-  import { MARKER_CONDITION_ORDER, resolveCondition, type MarkerCondition } from '@tableslayer/stage';
+  import {
+    conditionIdsInCategory,
+    MARKER_CONDITION_CATEGORIES,
+    resolveCondition,
+    type MarkerCondition
+  } from '@tableslayer/stage';
+  import { CONDITION_CATEGORY_ICONS, conditionIcon } from '$lib/utils/conditionIcons';
+  import { CUSTOM_CONDITION_COLORS } from '$lib/utils/markerConditionPicker';
 
   let {
     active,
@@ -24,14 +31,13 @@
   } = $props();
 
   const EXHAUSTION_MAX = 6;
-  const CUSTOM_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7', '#ec4899'];
-  const catalogIdsInGroup = (group: 'condition' | 'combat') =>
-    MARKER_CONDITION_ORDER.filter((id) => resolveCondition({ id }).group === group);
-  const conditionIds = catalogIdsInGroup('condition');
-  const combatIds = catalogIdsInGroup('combat');
+  const catalogCategories = MARKER_CONDITION_CATEGORIES.flatMap((category) =>
+    category.id === 'custom' ? [] : [{ ...category, ids: conditionIdsInCategory(category.id) }]
+  );
+  const customCategory = MARKER_CONDITION_CATEGORIES.find((category) => category.id === 'custom')!;
 
   let customLabel = $state('');
-  let customColor = $state(CUSTOM_COLORS[0]);
+  let customColor = $state(CUSTOM_CONDITION_COLORS[0]);
 
   const activeById = $derived(new Map(active.map((condition) => [condition.id, condition])));
   const exhaustion = $derived(activeById.get('exhaustion'));
@@ -41,7 +47,7 @@
   const customConditions = $derived.by(() => {
     const seen = new Set<string>();
     return [...active, ...customSuggestions].filter((condition) => {
-      if (resolveCondition(condition).group !== 'custom' || seen.has(condition.id)) return false;
+      if (resolveCondition(condition).category !== 'custom' || seen.has(condition.id)) return false;
       seen.add(condition.id);
       return true;
     });
@@ -59,6 +65,13 @@
     addCustomCondition();
   };
 </script>
+
+{#snippet categoryTitle(category: (typeof MARKER_CONDITION_CATEGORIES)[number])}
+  <div class="conditionPicker__groupTitle" style:--conditionColor={category.color} title={category.description}>
+    <Icon Icon={CONDITION_CATEGORY_ICONS[category.id]} size="0.875rem" />
+    {category.label}
+  </div>
+{/snippet}
 
 {#snippet chip(condition: MarkerCondition)}
   {@const info = resolveCondition(condition)}
@@ -80,9 +93,9 @@
       title={isAutomatic ? `${info.description} Set automatically from hit points.` : info.description}
       onclick={() => onToggle(condition)}
     >
-      <span class="conditionPicker__swatch"></span>
+      <span class="conditionPicker__icon"><Icon Icon={conditionIcon(condition.id)} size="0.875rem" /></span>
       <span class="conditionPicker__label">{info.label}</span>
-      {#if isActive && info.group === 'custom'}
+      {#if isActive && info.category === 'custom'}
         <Icon Icon={IconX} size="0.75rem" />
       {/if}
     </button>
@@ -106,44 +119,39 @@
     <Button variant="ghost" size="sm" isDisabled={!hasAnyCondition} onclick={onClear}>Clear</Button>
   </div>
 
-  <div class="conditionPicker__chips">
-    {#each conditionIds as id (id)}
-      {@render chip({ id })}
-    {/each}
-  </div>
-
-  {#if exhaustion}
-    <div class="conditionPicker__exhaustion">
-      <span class="conditionPicker__groupTitle">Exhaustion</span>
-      <IconButton
-        variant="ghost"
-        size="sm"
-        aria-label="Decrease exhaustion"
-        onclick={() => onStepValue('exhaustion', -1)}
-      >
-        <Icon Icon={IconMinus} size="0.875rem" />
-      </IconButton>
-      <span class="conditionPicker__level">{exhaustionLevel ?? 'Mixed'}</span>
-      <IconButton
-        variant="ghost"
-        size="sm"
-        aria-label="Increase exhaustion"
-        disabled={exhaustionLevel !== undefined && exhaustionLevel >= EXHAUSTION_MAX}
-        onclick={() => onStepValue('exhaustion', 1)}
-      >
-        <Icon Icon={IconPlus} size="0.875rem" />
-      </IconButton>
+  {#each catalogCategories as category (category.id)}
+    {@render categoryTitle(category)}
+    <div class="conditionPicker__chips">
+      {#each category.ids as id (id)}
+        {@render chip({ id })}
+      {/each}
     </div>
-  {/if}
+    {#if category.id === 'debuffs' && exhaustion}
+      <div class="conditionPicker__exhaustion">
+        <span class="conditionPicker__levelLabel">Exhaustion level</span>
+        <IconButton
+          variant="ghost"
+          size="sm"
+          aria-label="Decrease exhaustion"
+          onclick={() => onStepValue('exhaustion', -1)}
+        >
+          <Icon Icon={IconMinus} size="0.875rem" />
+        </IconButton>
+        <span class="conditionPicker__level">{exhaustionLevel ?? 'Mixed'}</span>
+        <IconButton
+          variant="ghost"
+          size="sm"
+          aria-label="Increase exhaustion"
+          disabled={exhaustionLevel !== undefined && exhaustionLevel >= EXHAUSTION_MAX}
+          onclick={() => onStepValue('exhaustion', 1)}
+        >
+          <Icon Icon={IconPlus} size="0.875rem" />
+        </IconButton>
+      </div>
+    {/if}
+  {/each}
 
-  <div class="conditionPicker__groupTitle">Combat</div>
-  <div class="conditionPicker__chips">
-    {#each combatIds as id (id)}
-      {@render chip({ id })}
-    {/each}
-  </div>
-
-  <div class="conditionPicker__groupTitle">Custom</div>
+  {@render categoryTitle(customCategory)}
   <div class="conditionPicker__chips">
     {#each customConditions as condition (condition.id)}
       {@render chip(condition)}
@@ -155,7 +163,7 @@
       <Input maxlength={24} placeholder="Name" aria-label="Custom condition name" bind:value={customLabel} />
     </div>
     <div class="conditionPicker__customColor" role="radiogroup" aria-label="Custom condition color">
-      {#each CUSTOM_COLORS as color}
+      {#each CUSTOM_CONDITION_COLORS as color}
         <button
           type="button"
           role="radio"
@@ -192,6 +200,10 @@
   }
 
   .conditionPicker__groupTitle {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-top: 0.25rem;
     font-size: 0.75rem;
     color: var(--fgMuted);
     text-transform: uppercase;
@@ -247,11 +259,13 @@
     font-style: italic;
   }
 
-  .conditionPicker__swatch {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    background: var(--conditionColor);
+  .conditionPicker__groupTitle :global(svg) {
+    color: var(--conditionColor);
+  }
+
+  .conditionPicker__icon {
+    display: inline-flex;
+    color: var(--conditionColor);
     flex-shrink: 0;
   }
 
@@ -283,6 +297,11 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  .conditionPicker__levelLabel {
+    font-size: 0.75rem;
+    color: var(--fgMuted);
   }
 
   .conditionPicker__level {

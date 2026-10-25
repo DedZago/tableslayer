@@ -27,9 +27,9 @@
     type StageProps
   } from '@tableslayer/stage';
   import { PersistButton } from '@tableslayer/ui';
-  import { IconArrowBackUp } from '@tabler/icons-svelte';
+  import { IconArrowBackUp, IconX } from '@tabler/icons-svelte';
   import { onMount, untrack } from 'svelte';
-  import AoeTemplateContextPanel from '$lib/components/GameSession/AoeTemplateContextPanel.svelte';
+  import TvConditionForm from './TvConditionForm.svelte';
   import PauseOverlay from './PauseOverlay.svelte';
   import PlayToolbar from './PlayToolbar.svelte';
   import SleepOverlay from './SleepOverlay.svelte';
@@ -67,7 +67,9 @@
         userId: data.user.id,
         getStage: () => stage,
         routes: () => sceneRoutes,
-        defaultSessionFilter: () => session.gameSessionId
+        defaultSessionFilter: () => session.gameSessionId,
+        canFit: () => viewZoomed,
+        onFit: () => resetView()
       })
   );
 
@@ -419,7 +421,7 @@
     tools.activeLayer = MapLayerType.None;
   }
 
-  // Players have no marker context menu; the callback is required by the stage
+  // Right-click is handled by the gesture detector, which opens the menu for whatever is under the pointer
   function onMarkerContextMenu() {}
 
   // Double-tap (or right-click) on a fog room toggles it, mirroring the
@@ -454,12 +456,67 @@
   // Radial menu + touch affordances
   // ---------------------------------------------------------------------------
 
-  let menuVisible = $state(false);
-  let menuPosition = $state({ x: 0, y: 0 });
   let showTouchHint = $state(false);
   let isTouchDevice = $state(false);
 
-  // Group select: dragging on empty space draws a rectangle that adds the tokens inside it
+  // Tokens and shapes have their own press handling (drag, long press); empty map is ours
+  const pressHitsItem = (point: { x: number; y: number }) => {
+    if (!stage) return false;
+    if (stage.markers.hitTest(point)) return true;
+    const layerPoint = stage.markers.clientToPosition(point);
+    return !!layerPoint && !!stage.aoeTemplates.hitTest(layerPoint);
+  };
+
+  // A still, one-finger hold on empty map opens the general menu (tokens and shapes report their own)
+  onMount(() => {
+    const element = stageElement;
+    const LONG_PRESS_MS = 500;
+    const LONG_PRESS_SLOP_PX = 12;
+    let press: { x: number; y: number; pointerId: number; timer: ReturnType<typeof setTimeout> } | null = null;
+
+    const cancel = () => {
+      if (press) clearTimeout(press.timer);
+      press = null;
+    };
+    const down = (event: PointerEvent) => {
+      cancel();
+      if (!event.isPrimary || event.button !== 0 || !(event.target instanceof HTMLCanvasElement)) return;
+      if (tools.activeLayer !== MapLayerType.None || tools.menu) return;
+      const point = { x: event.clientX, y: event.clientY };
+      if (pressHitsItem(point)) return;
+      press = { ...point, pointerId: event.pointerId, timer: setTimeout(() => tools.openMenuAt(point), LONG_PRESS_MS) };
+    };
+    const move = (event: PointerEvent) => {
+      if (!press) return;
+      if (!event.isPrimary || Math.hypot(event.clientX - press.x, event.clientY - press.y) > LONG_PRESS_SLOP_PX) {
+        cancel();
+      }
+    };
+
+    element?.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', cancel, true);
+    window.addEventListener('pointercancel', cancel, true);
+    return () => {
+      cancel();
+      element?.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', cancel, true);
+      window.removeEventListener('pointercancel', cancel, true);
+    };
+  });
+
+  // The menu closes with the scene it was opened on, on pause, and when its token or shape is deleted
+  $effect(() => {
+    void session.activeSceneId;
+    if (gameIsPaused) untrack(() => tools.closeMenu());
+    return () => untrack(() => tools.closeMenu());
+  });
+  $effect(() => {
+    if (tools.menuTargetGone) untrack(() => tools.closeMenu());
+  });
+
+  // Group select: dragging on empty space draws a rectangle that adds the tokens and shapes inside it
   let selectionRectangle = $state<{ x: number; y: number; width: number; height: number } | null>(null);
 
   onMount(() => {
@@ -473,7 +530,7 @@
     };
     const down = (event: PointerEvent) => {
       if (!tools.groupSelect || !event.isPrimary || !(event.target instanceof HTMLCanvasElement)) return;
-      if (stage?.markers.hitTest({ x: event.clientX, y: event.clientY })) return;
+      if (pressHitsItem({ x: event.clientX, y: event.clientY })) return;
       start = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     };
     const move = (event: PointerEvent) => {
@@ -491,7 +548,16 @@
     };
     const up = (event: PointerEvent) => {
       if (start && selectionRectangle && stage) {
-        tools.selectMarkers(stage.markers.inRectangle(start, { x: event.clientX, y: event.clientY }));
+        const end = { x: event.clientX, y: event.clientY };
+        const layerStart = stage.markers.clientToPosition(start);
+        const layerEnd = stage.markers.clientToPosition(end);
+        tools.selectMembers([
+          ...stage.markers.inRectangle(start, end).map((id) => ({ collection: 'markers' as const, id })),
+          ...(layerStart && layerEnd ? stage.aoeTemplates.inRectangle(layerStart, layerEnd) : []).map((id) => ({
+            collection: 'aoeTemplates' as const,
+            id
+          }))
+        ]);
       }
       reset();
     };
@@ -512,10 +578,7 @@
     stagePerformance.init();
 
     const gestureDetector = stageElement
-      ? createUnifiedGestureDetector((position) => {
-          menuVisible = true;
-          menuPosition = position;
-        }, stageElement)
+      ? createUnifiedGestureDetector((position) => tools.openMenuAt(position), stageElement)
       : null;
 
     const pinchGesture = stageElement ? createPinchGesture({ target: stageElement, onPinch }) : null;
@@ -622,14 +685,15 @@
       onMarkerMoved,
       onMarkerSelected: tools.onMarkerSelected,
       onMarkerContextMenu,
+      onMarkerLongPress: (marker, position) => tools.openTokenMenu(marker.id, position),
       onMarkerHover: () => {},
       onMeasurementStart,
       onMeasurementUpdate,
       onMeasurementEnd,
       onAoeTemplateAdded: tools.onAoeTemplateAdded,
       onAoeTemplateUpdated: tools.onAoeTemplateUpdated,
-      onAoeTemplateSelected: (id) => (tools.aoeSelectedIds = id ? [id] : []),
-      onAoeTemplatesSelected: (ids) => (tools.aoeSelectedIds = ids),
+      onAoeTemplateSelected: (id) => tools.onAoeTemplatesSelected(id ? [id] : []),
+      onAoeTemplatesSelected: tools.onAoeTemplatesSelected,
       onAoeTemplateDeleted: tools.onAoeTemplateDeleted,
       onAoeTemplateMenu: tools.onAoeTemplateMenu
     }}
@@ -663,43 +727,38 @@
   <PlayToolbar {tools} templates={renderedProps.aoeTemplates?.templates ?? []} showFit={viewZoomed} onFit={resetView} />
 {/if}
 
-{#if tools.aoeMenu && tools.aoeSelectedIds.length}
-  {@const menuTemplates = (renderedProps.aoeTemplates?.templates ?? []).filter((t) =>
-    tools.aoeSelectedIds.includes(t.id)
-  )}
-  {#if menuTemplates.length}
-    <AoeTemplateContextPanel
-      targetCount={menuTemplates.length}
-      position={tools.aoeMenu}
-      currentEffect={menuTemplates.every((t) => t.effect === menuTemplates[0].effect)
-        ? menuTemplates[0].effect
-        : undefined}
-      opacity={menuTemplates.every((t) => t.opacity === menuTemplates[0].opacity)
-        ? menuTemplates[0].opacity
-        : undefined}
-      onEffectChange={(effect) => tools.setSelectedAoeEffect(effect)}
-      onOpacityChange={(opacity) => tools.setSelectedAoeOpacity(opacity)}
-      onDelete={() => tools.deleteSelectedAoeTemplates()}
-      onClose={() => (tools.aoeMenu = null)}
-    />
-  {/if}
+{#if tools.notice}
+  <div class="playNotice" role="status">{tools.notice}</div>
+{/if}
+
+{#if tools.conditionForm}
+  <TvConditionForm
+    position={tools.conditionForm}
+    onAdd={(label, color) => tools.addCustomCondition(label, color)}
+    onCancel={() => (tools.conditionForm = null)}
+  />
 {/if}
 
 {#if isTouchDevice && showTouchHint && !gameIsPaused}
   <div class="touchHint" class:touchHint--hidden={!showTouchHint}>
-    <span>Press and hold with two fingers to bring up menu</span>
+    <span>Press and hold the map, a token or an area to open its menu</span>
   </div>
 {/if}
 
 <RadialMenu
-  visible={menuVisible}
-  position={menuPosition}
+  visible={tools.menu !== null}
+  position={{ x: tools.menu?.x ?? 0, y: tools.menu?.y ?? 0 }}
   items={tools.menuItems}
+  title={tools.menuTitle}
+  subtitle="Hold an option to read about it"
   backIcon={IconArrowBackUp}
+  closeIcon={IconX}
+  autoCloseMs={15000}
   onItemSelect={(itemId) => tools.selectMenuItem(itemId)}
-  onClose={() => (menuVisible = false)}
-  onReposition={(pos) => {
-    menuPosition = pos;
+  onClose={() => tools.closeMenu()}
+  onReposition={(point) => {
+    tools.closeMenu();
+    tools.openMenuAt(point);
   }}
 />
 
@@ -739,6 +798,23 @@
     pointer-events: none;
     background: color-mix(in srgb, var(--fgPrimary) 20%, transparent);
     border: 1px dashed var(--fgPrimary);
+  }
+
+  .playNotice {
+    position: fixed;
+    top: 1.5rem;
+    left: 50%;
+    z-index: 1001;
+    max-width: min(32rem, calc(100vw - 2rem));
+    padding: 0.75rem 1.25rem;
+    transform: translateX(-50%);
+    font-size: 1.125rem;
+    text-align: center;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    border: 1px solid var(--fgMuted);
+    border-radius: 0.75rem;
+    pointer-events: none;
   }
 
   .touchHint {

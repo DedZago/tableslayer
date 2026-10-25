@@ -99,13 +99,16 @@ export {
 } from './helpers/mapSpace';
 export {
   MARKER_CONDITIONS,
+  MARKER_CONDITION_CATEGORIES,
   MARKER_CONDITION_ORDER,
+  conditionIdsInCategory,
   conditionsKey,
   resolveCondition,
   sortConditions,
   toggleCondition,
+  type ConditionCategory,
+  type ConditionCategoryDefinition,
   type ConditionDefinition,
-  type ConditionGroup,
   type ResolvedCondition
 } from './helpers/markerConditions';
 export {

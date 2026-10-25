@@ -114,7 +114,7 @@
   import { stagePerformance } from '$lib/stores';
   import { getLatestMeasurement } from '$lib/utils/measurements';
   import { throttle } from '$lib/utils/throttle';
-  import { conditionPickerState, stepConditionValue } from '$lib/utils/markerConditionPicker';
+  import { conditionPickerState } from '$lib/utils/markerConditionPicker';
   import {
     AOE_EFFECT_DEFAULT_COLORS,
     AnnotationEffect,
@@ -133,7 +133,7 @@
     StageMode,
     ToolType,
     type AnnotationLayerData,
-    sortConditions,
+    MARKER_CONDITIONS,
     type HoveredMarker,
     type Light,
     type Marker,
@@ -1397,8 +1397,6 @@
   const markerRowFor = (markerId: string) =>
     session.client?.scene(selectedSceneId)?.markers.find((row) => row.id === markerId);
 
-  const storedConditionsOf = (markerId: string): MarkerCondition[] => markerRowFor(markerId)?.conditions ?? [];
-
   const customConditionSuggestions = $derived.by(() => {
     const byId = new Map<string, MarkerCondition>();
     for (const marker of stageProps.marker.markers) {
@@ -1409,45 +1407,34 @@
     return [...byId.values()];
   });
 
-  const writeMarkerConditions = (targetIds: string[], update: (stored: MarkerCondition[]) => MarkerCondition[]) => {
+  // Each edit touches one condition per token in one undo step, so it merges with TV edits
+  const writeMarkerConditions = (write: (writer: NonNullable<typeof session.client>['write']) => void) => {
     const client = session.client;
     if (!client) return;
-    const updates = targetIds.map((id) => ({ id, conditions: update(storedConditionsOf(id)) }));
-    for (const { id, conditions } of updates) {
-      const marker = stageProps.marker.markers.find((m) => m.id === id);
-      if (marker) marker.conditions = conditions;
-    }
     client.stopCapturing();
-    client.write.transaction(() => {
-      for (const { id, conditions } of updates) client.write.setMarkerFields(selectedSceneId, id, { conditions });
-    });
+    write(client.write);
     client.stopCapturing();
   };
 
-  const toggleConditionOn = (targetIds: string[], condition: MarkerCondition) => {
-    const allHave = targetIds.every((id) => storedConditionsOf(id).some((c) => c.id === condition.id));
-    const incoming: MarkerCondition =
-      condition.id === 'exhaustion' ? { id: condition.id, value: condition.value ?? 1 } : { ...condition };
-    writeMarkerConditions(targetIds, (stored) => {
-      const present = stored.some((c) => c.id === condition.id);
-      if (allHave) return sortConditions(stored.filter((c) => c.id !== condition.id));
-      return present ? stored : sortConditions([...stored, incoming]);
-    });
-  };
-
-  const stepConditionValueOn = (targetIds: string[], id: string, delta: number) =>
-    writeMarkerConditions(targetIds, (stored) => stepConditionValue(stored, id, delta));
-
-  const toggleConditionDmOnly = (targetIds: string[], id: string) =>
-    writeMarkerConditions(targetIds, (stored) =>
-      stored.map((c) => {
-        if (c.id !== id) return c;
-        const { dmOnly, ...rest } = c;
-        return dmOnly ? rest : { ...rest, dmOnly: true };
-      })
+  const toggleConditionOn = (targetIds: string[], condition: MarkerCondition) =>
+    writeMarkerConditions((write) =>
+      write.toggleMarkerCondition(
+        selectedSceneId,
+        targetIds,
+        condition.id === 'exhaustion' ? { id: condition.id, value: condition.value ?? 1 } : condition
+      )
     );
 
-  const clearConditions = (targetIds: string[]) => writeMarkerConditions(targetIds, () => []);
+  const stepConditionValueOn = (targetIds: string[], id: string, delta: number) =>
+    writeMarkerConditions((write) =>
+      write.stepMarkerConditionValue(selectedSceneId, targetIds, id, delta, MARKER_CONDITIONS[id]?.maxValue ?? 1)
+    );
+
+  const toggleConditionDmOnly = (targetIds: string[], id: string) =>
+    writeMarkerConditions((write) => write.toggleMarkerConditionDmOnly(selectedSceneId, targetIds, id));
+
+  const clearConditions = (targetIds: string[]) =>
+    writeMarkerConditions((write) => write.clearMarkerConditions(selectedSceneId, targetIds));
 
   const conditionPickerFor = (targetIds: string[]): ComponentProps<typeof TokenContextPanel>['conditions'] => {
     // Stored rows, not stageProps: stage markers carry the derived Bloodied, which is never written

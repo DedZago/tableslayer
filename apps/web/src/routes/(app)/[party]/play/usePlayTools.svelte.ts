@@ -1,21 +1,15 @@
-import { base64ToUint8, uint8ToBase64, type AnnotationRow } from '$lib/realtime';
+import { base64ToUint8, uint8ToBase64, type AnnotationRow, type MarkerRow } from '$lib/realtime';
 import { aoeFieldsFromPatch, aoeRowFromTemplate } from '$lib/utils/aoeTemplateRows';
-import { devError, devLog } from '$lib/utils/debug';
 import {
-  IconCircle,
-  IconCone2,
-  IconLine,
-  IconMap,
-  IconPaint,
-  IconPaintFilled,
-  IconPencil,
-  IconRectangleVertical,
-  IconRestore,
-  IconRuler,
-  IconShadow,
-  IconSquare,
-  IconTrash
-} from '@tabler/icons-svelte';
+  expandToGroups,
+  groupIdOf,
+  groupMembers,
+  planGroupToggle,
+  toggleGroupInSelection,
+  type GroupedRows,
+  type GroupMember
+} from '$lib/utils/assetGroups';
+import { devError, devLog } from '$lib/utils/debug';
 import {
   AnnotationEffect,
   AOE_EFFECT_DEFAULT_COLORS,
@@ -25,42 +19,37 @@ import {
   getDefaultEffectProps,
   MapLayerType,
   MeasurementType,
+  resolveCondition,
   StageMode,
   type AnnotationLayerData,
   type AoeTemplate,
   type AoeToolSettings,
   type Marker,
+  type MarkerCondition,
   type RadialMenuItemProps,
   type StageExports
 } from '@tableslayer/stage';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  aoeMenu,
+  DRAW_COLORS,
+  generalMenu,
+  groupItems,
+  MENU_ID,
+  menuMembers,
+  tokenMenu,
+  type MenuTarget
+} from './playMenus';
 import type { PlaySession, SessionRoute } from './usePlaySession.svelte';
-
-const DRAW_COLORS: Record<string, string> = {
-  'draw-red': '#d73e2e',
-  'draw-orange': '#ffa500',
-  'draw-yellow': '#ffd93d',
-  'draw-green': '#6bcf7f',
-  'draw-blue': '#2e86ab',
-  'draw-purple': '#b197fc'
-};
-
-const DRAW_EFFECTS: Record<string, AnnotationEffect> = {
-  'effect-fire': AnnotationEffect.Fire,
-  'effect-water': AnnotationEffect.Water,
-  'effect-ice': AnnotationEffect.Ice,
-  'effect-magic': AnnotationEffect.Magic,
-  'effect-grease': AnnotationEffect.Grease,
-  'effect-spacetear': AnnotationEffect.SpaceTear,
-  'effect-web': AnnotationEffect.Web,
-  'effect-entangle': AnnotationEffect.Entangle
-};
 
 // Fog brush size in grid units (number of grid squares the brush spans)
 const PLAYFIELD_FOG_BRUSH_SIZE = 2;
 const FOG_COMMIT_DEBOUNCE_MS = 500;
 const DRAWING_IDLE_RESET_MS = 3000;
 const PERSIST_BUTTON_HIDE_MS = 3000;
+const NOTICE_MS = 2500;
+// Touchscreens may report a long press as both a hold and a contextmenu; the second open is ignored
+const MENU_REOPEN_GUARD_MS = 600;
 
 export interface PlayToolsOptions {
   session: PlaySession;
@@ -68,6 +57,8 @@ export interface PlayToolsOptions {
   getStage: () => StageExports | undefined;
   routes: () => SessionRoute[];
   defaultSessionFilter: () => string | undefined;
+  canFit: () => boolean;
+  onFit: () => void;
 }
 
 /**
@@ -83,19 +74,24 @@ export class PlayTools {
   fogTool = $state<{ mode: DrawMode; size: number }>({ mode: DrawMode.Erase, size: PLAYFIELD_FOG_BRUSH_SIZE });
   measurement = $state<{ type: number; coneAngle?: number; beamWidth?: number }>({ type: MeasurementType.Line });
 
-  // Touch toolbar modes (local-only): token group selection, token-to-token distances, AoE templates
+  // Touch toolbar modes (local-only): multi-select, token-to-token distances, AoE templates
   groupSelect = $state(false);
   distanceMode = $state(false);
-  selectedMarkerIds = $state<string[]>([]);
+  /** Selected tokens and AoEs (plus lights that came along with a group, which the TV can't pick alone) */
+  selection = $state<GroupMember[]>([]);
   aoeTool = $state<Partial<AoeToolSettings>>({
     shape: AoeShape.Circle,
     effect: AoeEffect.Fire,
     color: AOE_EFFECT_DEFAULT_COLORS[AoeEffect.Fire],
     visibility: StageMode.Player
   });
-  aoeSelectedIds = $state<string[]>([]);
-  /** Long-press menu for the selected shapes; the TV is a touchscreen, so right-click keeps opening the radial menu */
-  aoeMenu = $state<{ x: number; y: number } | null>(null);
+
+  /** The radial menu and what it acts on */
+  menu = $state<{ target: MenuTarget; x: number; y: number } | null>(null);
+  /** The custom condition form, opened from the menu's "New…" */
+  conditionForm = $state<{ x: number; y: number; markerIds: string[] } | null>(null);
+  /** Short feedback line ("Grouped 3 items") */
+  notice = $state<string | null>(null);
 
   // Temporary drawing state
   currentTemporaryLayerId = $state<string | null>(null);
@@ -106,6 +102,8 @@ export class PlayTools {
   persistButtonPosition = $state({ x: 0, y: 0 });
 
   #options: PlayToolsOptions;
+  #menuOpenedAt = 0;
+  #noticeTimer: ReturnType<typeof setTimeout> | null = null;
   #persistButtonLayerId: string | null = null;
   #pendingPersistPosition: { x: number; y: number } | null = null;
   #persistButtonTimer: ReturnType<typeof setTimeout> | null = null;
@@ -172,40 +170,158 @@ export class PlayTools {
       }));
   }
 
-  get menuItems(): RadialMenuItemProps[] {
-    return [
-      {
-        id: 'measure',
-        label: '',
-        icon: IconRuler,
-        submenu: [
-          { id: 'measure-line', label: '', icon: IconLine },
-          { id: 'measure-circle', label: '', icon: IconCircle },
-          { id: 'measure-square', label: '', icon: IconSquare },
-          {
-            id: 'measure-cone',
-            label: '',
-            icon: IconCone2,
-            submenu: [
-              { id: 'measure-cone-30', label: '30°' },
-              { id: 'measure-cone-60', label: '60°' },
-              { id: 'measure-cone-90', label: '90°' }
-            ]
-          },
-          {
-            id: 'measure-beam',
-            label: '',
-            icon: IconRectangleVertical,
-            submenu: [
-              { id: 'measure-beam-5', label: '5 ft' },
-              { id: 'measure-beam-10', label: '10 ft' },
-              { id: 'measure-beam-15', label: '15 ft' },
-              { id: 'measure-beam-20', label: '20 ft' }
-            ]
-          }
-        ]
-      }
+  get selectedMarkerIds(): string[] {
+    return this.#selectedIn('markers');
+  }
+
+  set selectedMarkerIds(ids: string[]) {
+    this.#replaceSelected('markers', ids);
+  }
+
+  get aoeSelectedIds(): string[] {
+    return this.#selectedIn('aoeTemplates');
+  }
+
+  set aoeSelectedIds(ids: string[]) {
+    this.#replaceSelected('aoeTemplates', ids);
+  }
+
+  #selectedIn(collection: GroupMember['collection']) {
+    return this.selection.filter((member) => member.collection === collection).map((member) => member.id);
+  }
+
+  #replaceSelected(collection: GroupMember['collection'], ids: string[]) {
+    this.selection = [
+      ...this.selection.filter((member) => member.collection !== collection),
+      ...ids.map((id) => ({ collection, id }))
     ];
+  }
+
+  #rows(): GroupedRows {
+    const scene = this.#options.session.activeScene;
+    return { markers: scene?.markers ?? [], lights: scene?.lights ?? [], aoeTemplates: scene?.aoeTemplates ?? [] };
+  }
+
+  #markerRows(ids: string[]): MarkerRow[] {
+    return (this.#options.session.activeScene?.markers ?? []).filter((marker) => ids.includes(marker.id));
+  }
+
+  /** Custom conditions players can see somewhere in the scene, offered for reuse */
+  #customSuggestions(): MarkerCondition[] {
+    const byId = new Map<string, MarkerCondition>();
+    for (const marker of this.#options.session.activeScene?.markers ?? []) {
+      for (const condition of marker.conditions ?? []) {
+        if (!condition.dmOnly && condition.id.startsWith('custom:') && !byId.has(condition.id)) {
+          byId.set(condition.id, condition);
+        }
+      }
+    }
+    return [...byId.values()];
+  }
+
+  #say(text: string) {
+    this.notice = text;
+    if (this.#noticeTimer) clearTimeout(this.#noticeTimer);
+    this.#noticeTimer = setTimeout(() => (this.notice = null), NOTICE_MS);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Radial menu
+  // ---------------------------------------------------------------------------
+
+  /** Opens the menu for whatever is under a client point: a token, an AoE, or the map */
+  openMenuAt(point: { x: number; y: number }) {
+    const stage = this.#options.getStage();
+    const markerId = stage?.markers.hitTest(point);
+    if (markerId) return this.openTokenMenu(markerId, point);
+    const layerPoint = stage?.markers.clientToPosition(point);
+    const aoeId = layerPoint ? stage?.aoeTemplates.hitTest(layerPoint) : null;
+    if (aoeId) return this.openAoeMenu(aoeId, point);
+    this.#openMenu({ kind: 'general' }, point);
+  }
+
+  openTokenMenu(markerId: string, point: { x: number; y: number }) {
+    const pressed: GroupMember = { collection: 'markers', id: markerId };
+    const members = this.groupSelect ? menuMembers(pressed, this.selection) : [pressed];
+    this.#openMenu({ kind: 'token', markerId, members }, point);
+  }
+
+  openAoeMenu(aoeId: string, point: { x: number; y: number }) {
+    const pressed: GroupMember = { collection: 'aoeTemplates', id: aoeId };
+    const members = this.groupSelect ? menuMembers(pressed, this.selection) : [pressed];
+    this.#openMenu({ kind: 'aoe', aoeId, members }, point);
+  }
+
+  #openMenu(target: MenuTarget, point: { x: number; y: number }) {
+    if (this.menu && performance.now() - this.#menuOpenedAt < MENU_REOPEN_GUARD_MS) return;
+    this.#menuOpenedAt = performance.now();
+    this.conditionForm = null;
+    this.menu = { target, ...point };
+  }
+
+  closeMenu() {
+    this.menu = null;
+  }
+
+  #menuIds(collection: GroupMember['collection']): string[] {
+    const target = this.menu?.target;
+    if (!target || target.kind === 'general') return [];
+    return target.members.filter((member) => member.collection === collection).map((member) => member.id);
+  }
+
+  get menuItems(): RadialMenuItemProps[] {
+    const target = this.menu?.target;
+    if (!target) return [];
+    if (target.kind === 'general') {
+      return generalMenu({
+        canUndo: this.canUndo,
+        canRedo: this.canRedo,
+        canFit: this.#options.canFit(),
+        groupSelect: this.groupSelect,
+        distanceMode: this.distanceMode,
+        selectionCount: this.selection.length
+      });
+    }
+    const rows = this.#rows();
+    const groups = groupItems(rows, target.members);
+    if (target.kind === 'token') {
+      return tokenMenu({
+        markers: this.#markerRows(this.#menuIds('markers')),
+        customSuggestions: this.#customSuggestions(),
+        groupItems: groups,
+        selectionCount: this.selection.length
+      });
+    }
+    const aoeIds = this.#menuIds('aoeTemplates');
+    const templates = (this.#options.session.activeScene?.aoeTemplates ?? []).filter((template) =>
+      aoeIds.includes(template.id)
+    );
+    const shared = <T>(values: T[]) => (values.every((value) => value === values[0]) ? values[0] : undefined);
+    return aoeMenu({
+      count: templates.length,
+      effect: shared(templates.map((template) => template.effect)),
+      opacity: shared(templates.map((template) => template.opacity)),
+      groupItems: groups
+    });
+  }
+
+  /** Hub text when nothing is pressed: what the menu acts on */
+  get menuTitle(): string {
+    const target = this.menu?.target;
+    if (!target || target.kind === 'general') return 'Map';
+    if (target.members.length > 1) return `${target.members.length} selected`;
+    if (target.kind === 'aoe') return 'Spell area';
+    return this.#markerRows([target.markerId])[0]?.title || 'Token';
+  }
+
+  /** The menu closes when what it acts on is gone (deleted on the GM screen, or another scene) */
+  get menuTargetGone(): boolean {
+    const target = this.menu?.target;
+    if (!target || target.kind === 'general') return false;
+    const rows = this.#rows();
+    return target.kind === 'token'
+      ? !rows.markers.some((marker) => marker.id === target.markerId)
+      : !rows.aoeTemplates.some((template) => template.id === target.aoeId);
   }
 
   get isAoeActive() {
@@ -215,13 +331,13 @@ export class PlayTools {
   toggleGroupSelect() {
     this.groupSelect = !this.groupSelect;
     this.distanceMode = false;
-    this.selectedMarkerIds = [];
+    this.selection = [];
   }
 
   toggleDistanceMode() {
     this.distanceMode = !this.distanceMode;
     this.groupSelect = false;
-    this.selectedMarkerIds = [];
+    this.selection = [];
   }
 
   toggleAoe() {
@@ -252,21 +368,30 @@ export class PlayTools {
     return effects.size === 1 ? [...effects][0] : undefined;
   }
 
-  /** Stage callback: a token was tapped; group select toggles it, distance mode makes it the origin. */
+  /** Stage callback: a token was tapped; select mode toggles it with its group, distance mode makes it the origin. */
   onMarkerSelected = (marker: Marker | null) => {
     if (!marker) return;
-    if (this.groupSelect) {
-      this.selectedMarkerIds = this.selectedMarkerIds.includes(marker.id)
-        ? this.selectedMarkerIds.filter((id) => id !== marker.id)
-        : [...this.selectedMarkerIds, marker.id];
-    } else if (this.distanceMode) {
-      this.selectedMarkerIds = [marker.id];
-    }
+    const member: GroupMember = { collection: 'markers', id: marker.id };
+    if (this.groupSelect) this.selection = toggleGroupInSelection(this.#rows(), member, this.selection);
+    else if (this.distanceMode) this.selection = [member];
   };
 
-  selectMarkers(ids: string[]) {
-    this.selectedMarkerIds = [...new Set([...this.selectedMarkerIds, ...ids])];
+  /** The select-mode marquee adds what it encloses, with their groups */
+  selectMembers(members: GroupMember[]) {
+    this.selection = expandToGroups(this.#rows(), [...this.selection, ...members]);
   }
+
+  /** Stage callback: shapes picked by tap. Select mode toggles a tapped shape with its group. */
+  onAoeTemplatesSelected = (ids: string[]) => {
+    if (this.groupSelect && ids.length === 1) {
+      const member: GroupMember = { collection: 'aoeTemplates', id: ids[0] };
+      this.selection = toggleGroupInSelection(this.#rows(), member, this.selection);
+    } else if (this.groupSelect) {
+      this.selectMembers(ids.map((id) => ({ collection: 'aoeTemplates', id })));
+    } else {
+      this.aoeSelectedIds = ids;
+    }
+  };
 
   /**
    * Stage callbacks: AoE shapes drawn on this screen are written straight to the doc, like marker moves.
@@ -290,10 +415,9 @@ export class PlayTools {
     if (sceneId) this.#options.session.client?.write.deleteAoeTemplate(sceneId, id);
   };
 
-  onAoeTemplateMenu = (id: string, position: { x: number; y: number }, trigger: 'contextmenu' | 'longpress') => {
-    if (trigger !== 'longpress') return;
-    if (!this.aoeSelectedIds.includes(id)) this.aoeSelectedIds = [id];
-    this.aoeMenu = position;
+  // Right-click or a long press on a shape opens its radial menu
+  onAoeTemplateMenu = (id: string, position: { x: number; y: number }) => {
+    this.openAoeMenu(id, position);
   };
 
   setSelectedAoeEffect(effect: AoeEffect) {
@@ -360,36 +484,174 @@ export class PlayTools {
     }, DRAWING_IDLE_RESET_MS);
   }
 
+  /** Several doc writes as one undo step, kept apart from the steps around it */
+  #write(fn: (write: NonNullable<PlaySession['client']>['write'], sceneId: string) => void) {
+    const { client, activeSceneId } = this.#options.session;
+    if (!client || !activeSceneId) return;
+    client.stopCapturing();
+    fn(client.write, activeSceneId);
+    client.stopCapturing();
+  }
+
+  #toggleCondition(markerIds: string[], condition: MarkerCondition) {
+    this.#write((write, sceneId) => write.toggleMarkerCondition(sceneId, markerIds, condition, { playerView: true }));
+  }
+
+  /** The custom condition form's Add: a new status, put on the tokens the menu acted on */
+  addCustomCondition(label: string, color: string) {
+    const markerIds = this.conditionForm?.markerIds ?? [];
+    const name = label.trim().slice(0, 24);
+    this.conditionForm = null;
+    if (!name || markerIds.length === 0) return;
+    this.#toggleCondition(markerIds, { id: `custom:${uuidv4()}`, label: name, color });
+    this.#say(`${name} added`);
+  }
+
+  #groupAction(itemId: string, members: GroupMember[]) {
+    const rows = this.#rows();
+    const [first] = members;
+    const groupOfFirst = () => {
+      const groupId = first ? groupIdOf(rows, first) : null;
+      return groupId ? groupMembers(rows, groupId) : [];
+    };
+    switch (itemId) {
+      case MENU_ID.group: {
+        const plan = planGroupToggle(rows, members, uuidv4);
+        if (plan.kind !== 'group') return;
+        this.#write((write, sceneId) => write.setGroup(sceneId, plan.members, plan.groupId));
+        this.selection = plan.members;
+        this.#say(`Grouped ${plan.members.length} items. They now move together`);
+        return;
+      }
+      case MENU_ID.ungroup: {
+        const group = members.length > 1 ? expandToGroups(rows, members) : groupOfFirst();
+        this.#write((write, sceneId) => write.setGroup(sceneId, group, null));
+        this.#say(`Ungrouped ${group.length} items`);
+        return;
+      }
+      case MENU_ID.leaveGroup:
+        if (!first) return;
+        this.#write((write, sceneId) => write.setGroup(sceneId, [first], null));
+        this.#say('Left the group');
+        return;
+      case MENU_ID.groupWith:
+        this.groupSelect = true;
+        this.distanceMode = false;
+        this.selection = expandToGroups(rows, members);
+        this.#say('Tap what should move with it, then hold one and choose Group');
+    }
+  }
+
   selectMenuItem(itemId: string) {
     devLog('play', 'Menu item selected:', itemId);
+    const target = this.menu?.target;
+    const members = target && target.kind !== 'general' ? target.members : [];
+    const markerIds = this.#menuIds('markers');
+    const aoeIds = this.#menuIds('aoeTemplates');
+    const valueOf = (prefix: string) => itemId.slice(prefix.length);
+
+    if (itemId.startsWith(MENU_ID.condition)) {
+      const id = valueOf(MENU_ID.condition);
+      const known = [...this.#customSuggestions(), ...this.#markerRows(markerIds).flatMap((m) => m.conditions ?? [])];
+      const condition = resolveCondition({ id }).category === 'custom' ? known.find((c) => c.id === id) : { id };
+      if (condition) this.#toggleCondition(markerIds, condition);
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.exhaustionLevel)) {
+      const value = Number(valueOf(MENU_ID.exhaustionLevel));
+      this.#write((write, sceneId) =>
+        write.setMarkerConditionValue(sceneId, markerIds, 'exhaustion', value, { playerView: true })
+      );
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.measureCone)) {
+      this.activeLayer = MapLayerType.Measurement;
+      this.measurement = { type: MeasurementType.Cone, coneAngle: Number(valueOf(MENU_ID.measureCone)) };
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.measureBeam)) {
+      this.activeLayer = MapLayerType.Measurement;
+      this.measurement = { type: MeasurementType.Beam, beamWidth: Number(valueOf(MENU_ID.measureBeam)) };
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.aoeShape)) {
+      this.setAoeShape(valueOf(MENU_ID.aoeShape) as AoeShape);
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.drawColor)) {
+      const color = DRAW_COLORS.find(({ id }) => id === valueOf(MENU_ID.drawColor))?.color;
+      if (color) this.#startTemporaryDrawing(color);
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.drawEffect)) {
+      this.#startTemporaryDrawing('#ffffff', Number(valueOf(MENU_ID.drawEffect)) as AnnotationEffect);
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.aoeEffect)) {
+      const effect = Number(valueOf(MENU_ID.aoeEffect)) as AoeEffect;
+      this.#write(() =>
+        aoeIds.forEach((id) => this.onAoeTemplateUpdated(id, { effect, color: AOE_EFFECT_DEFAULT_COLORS[effect] }))
+      );
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.aoeOpacity)) {
+      const opacity = Number(valueOf(MENU_ID.aoeOpacity));
+      this.#write(() => aoeIds.forEach((id) => this.onAoeTemplateUpdated(id, { opacity })));
+      return;
+    }
 
     switch (itemId) {
-      case 'measure-line':
+      case MENU_ID.measureLine:
         this.activeLayer = MapLayerType.Measurement;
         this.measurement = { type: MeasurementType.Line };
-        break;
-      case 'measure-circle':
+        return;
+      case MENU_ID.measureCircle:
         this.activeLayer = MapLayerType.Measurement;
         this.measurement = { type: MeasurementType.Circle };
-        break;
-      case 'measure-square':
+        return;
+      case MENU_ID.measureSquare:
         this.activeLayer = MapLayerType.Measurement;
         this.measurement = { type: MeasurementType.Square };
-        break;
+        return;
+      case MENU_ID.distance:
+        this.toggleDistanceMode();
+        return;
+      case MENU_ID.select:
+        this.toggleGroupSelect();
+        return;
+      case MENU_ID.clearSelection:
+        this.selection = [];
+        return;
+      case MENU_ID.undo:
+        this.undo();
+        return;
+      case MENU_ID.redo:
+        this.redo();
+        return;
+      case MENU_ID.fit:
+        this.#options.onFit();
+        return;
+      case MENU_ID.newCondition:
+        if (this.menu) this.conditionForm = { x: this.menu.x, y: this.menu.y, markerIds };
+        return;
+      case MENU_ID.distanceFrom:
+        this.groupSelect = false;
+        this.distanceMode = true;
+        this.selection = markerIds.slice(0, 1).map((id) => ({ collection: 'markers', id }));
+        return;
+      case MENU_ID.pin: {
+        const marker = this.#markerRows(markerIds)[0];
+        if (marker)
+          this.#write((write, sceneId) =>
+            write.setMarkerFields(sceneId, marker.id, { pinnedTooltip: !marker.pinnedTooltip })
+          );
+        return;
+      }
+      case MENU_ID.aoeDelete:
+        this.#write(() => aoeIds.forEach(this.onAoeTemplateDeleted));
+        return;
       default:
-        if (itemId.startsWith('measure-cone-')) {
-          this.activeLayer = MapLayerType.Measurement;
-          this.measurement = {
-            type: MeasurementType.Cone,
-            coneAngle: parseInt(itemId.replace('measure-cone-', ''), 10)
-          };
-        } else if (itemId.startsWith('measure-beam-')) {
-          this.activeLayer = MapLayerType.Measurement;
-          this.measurement = {
-            type: MeasurementType.Beam,
-            beamWidth: parseInt(itemId.replace('measure-beam-', ''), 10)
-          };
-        }
+        this.#groupAction(itemId, members);
     }
   }
 
@@ -557,6 +819,7 @@ export class PlayTools {
 
   destroy() {
     clearInterval(this.#expiryTicker);
+    if (this.#noticeTimer) clearTimeout(this.#noticeTimer);
     if (this.#resetLayerTimer) clearTimeout(this.#resetLayerTimer);
     if (this.#persistButtonTimer) clearTimeout(this.#persistButtonTimer);
     if (this.#pendingFogCommit) clearTimeout(this.#pendingFogCommit.timer);

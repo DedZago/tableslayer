@@ -92,7 +92,8 @@ const wire: SessionSnapshotWire = {
           shapeColor: '#fff',
           size: 1,
           note: { blocks: [] },
-          pinnedTooltip: false
+          pinnedTooltip: false,
+          conditions: []
         }
       ],
       lights: [],

@@ -47,8 +47,37 @@
     onMarkerSelected,
     onMarkerDoubleClick,
     onMarkerContextMenu,
+    onMarkerLongPress,
     onMarkerHover
   } = getContext<Callbacks>('callbacks');
+
+  const LONG_PRESS_MS = 500;
+  const LONG_PRESS_SLOP_PX = 12;
+  let longPress: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
+  let longPressFired = false;
+
+  function cancelLongPress() {
+    if (longPress) clearTimeout(longPress.timer);
+    longPress = null;
+  }
+
+  // Holding still on a token opens the consumer's menu instead of dragging or clicking it
+  function armLongPress(marker: Marker, clientPoint: { x: number; y: number }) {
+    cancelLongPress();
+    if (!onMarkerLongPress) return;
+    longPress = {
+      ...clientPoint,
+      timer: setTimeout(() => {
+        longPress = null;
+        if (isDragging || dragMoved) return;
+        longPressFired = true;
+        pendingDrag = null;
+        groupDrag = null;
+        dragStart = null;
+        onMarkerLongPress(marker, clientPoint);
+      }, LONG_PRESS_MS)
+    };
+  }
 
   // Double-click / double-tap detection on markers
   const DOUBLE_CLICK_MS = 350;
@@ -167,6 +196,7 @@
       tooltipWasOpenAtDown = selectedMarker?.id === closestMarker.id && !tooltipSuppressed;
       tooltipSuppressed = false;
       dragMoved = false;
+      longPressFired = false;
       const clientPoint = getClientPoint(e);
       selectedMarker = closestMarker;
 
@@ -197,6 +227,8 @@
       }
       if (isDoubleClick) {
         onMarkerDoubleClick(closestMarker);
+      } else if (clientPoint) {
+        armLongPress(closestMarker, clientPoint);
       }
     } else {
       lastMarkerClick = null;
@@ -272,8 +304,16 @@
       clearHoverTimer();
     }
 
+    if (longPress) {
+      const clientPoint = getClientPoint(e);
+      if (clientPoint && Math.hypot(clientPoint.x - longPress.x, clientPoint.y - longPress.y) > LONG_PRESS_SLOP_PX) {
+        cancelLongPress();
+      }
+    }
+
     if (pendingDrag) {
       if (!hasPassedDragThreshold(e, pendingDrag)) return;
+      cancelLongPress();
       pendingDrag = null;
       isDragging = true;
       dragMoved = true;
@@ -371,6 +411,7 @@
   }
 
   onDestroy(() => {
+    cancelLongPress();
     stopListeningForRelease();
     endGroupDrag(false);
   });
@@ -431,10 +472,12 @@
 
   function onMouseUp() {
     stopListeningForRelease();
-    if (pressedSelected && !dragMoved && selectedMarker) {
+    cancelLongPress();
+    if (pressedSelected && !dragMoved && !longPressFired && selectedMarker) {
       onMarkerSelected(selectedMarker);
     }
     pressedSelected = false;
+    longPressFired = false;
     endGroupDrag(false);
     pendingDrag = null;
     dragStart = null;
@@ -492,6 +535,8 @@
     endGroupDrag(false);
     dragMoved = false;
     pressedSelected = false;
+    longPressFired = false;
+    cancelLongPress();
     pendingDrag = null;
     dragStart = null;
     stopListeningForRelease();

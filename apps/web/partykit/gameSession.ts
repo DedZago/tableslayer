@@ -6,7 +6,8 @@ import {
   getScenesMap,
   hydrateGameSessionDoc,
   isDocHydrated,
-  pruneRowFragments
+  pruneRowFragments,
+  upgradeConditionMaps
 } from '../src/lib/realtime/docSchema';
 import type { ScenePart } from '../src/lib/realtime/types';
 import {
@@ -107,6 +108,8 @@ export default class GameSessionServer implements Party.Server {
     // Older clients could leave id-less row fragments that broke every read of their scene;
     // drop them and re-save the scene, whose edits could not persist while the fragment was there
     for (const sceneId of pruneRowFragments(doc, HYDRATION_ORIGIN)) this.#markDirty(sceneId, ALL_PARTS);
+    // Conditions stored as one array lose concurrent edits; per-condition maps merge them
+    upgradeConditionMaps(doc, HYDRATION_ORIGIN);
 
     return doc;
   }

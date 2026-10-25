@@ -32,6 +32,7 @@ import {
   parseFogRooms,
   RainPreset,
   SceneRotation,
+  sortConditions,
   StageMode,
   type StageProps,
   ToolType
@@ -91,7 +92,7 @@ export const withAutoConditions = (
 // GM-only conditions never reach player clients
 const conditionsForMode = (conditions: unknown, mode: 'client' | 'editor'): MarkerCondition[] => {
   const list = Array.isArray(conditions)
-    ? (conditions as MarkerCondition[]).map((condition) => ({ ...condition }))
+    ? sortConditions((conditions as MarkerCondition[]).map((condition) => ({ ...condition })))
     : [];
   return mode === 'client' ? list.filter((condition) => !condition.dmOnly) : list;
 };

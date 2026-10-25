@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { MarkerCondition } from '../components/MarkerLayer/types';
 import {
+  conditionIdsInCategory,
   conditionsKey,
+  MARKER_CONDITION_CATEGORIES,
   MARKER_CONDITION_ORDER,
   MARKER_CONDITIONS,
   resolveCondition,
@@ -20,6 +22,45 @@ describe('MARKER_CONDITIONS', () => {
 
   it('exposes the catalog keys as the order', () => {
     expect(MARKER_CONDITION_ORDER).toEqual(Object.keys(MARKER_CONDITIONS));
+  });
+
+  it('includes every official 5e condition and the common table statuses', () => {
+    for (const id of [
+      'blinded',
+      'charmed',
+      'deafened',
+      'exhaustion',
+      'frightened',
+      'grappled',
+      'incapacitated',
+      'invisible',
+      'paralyzed',
+      'petrified',
+      'poisoned',
+      'prone',
+      'restrained',
+      'stunned',
+      'unconscious',
+      'turned',
+      'dying'
+    ]) {
+      expect(MARKER_CONDITIONS[id], id).toBeDefined();
+    }
+  });
+
+  it('gives every condition a unique badge abbreviation', () => {
+    const abbrs = Object.values(MARKER_CONDITIONS).map((definition) => definition.abbr);
+    expect(new Set(abbrs).size).toBe(abbrs.length);
+  });
+
+  it('fits every category in one radial ring, in catalog order', () => {
+    const categories = MARKER_CONDITION_CATEGORIES.flatMap(({ id }) => (id === 'custom' ? [] : [id]));
+    for (const category of categories) {
+      const ids = conditionIdsInCategory(category);
+      expect(ids.length, category).toBeGreaterThan(0);
+      expect(ids.length, category).toBeLessThanOrEqual(8);
+    }
+    expect(categories.flatMap(conditionIdsInCategory)).toEqual(MARKER_CONDITION_ORDER);
   });
 });
 
@@ -53,7 +94,7 @@ describe('conditionsKey', () => {
 
   it('encodes value, custom fields and dm-only flags', () => {
     const key = conditionsKey([{ id: 'exhaustion', value: 2 }, { ...CUSTOM, dmOnly: true }, { id: 'prone' }]);
-    expect(key).toBe('exhaustion:2|prone|custom:1:Hexed:#ffff00:dm');
+    expect(key).toBe('prone|exhaustion:2|custom:1:Hexed:#ffff00:dm');
   });
 
   it('is empty for an empty list', () => {
@@ -68,7 +109,7 @@ describe('resolveCondition', () => {
       abbr: 'St',
       color: '#facc15',
       description: MARKER_CONDITIONS.stunned.description,
-      group: 'condition'
+      category: 'cantAct'
     });
   });
 
@@ -78,7 +119,7 @@ describe('resolveCondition', () => {
       abbr: 'He',
       color: '#8b5cf6',
       description: 'Custom condition',
-      group: 'custom'
+      category: 'custom'
     });
   });
 
@@ -98,6 +139,6 @@ describe('toggleCondition', () => {
 
   it('keeps the values of other conditions when toggling', () => {
     const list = [{ id: 'exhaustion', value: 3 }];
-    expect(toggleCondition(list, 'prone')).toEqual([{ id: 'exhaustion', value: 3 }, { id: 'prone' }]);
+    expect(toggleCondition(list, 'prone')).toEqual([{ id: 'prone' }, { id: 'exhaustion', value: 3 }]);
   });
 });

@@ -1,3 +1,4 @@
+import type { MarkerCondition } from '@tableslayer/stage';
 import * as Y from 'yjs';
 import type {
   AnnotationRow,
@@ -24,6 +25,7 @@ import type {
 //   scenes: Y.Map<sceneId, Y.Map>
 //     settings: Y.Map<SceneSettings field, primitive>
 //     markers: Y.Map<markerId, Y.Map<MarkerRow field, primitive>>
+//       conditions: Y.Map<condition id, MarkerCondition> (rooms persisted before may still hold an array)
 //     lights: Y.Map<lightId, Y.Map<LightRow field, primitive>>
 //     aoeTemplates: Y.Map<aoeTemplateId, Y.Map<AoeTemplateRow field, primitive>>
 //     annotations: Y.Map<annotationId, Y.Map<AnnotationRow field | 'mask', primitive | Uint8Array>>
@@ -50,17 +52,61 @@ export const getPartyStateMap = (doc: Y.Doc) => doc.getMap<unknown>('state');
 
 export const isDocHydrated = (doc: Y.Doc): boolean => getMeta(doc).get('schemaVersion') === DOC_SCHEMA_VERSION;
 
+// A token's conditions are keyed by id, so edits to different conditions from any screen merge
+const CONDITIONS_KEY = 'conditions';
+
+// Readers get a plain array ordered by id; consumers sort it for display (sortConditions)
+const conditionListOf = (map: Y.Map<MarkerCondition>): MarkerCondition[] =>
+  [...map.values()].sort((a, b) => a.id.localeCompare(b.id));
+
 const yMapToObject = <T>(map: Y.Map<unknown>, omit?: string): T => {
   const obj: Record<string, unknown> = {};
   map.forEach((value, key) => {
-    if (key !== omit) obj[key] = value;
+    if (key === omit) return;
+    obj[key] = key === CONDITIONS_KEY && value instanceof Y.Map ? conditionListOf(value) : value;
   });
   return obj as T;
 };
 
+const sameCondition = (a: MarkerCondition | undefined, b: MarkerCondition) =>
+  a !== undefined &&
+  a.id === b.id &&
+  a.label === b.label &&
+  a.color === b.color &&
+  a.value === b.value &&
+  Boolean(a.dmOnly) === Boolean(b.dmOnly);
+
+// Plain copy without undefined keys (Y.js can't encode undefined)
+const storedCondition = (condition: MarkerCondition): MarkerCondition =>
+  Object.fromEntries(Object.entries(condition).filter(([, value]) => value !== undefined)) as MarkerCondition;
+
+/** The row's conditions map, converting a legacy array in place */
+const conditionsMapOf = (row: Y.Map<unknown>): Y.Map<MarkerCondition> => {
+  const current = row.get(CONDITIONS_KEY);
+  if (current instanceof Y.Map) return current as Y.Map<MarkerCondition>;
+  const map = new Y.Map<MarkerCondition>();
+  for (const condition of Array.isArray(current) ? (current as MarkerCondition[]) : []) {
+    map.set(condition.id, storedCondition(condition));
+  }
+  row.set(CONDITIONS_KEY, map);
+  return map;
+};
+
+// A whole list (row upsert, paste, hydration) is applied as per-condition changes
+const writeConditionList = (row: Y.Map<unknown>, list: MarkerCondition[] | null) => {
+  const map = conditionsMapOf(row);
+  const next = new Map((list ?? []).map((condition) => [condition.id, condition]));
+  for (const id of [...map.keys()]) if (!next.has(id)) map.delete(id);
+  for (const [id, condition] of next) {
+    if (!sameCondition(map.get(id), condition)) map.set(id, storedCondition(condition));
+  }
+};
+
 const setChangedFields = (map: Y.Map<unknown>, fields: Record<string, unknown>) => {
   for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined && map.get(key) !== value) {
+    if (key === CONDITIONS_KEY && (Array.isArray(value) || value === null)) {
+      writeConditionList(map, value as MarkerCondition[] | null);
+    } else if (value !== undefined && map.get(key) !== value) {
       map.set(key, value);
     }
   }
@@ -80,7 +126,12 @@ const trackRowObjects = (doc: Y.Doc) => {
   if (rowCacheTrackedDocs.has(doc)) return;
   rowCacheTrackedDocs.add(doc);
   getScenesMap(doc).observeDeep((events) => {
-    for (const event of events) invalidateRowObject(event.target);
+    // A change inside a nested map (a token's conditions) also invalidates the row holding it
+    for (const event of events) {
+      for (let type: Y.AbstractType<unknown> | null = event.target; type; type = type.parent) {
+        invalidateRowObject(type);
+      }
+    }
   });
 };
 
@@ -103,6 +154,17 @@ const rowsOf = <T>(scene: SceneMap | undefined, collection: RowCollection, omit?
     rows.push(omit === undefined ? rowObjectOf<T>(row) : yMapToObject<T>(row, omit));
   });
   return rows;
+};
+
+/** Converts tokens' legacy condition arrays to per-condition maps; the room does this once on load */
+export const upgradeConditionMaps = (doc: Y.Doc, origin: unknown) => {
+  doc.transact(() => {
+    getScenesMap(doc).forEach((scene) => {
+      (scene.get('markers') as Y.Map<Y.Map<unknown>> | undefined)?.forEach((row) => {
+        if (!isRowFragment(row) && !(row.get(CONDITIONS_KEY) instanceof Y.Map)) conditionsMapOf(row);
+      });
+    });
+  }, origin);
 };
 
 /** Deletes row fragments left by older clients; returns the ids of the scenes it repaired */
@@ -205,6 +267,9 @@ export const orderBetween = (prev: number | null, next: number | null): number =
 const GROUPED_COLLECTIONS = ['markers', 'lights', 'aoeTemplates'] as const;
 type GroupedCollection = (typeof GROUPED_COLLECTIONS)[number];
 
+/** `playerView`: the writer can't see GM-only conditions (the TV), so it treats them as absent and never touches them */
+export type ConditionWriteOptions = { playerView?: boolean };
+
 /** `detached`: the row moves on its own, leaving the rest of its group where it is */
 export type MoveOptions = { detached?: boolean };
 
@@ -288,6 +353,8 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
         if (fields.id !== id) return;
         row = new Y.Map();
         map.set(id, row);
+        // Created with the row, so two screens never race to create it
+        if (collection === 'markers') conditionsMapOf(row);
       }
       writeRowFields(sceneId, collection, id, row, fields, options);
     });
@@ -335,10 +402,11 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
           scene.set(collection, map);
           for (const row of content?.[collection] ?? []) {
             const rowMap = new Y.Map<unknown>();
+            map.set(row.id, rowMap);
             const { mask, ...fields } = row as AnnotationRow & { mask?: Uint8Array | null };
             setChangedFields(rowMap, fields as unknown as Record<string, unknown>);
+            if (collection === 'markers') conditionsMapOf(rowMap);
             if (collection === 'annotations' && mask) rowMap.set(ANNOTATION_MASK_KEY, mask);
-            map.set(row.id, rowMap);
           }
         }
 
@@ -391,6 +459,87 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
     deleteMarker(sceneId: string, markerId: string) {
       deleteRow(sceneId, 'markers', markerId);
     },
+    /**
+     * Condition edits touch one key per token, so they merge with any other screen's edits and never
+     * disturb conditions the writer didn't name (GM-only ones the TV can't see).
+     * Toggle removes the condition when every token has it, otherwise adds it where missing.
+     */
+    toggleMarkerCondition(
+      sceneId: string,
+      markerIds: string[],
+      condition: MarkerCondition,
+      options?: ConditionWriteOptions
+    ) {
+      transact(() => {
+        const rows = markerIds.flatMap((id) => collectionOf(sceneId, 'markers')?.get(id) ?? []);
+        const maps = rows.map(conditionsMapOf);
+        const has = (map: Y.Map<MarkerCondition>) => {
+          const existing = map.get(condition.id);
+          return existing !== undefined && !(options?.playerView && existing.dmOnly);
+        };
+        const allHave = maps.length > 0 && maps.every(has);
+        for (const map of maps) {
+          if (allHave) map.delete(condition.id);
+          else if (!map.has(condition.id)) map.set(condition.id, storedCondition(condition));
+        }
+      });
+    },
+    /** Sets a valued condition (exhaustion) to `value` on every token; 0 or less removes it */
+    setMarkerConditionValue(
+      sceneId: string,
+      markerIds: string[],
+      conditionId: string,
+      value: number,
+      options?: ConditionWriteOptions
+    ) {
+      transact(() => {
+        for (const id of markerIds) {
+          const row = collectionOf(sceneId, 'markers')?.get(id);
+          if (!row) continue;
+          const map = conditionsMapOf(row);
+          const existing = map.get(conditionId);
+          if (options?.playerView && existing?.dmOnly) continue;
+          if (value <= 0) map.delete(conditionId);
+          else if (existing?.value !== value) {
+            map.set(conditionId, storedCondition({ ...existing, id: conditionId, value }));
+          }
+        }
+      });
+    },
+    /** Steps a valued condition on each token from its own level, capped at `max`; below 1 removes it */
+    stepMarkerConditionValue(sceneId: string, markerIds: string[], conditionId: string, delta: number, max: number) {
+      transact(() => {
+        for (const id of markerIds) {
+          const row = collectionOf(sceneId, 'markers')?.get(id);
+          if (!row) continue;
+          const map = conditionsMapOf(row);
+          const existing = map.get(conditionId);
+          const value = Math.min((existing?.value ?? 0) + delta, max);
+          if (value <= 0) map.delete(conditionId);
+          else map.set(conditionId, storedCondition({ ...existing, id: conditionId, value }));
+        }
+      });
+    },
+    toggleMarkerConditionDmOnly(sceneId: string, markerIds: string[], conditionId: string) {
+      transact(() => {
+        for (const id of markerIds) {
+          const row = collectionOf(sceneId, 'markers')?.get(id);
+          const existing = row ? conditionsMapOf(row).get(conditionId) : undefined;
+          if (!row || !existing) continue;
+          const { dmOnly, ...rest } = existing;
+          conditionsMapOf(row).set(conditionId, dmOnly ? rest : { ...rest, dmOnly: true });
+        }
+      });
+    },
+    clearMarkerConditions(sceneId: string, markerIds: string[]) {
+      transact(() => {
+        for (const id of markerIds) {
+          const row = collectionOf(sceneId, 'markers')?.get(id);
+          if (row) conditionsMapOf(row).clear();
+        }
+      });
+    },
+
     /** Puts rows in a group (or takes them out with null); positions stay where they are */
     setGroup(sceneId: string, members: Array<{ collection: GroupedCollection; id: string }>, groupId: string | null) {
       transact(() => {

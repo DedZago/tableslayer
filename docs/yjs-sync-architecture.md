@@ -49,6 +49,15 @@ Key properties:
   names the group a row belongs to. Positions stay absolute; a position write on any member shifts
   the rest of its group by the same delta inside the same transaction (rows placed explicitly in
   that transaction are left alone). A write with `{ detached: true }` moves only that row.
+- **A token's conditions are one key each.** The marker row holds `conditions` as a nested
+  `Y.Map<conditionId, MarkerCondition>`, created with the row (the room converts older array rows
+  on load with `upgradeConditionMaps`). Condition writers (`toggleMarkerCondition`,
+  `setMarkerConditionValue`, `stepMarkerConditionValue`, `toggleMarkerConditionDmOnly`,
+  `clearMarkerConditions`) change one key per token, so the GM and the TV can edit the same token
+  at once without losing either change; `{ playerView: true }` (the TV) treats GM-only entries as
+  absent and never touches them. A whole list passed to `upsertMarker`/`setMarkerFields` is applied
+  as per-condition changes. Readers get a plain array (ordered by id), the row cache refreshes when
+  the nested map changes, and the DB column stays a JSON array.
 - **Only a whole row creates a row.** The `set*Fields` writers create a missing row only when the
   fields carry its `id`; a patch for a row deleted or undone elsewhere (a stale selection) is
   dropped. Readers skip id-less fragments, and the game session room prunes any it finds

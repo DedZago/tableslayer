@@ -7,170 +7,155 @@
     angle: number;
     radius: number;
     counterRotation: number;
+    focused: boolean;
     onSelect: (itemId: string) => void;
+    onFocus: (itemId: string) => void;
   }
 
-  const { item, angle, radius, counterRotation, onSelect }: Props = $props();
+  const { item, angle, radius, counterRotation, focused, onSelect, onFocus }: Props = $props();
 
-  // Calculate position using polar to cartesian conversion
   const x = $derived(Math.cos(angle) * radius);
   const y = $derived(Math.sin(angle) * radius);
-
-  // Determine if this is an icon-only button (has icon but no label)
-  const isIconOnly = $derived(item.icon && !item.label && !item.color && item.effectType === undefined);
-
-  // Determine if this is an effect-only button
-  const isEffectOnly = $derived(item.effectType !== undefined && !item.label);
-
-  function handleClick() {
-    if (!item.disabled) {
-      onSelect(item.id);
-    }
-  }
+  const isSwatch = $derived(item.color !== undefined && item.effectType === undefined);
 </script>
 
+<!-- Disabled options stay pressable so the hub can say why they are off -->
 <button
-  class="radialMenu__item"
-  class:radialMenu__item--disabled={item.disabled}
-  class:radialMenu__item--colorOnly={item.color && !item.label}
-  class:radialMenu__item--iconOnly={isIconOnly}
-  class:radialMenu__item--effectOnly={isEffectOnly}
-  style="transform: translate({x}px, {y}px) rotate({-counterRotation}deg);"
-  onclick={handleClick}
+  class={[
+    'radialMenuItem',
+    item.active && 'radialMenuItem--active',
+    item.danger && 'radialMenuItem--danger',
+    item.disabled && 'radialMenuItem--disabled',
+    focused && 'radialMenuItem--focused',
+    item.submenu?.length && 'radialMenuItem--hasSubmenu'
+  ]}
+  style:--accent={item.accent ?? 'var(--fg)'}
+  style:transform="translate({x}px, {y}px) rotate({-counterRotation}deg)"
   type="button"
+  aria-label={item.label}
+  aria-disabled={item.disabled}
+  aria-pressed={item.active}
+  onpointerdown={() => onFocus(item.id)}
+  onpointerenter={(event) => event.pointerType === 'mouse' && onFocus(item.id)}
+  onclick={() => onSelect(item.id)}
 >
-  {#if item.effectType !== undefined}
-    <span class="radialMenu__itemEffect">
-      <EffectPreview effectType={item.effectType} size="2.5rem" />
-    </span>
-  {:else if item.color}
-    <span class="radialMenu__itemSwatch" style="background-color: {item.color};"></span>
-  {:else if item.icon}
-    <span class="radialMenu__itemIcon">
-      <item.icon size={24} stroke={2} />
-    </span>
-  {/if}
-  {#if item.label}
-    <span class="radialMenu__itemLabel">{item.label}</span>
-  {/if}
+  <span class="radialMenuItem__circle">
+    {#if item.effectType !== undefined}
+      <EffectPreview effectType={item.effectType} size="100%" />
+    {:else if isSwatch}
+      <span class="radialMenuItem__swatch" style:background={item.color}></span>
+    {:else if item.icon}
+      <item.icon size={28} stroke={2} />
+    {/if}
+    {#if item.badge !== undefined}
+      <span class="radialMenuItem__badge">{item.badge}</span>
+    {/if}
+  </span>
+  <span class="radialMenuItem__label">{item.label}</span>
 </button>
 
 <style>
-  .radialMenu__item {
+  .radialMenuItem {
     position: absolute;
     top: 0;
     left: 0;
-    transform-origin: center;
-    padding: 0.75rem 1rem;
-    background: var(--bg);
-    border: 1px solid var(--fgMuted);
-    border-radius: 0.5rem;
+    width: 4rem;
+    height: 4rem;
+    margin: -2rem 0 0 -2rem;
+    padding: 0;
+    background: none;
+    border: none;
     color: var(--fg);
-    font-size: 0.875rem;
-    font-weight: 500;
     cursor: pointer;
     pointer-events: auto;
-    white-space: nowrap;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .radialMenuItem__circle {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    color: var(--accent);
+    background: var(--bg);
+    border: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 50%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    transition:
+      transform 0.12s ease-out,
+      background 0.12s ease-out;
   }
 
-  .radialMenu__item:hover {
-    background: var(--fgPrimary);
+  .radialMenuItem--hasSubmenu .radialMenuItem__circle {
+    border-style: double;
+    border-width: 4px;
+  }
+
+  .radialMenuItem--focused .radialMenuItem__circle {
+    transform: scale(1.12);
+    border-color: var(--accent);
+  }
+
+  .radialMenuItem--active .radialMenuItem__circle {
     color: var(--bg);
-    border-color: var(--fgPrimary);
+    background: var(--accent);
+    border-color: var(--fg);
   }
 
-  .radialMenu__item--disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .radialMenuItem--danger {
+    --accent: var(--fgDanger);
+  }
+
+  .radialMenuItem--disabled .radialMenuItem__circle {
+    opacity: 0.4;
+  }
+
+  .radialMenuItem__swatch {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+  }
+
+  .radialMenuItem__badge {
+    position: absolute;
+    top: -0.25rem;
+    right: -0.25rem;
+    min-width: 1.375rem;
+    height: 1.375rem;
+    padding: 0 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.375rem;
+    color: var(--bg);
+    background: var(--fg);
+    border-radius: 0.6875rem;
+  }
+
+  .radialMenuItem__label {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 50%;
+    max-width: 7rem;
+    padding: 0.0625rem 0.375rem;
+    transform: translateX(-50%);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    border-radius: 0.375rem;
     pointer-events: none;
   }
 
-  .radialMenu__itemIcon {
-    font-size: 1.125rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .radialMenu__itemLabel {
-    font-family: inherit;
-  }
-
-  .radialMenu__itemSwatch {
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: 50%;
-    border: 2px solid var(--bg);
-    box-shadow: 0 0 0 1px var(--fgMuted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .radialMenu__item--colorOnly {
-    width: 3rem;
-    height: 3rem;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 50%;
-    box-shadow: none;
-  }
-
-  .radialMenu__item--colorOnly:hover {
-    background: transparent;
-    border: none;
-  }
-
-  .radialMenu__item--colorOnly .radialMenu__itemSwatch {
-    width: 3rem;
-    height: 3rem;
-    border: 2px solid var(--bg);
-    box-shadow:
-      0 0 0 1px var(--fgMuted),
-      0 4px 6px rgba(0, 0, 0, 0.1);
-  }
-
-  .radialMenu__item--iconOnly {
-    width: 3rem;
-    height: 3rem;
-    padding: 0;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .radialMenu__item--effectOnly {
-    width: 3rem;
-    height: 3rem;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 50%;
-    box-shadow: none;
-  }
-
-  .radialMenu__item--effectOnly:hover {
-    background: transparent;
-    border: none;
-  }
-
-  .radialMenu__itemEffect {
-    width: 2.5rem;
-    height: 2.5rem;
-    border-radius: 50%;
-    overflow: hidden;
-    border: 2px solid var(--bg);
-    box-shadow:
-      0 0 0 1px var(--fgMuted),
-      0 4px 6px rgba(0, 0, 0, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .radialMenuItem--disabled .radialMenuItem__label {
+    color: var(--fgMuted);
   }
 </style>

@@ -34,6 +34,8 @@ export interface Callbacks {
   onMarkerSelected: (marker: Marker | null) => void;
   onMarkerDoubleClick?: (marker: Marker) => void;
   onMarkerContextMenu: (marker: Marker, event: MouseEvent | TouchEvent) => void;
+  /** A 500 ms press on a token that did not move; the press then neither drags nor reports a click */
+  onMarkerLongPress?: (marker: Marker, position: { x: number; y: number }) => void;
   onMeasurementStart?: (startPoint: { x: number; y: number }, type: number) => void;
   onMeasurementUpdate?: (
     startPoint: { x: number; y: number },

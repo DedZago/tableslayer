@@ -17,7 +17,8 @@ import {
   listScenes,
   openUndoCaptureGroup,
   orderBetween,
-  pruneRowFragments
+  pruneRowFragments,
+  upgradeConditionMaps
 } from './docSchema';
 import type { AnnotationRow, AoeTemplateRow, LightRow, MarkerRow, SceneChange, SceneSettings } from './types';
 
@@ -932,5 +933,135 @@ describe('row fragments', () => {
     expect(snapshot.annotations).toHaveLength(2);
     expect((getScenesMap(doc).get('s1')!.get('aoeTemplates') as Y.Map<unknown>).has('gone')).toBe(false);
     expect(pruneRowFragments(doc, 'server')).toEqual([]);
+  });
+});
+
+describe('marker conditions', () => {
+  const conditionsOf = (doc: Y.Doc, id: string) =>
+    getSceneSnapshot(doc, 's1')!.markers.find((marker) => marker.id === id)!.conditions;
+  const markerMap = (doc: Y.Doc, id: string) =>
+    (getScenesMap(doc).get('s1')!.get('markers') as Y.Map<Y.Map<unknown>>).get(id)!;
+
+  it('merges different conditions toggled at once on two screens', () => {
+    const a = hydratedDoc();
+    const b = new Y.Doc();
+    syncOnce(a, b);
+
+    createSessionWriter(a, 'gm').toggleMarkerCondition('s1', ['m1'], { id: 'prone' });
+    createSessionWriter(b, 'tv').toggleMarkerCondition('s1', ['m1'], { id: 'poisoned' });
+    syncOnce(a, b);
+
+    for (const doc of [a, b]) expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'poisoned' }, { id: 'prone' }]);
+  });
+
+  it('keeps GM-only conditions when another condition changes', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'gm');
+    writer.toggleMarkerCondition('s1', ['m1'], { id: 'cursed', dmOnly: true });
+    createSessionWriter(doc, 'tv').toggleMarkerCondition('s1', ['m1'], { id: 'blessed' });
+    createSessionWriter(doc, 'tv').toggleMarkerCondition('s1', ['m1'], { id: 'blessed' });
+
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'cursed', dmOnly: true }]);
+  });
+
+  it('never touches GM-only conditions from the player view', () => {
+    const doc = hydratedDoc();
+    createSessionWriter(doc, 'gm').toggleMarkerCondition('s1', ['m1'], { id: 'prone', dmOnly: true });
+    const tv = createSessionWriter(doc, 'tv');
+    tv.toggleMarkerCondition('s1', ['m1'], { id: 'prone' }, { playerView: true });
+    tv.setMarkerConditionValue('s1', ['m1'], 'prone', 0, { playerView: true });
+
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'prone', dmOnly: true }]);
+  });
+
+  it('toggles off only when every token has the condition', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.toggleMarkerCondition('s1', ['m1'], { id: 'prone' });
+    writer.toggleMarkerCondition('s1', ['m1', 'm2'], { id: 'prone' });
+    expect(conditionsOf(doc, 'm2')).toEqual([{ id: 'prone' }]);
+
+    writer.toggleMarkerCondition('s1', ['m1', 'm2'], { id: 'prone' });
+    expect(conditionsOf(doc, 'm1')).toEqual([]);
+    expect(conditionsOf(doc, 'm2')).toEqual([]);
+  });
+
+  it('sets, steps and removes a valued condition per token', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.setMarkerConditionValue('s1', ['m1'], 'exhaustion', 2);
+    writer.stepMarkerConditionValue('s1', ['m1', 'm2'], 'exhaustion', 1, 6);
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'exhaustion', value: 3 }]);
+    expect(conditionsOf(doc, 'm2')).toEqual([{ id: 'exhaustion', value: 1 }]);
+
+    writer.stepMarkerConditionValue('s1', ['m1'], 'exhaustion', 9, 6);
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'exhaustion', value: 6 }]);
+    writer.setMarkerConditionValue('s1', ['m1'], 'exhaustion', 0);
+    expect(conditionsOf(doc, 'm1')).toEqual([]);
+  });
+
+  it('keeps a GM-only flag when stepping its level', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.toggleMarkerCondition('s1', ['m1'], { id: 'exhaustion', value: 2, dmOnly: true });
+    writer.stepMarkerConditionValue('s1', ['m1'], 'exhaustion', -1, 6);
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'exhaustion', value: 1, dmOnly: true }]);
+  });
+
+  it('toggles GM-only and clears', () => {
+    const doc = hydratedDoc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.toggleMarkerCondition('s1', ['m1'], { id: 'prone' });
+    writer.toggleMarkerConditionDmOnly('s1', ['m1'], 'prone');
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'prone', dmOnly: true }]);
+    writer.toggleMarkerConditionDmOnly('s1', ['m1'], 'prone');
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'prone' }]);
+    writer.clearMarkerConditions('s1', ['m1']);
+    expect(conditionsOf(doc, 'm1')).toEqual([]);
+  });
+
+  it('applies a whole list as per-condition changes', () => {
+    const a = hydratedDoc();
+    const b = new Y.Doc();
+    syncOnce(a, b);
+
+    createSessionWriter(a, 'gm').setMarkerFields('s1', 'm1', { conditions: [{ id: 'prone' }, { id: 'hasted' }] });
+    createSessionWriter(b, 'tv').toggleMarkerCondition('s1', ['m1'], { id: 'blessed' });
+    syncOnce(a, b);
+
+    expect(conditionsOf(a, 'm1')).toEqual([{ id: 'blessed' }, { id: 'hasted' }, { id: 'prone' }]);
+  });
+
+  it('reads and upgrades rows that still hold an array', () => {
+    const doc = hydratedDoc();
+    doc.transact(() => markerMap(doc, 'm1').set('conditions', [{ id: 'prone' }, { id: 'exhaustion', value: 2 }]));
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'prone' }, { id: 'exhaustion', value: 2 }]);
+
+    upgradeConditionMaps(doc, 'server');
+    expect(markerMap(doc, 'm1').get('conditions')).toBeInstanceOf(Y.Map);
+    expect(conditionsOf(doc, 'm1')).toEqual([{ id: 'exhaustion', value: 2 }, { id: 'prone' }]);
+  });
+
+  it('refreshes the cached row when only its conditions change', () => {
+    const doc = hydratedDoc();
+    const before = getSceneSnapshot(doc, 's1')!.markers.find((marker) => marker.id === 'm1');
+    createSessionWriter(doc, 'me').toggleMarkerCondition('s1', ['m1'], { id: 'prone' });
+    createSessionWriter(doc, 'me').toggleMarkerCondition('s1', ['m1'], { id: 'hasted' });
+    const after = getSceneSnapshot(doc, 's1')!.markers.find((marker) => marker.id === 'm1');
+
+    expect(after).not.toBe(before);
+    expect(after!.conditions).toEqual([{ id: 'hasted' }, { id: 'prone' }]);
+  });
+
+  it('undoes one toggle in one step', () => {
+    const doc = hydratedDoc();
+    const undoManager = new Y.UndoManager(doc.getMap('scenes').get('s1') as Y.Map<unknown>, {
+      trackedOrigins: new Set(['me'])
+    });
+    createSessionWriter(doc, 'me').toggleMarkerCondition('s1', ['m1', 'm2'], { id: 'prone' });
+    undoManager.undo();
+
+    expect(conditionsOf(doc, 'm1')).toEqual([]);
+    expect(conditionsOf(doc, 'm2')).toEqual([]);
   });
 });

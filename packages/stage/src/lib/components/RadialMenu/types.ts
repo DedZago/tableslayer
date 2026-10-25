@@ -1,34 +1,43 @@
-export type SubmenuLayout = 'radial' | 'table';
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type IconComponent = any;
 
-export interface TableFilterOption {
-  value: string;
-  label: string;
-}
-
 export interface RadialMenuItemProps {
   id: string;
+  /** Always shown under the button */
   label: string;
+  /** One line shown in the hub while the option is pressed or hovered */
+  hint?: string;
   icon?: IconComponent;
-  color?: string; // Hex color for rendering a color swatch
-  effectType?: number; // AnnotationEffect enum value for rendering effect preview
+  /** Color-only button (a swatch), e.g. a drawing color */
+  color?: string;
+  /** AnnotationEffect enum value for an animated effect preview */
+  effectType?: number;
+  /** Tints the icon; an active option is filled with it */
+  accent?: string;
+  /** Shown as on (a condition the token has) */
+  active?: boolean;
+  /** Small count or text on the button's corner */
+  badge?: string | number;
+  /** Destructive option (delete) */
+  danger?: boolean;
+  /** Selecting it keeps the menu open, for toggles picked several in a row */
+  keepOpen?: boolean;
   submenu?: RadialMenuItemProps[];
-  submenuLayout?: SubmenuLayout; // 'radial' (default) or 'table' for column-based layout
-  submenuFilterOptions?: TableFilterOption[]; // Filter options for table layout (e.g., game sessions)
-  submenuFilterDefault?: string; // Default selected filter value
-  submenuFilterKey?: string; // Key on submenu items to match against filter value
   disabled?: boolean;
-  // Allow additional properties for filtering (e.g., gameSessionId)
-  [key: string]: unknown;
 }
 
 export interface RadialMenuProps {
   visible: boolean;
   position: { x: number; y: number };
   items: RadialMenuItemProps[];
+  /** Hub text at the top level: what the menu acts on ("Goblin", "Map") */
+  title?: string;
+  /** Hub second line at the top level */
+  subtitle?: string;
   backIcon?: IconComponent;
+  closeIcon?: IconComponent;
+  /** Closes the menu after this long without input */
+  autoCloseMs?: number;
   onItemSelect?: (itemId: string) => void;
   onClose?: () => void;
   onReposition?: (position: { x: number; y: number }) => void;

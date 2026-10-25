@@ -1,6 +1,18 @@
 import type { MarkerRow } from '$lib/realtime';
-import { MARKER_CONDITIONS, sortConditions, type MarkerCondition } from '@tableslayer/stage';
+import type { MarkerCondition } from '@tableslayer/stage';
 import { isAutoBloodied } from './buildSceneProps';
+
+/** Swatches offered when creating a custom condition (editor and TV) */
+export const CUSTOM_CONDITION_COLORS = [
+  '#ef4444',
+  '#f97316',
+  '#eab308',
+  '#22c55e',
+  '#06b6d4',
+  '#3b82f6',
+  '#a855f7',
+  '#ec4899'
+];
 
 type ConditionRow = Pick<MarkerRow, 'conditions' | 'statBlock' | 'hitPoints'>;
 
@@ -32,13 +44,4 @@ export const conditionPickerState = (rows: ConditionRow[]): ConditionPickerState
   const automatic = new Set<string>();
   if (rows.length > 0 && !byId.has('bloodied') && rows.every(isAutoBloodied)) automatic.add('bloodied');
   return { active, mixed, automatic };
-};
-
-// Steps a valued condition (exhaustion) on one token; dropping below 1 removes it
-export const stepConditionValue = (stored: MarkerCondition[], id: string, delta: number): MarkerCondition[] => {
-  const existing = stored.find((condition) => condition.id === id);
-  const rest = stored.filter((condition) => condition.id !== id);
-  const max = MARKER_CONDITIONS[id]?.maxValue ?? 1;
-  const value = Math.min((existing?.value ?? 0) + delta, max);
-  return value <= 0 ? rest : sortConditions([...rest, { ...existing, id, value }]);
 };

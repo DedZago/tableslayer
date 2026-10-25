@@ -52,26 +52,6 @@ case "$command" in
     [[ -z "$running" ]] || { echo 'Stop this stack and close all clients before cleanup: host.sh down development_or_release' >&2; exit 1; }
     "${compose[@]}" run --rm --no-deps --workdir /workspace/apps/web "$app" node scripts/cleanup-media.mjs "${@:3}" --offline
     ;;
-  tls)
-    data_root=$(sed -n 's/^DATA_ROOT=//p' .env)
-    data_root=${data_root#\"}
-    data_root=${data_root%\"}
-    lan_host=$(sed -n 's/^LAN_HOST=//p' .env)
-    tls_dir="$data_root/tls"
-    [[ ! -e "$tls_dir/server.crt" ]] || { echo "Certificate already exists in $tls_dir; delete that folder to regenerate it." >&2; exit 1; }
-    mkdir -p "$tls_dir"
-    if [[ "$lan_host" =~ ^[0-9.]+$ ]]; then san="IP:$lan_host"; else san="DNS:$lan_host"; fi
-    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj '/CN=Table Slayer local CA' \
-      -keyout "$tls_dir/ca.key" -out "$tls_dir/ca.crt" \
-      -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign'
-    openssl req -newkey rsa:2048 -nodes -subj "/CN=$lan_host" -keyout "$tls_dir/server.key" -out "$tls_dir/server.csr"
-    openssl x509 -req -in "$tls_dir/server.csr" -CA "$tls_dir/ca.crt" -CAkey "$tls_dir/ca.key" -CAcreateserial \
-      -days 825 -out "$tls_dir/server.crt" \
-      -extfile <(printf 'subjectAltName=%s,DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' "$san")
-    rm -f "$tls_dir/server.csr"
-    chmod 600 "$tls_dir/server.key" "$tls_dir/ca.key"; chmod 644 "$tls_dir/server.crt" "$tls_dir/ca.crt"
-    printf 'Certificate for %s in %s. Install ca.crt on devices to remove browser warnings.\n' "$lan_host" "$tls_dir"
-    ;;
   backup)
     data_root=$(sed -n 's/^DATA_ROOT=//p' .env)
     data_root=${data_root#\"}
@@ -106,5 +86,5 @@ case "$command" in
     tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$destination"
     printf 'Restored into %s. Stop the target stack, update DATA_ROOT in .env, then start it.\n' "$destination"
     ;;
-  *) printf 'Usage: %s {setup|up|down|logs|migrate|assets|tls|cleanup|backup|restore} [development|release]\nRead docs/local-container-hosting.md before initialization or restore.\n' "$0" ;;
+  *) printf 'Usage: %s {setup|up|down|logs|migrate|assets|cleanup|backup|restore} [development|release]\nRead docs/local-container-hosting.md before initialization or restore.\n' "$0" ;;
 esac

@@ -64,11 +64,7 @@ docker compose -f compose.release.yaml build
 ./containers/host.sh up release
 ```
 
-`make release` runs these steps and also creates a TLS certificate on first run (`./containers/host.sh tls`). Open `https://192.168.1.50:8443`; `http://192.168.1.50:8080` redirects there. A Caddy `proxy` service terminates HTTPS and forwards `/parties/*` WebSockets to PartyKit and everything else to the app, so browsers use one origin and accept one certificate. HTTPS enables secure cookies and browser features that require a secure context, such as installing the app fullscreen on a TV or tablet.
-
-The certificate is signed by a private CA in `DATA_ROOT/tls/` (valid 825 days; the CA 10 years). Install `ca.crt` as a trusted authority on phones and laptops to remove the warning. Devices that cannot install certificates, such as most TVs, can accept the warning once; the certificate stays the same across restarts. If `LAN_HOST` changes, delete `DATA_ROOT/tls/` and run `./containers/host.sh tls` again. Keep `ca.key` private.
-
-Allow ports 8080 and 8443 through your host firewall for your LAN clients; development additionally needs 5173, 5174, and 1999. Ports for the database and an object-store service are unnecessary: both are embedded/local. Release services restart after a host reboot when your runtime starts, and data survives container replacement or `down`.
+Open `http://192.168.1.50:8080`. Local realtime uses port 2000. Allow these ports through your host firewall for your LAN clients; development additionally needs 5173, 5174, and 1999. Ports for the database and an object-store service are unnecessary: both are embedded/local. Release services restart after a host reboot when your runtime starts, and data survives container replacement or `down`.
 
 The release image deliberately keeps the migration CLI and PartyKit dependencies so operator migrations and the realtime service use the same built source. Image builds do not run migrations, contact a campaign database, or include `.env` files. The production app uses the existing Node adapter. PartyKit runs its persistent **local development emulator**, not Cloudflare Workers; this is a personal trusted-LAN deployment, not an internet production or multi-host installation. Do not run multiple app instances against these files.
 
@@ -114,7 +110,7 @@ Edit root `.env` to change `DATA_ROOT`, `LAN_HOST`, or `BIND_ADDRESS`, then recr
 
 The application retains its original cloud mode when `TURSO_APP_DB_URL` is a remote URL and `ASSET_STORAGE` is absent or `r2`. The provided local Compose files intentionally choose local storage. To use accounts, create a private Compose override supplying the remote database URL/token and/or R2 credentials, set `ASSET_STORAGE=r2` and `CLOUDFLARE_R2_BUCKET_URL` to your public bucket URL. A deployed PartyKit service also needs matching `INTERNAL_API_TOKEN`, `APP_API_URL`/`BASE_URL`, and its browser-facing host. See `apps/web/.env-example`. Existing local files are not automatically copied to cloud services, and local backup commands only archive local folders.
 
-Development sets `SESSION_COOKIE_SECURE=false` for trusted HTTP LAN use. Release serves HTTPS through the proxy, so it uses secure cookies, an `https://` origin and a `wss://` WebSocket endpoint on the same port. Internet hosting is outside this local-network setup.
+`SESSION_COOKIE_SECURE=false` is explicitly selected for trusted HTTP LAN use. For HTTPS or internet hosting, enable secure cookies and configure the HTTPS origin and WebSocket endpoint. That deployment is outside the current local-network setup.
 
 ## Architecture
 
@@ -124,7 +120,7 @@ Compose owns environment separation, port publication, and bind mounts. The app 
 
 `files.ts` selects local filesystem helpers or the original R2 SDK. The browser receives `/assets` as its bucket URL. Default maps, annotation textures, and existing upstream LUT URLs use that configured backend. `transform.ts` reads image dimensions directly for local storage, avoiding HTTP requests back to the public LAN address.
 
-`containers/party.mjs` writes a temporary private PartyKit configuration with absolute source paths and passes `--persist /data/realtime` explicitly; PartyKit CLI defaults otherwise override the config-file persistence path. PartyKit calls the web service at `APP_API_URL`; web resync calls use `PARTYKIT_INTERNAL_URL`; clients use `PUBLIC_PARTYKIT_HOST` and `PUBLIC_PARTYKIT_PROTOCOL` (`ws` in development, `wss` through the proxy in release). Without that override, the provider retains its normal cloud/localhost protocol selection. The existing Y.js persistence model is unchanged.
+`containers/party.mjs` writes a temporary private PartyKit configuration with absolute source paths and passes `--persist /data/realtime` explicitly; PartyKit CLI defaults otherwise override the config-file persistence path. PartyKit calls the web service at `APP_API_URL`; web resync calls use `PARTYKIT_INTERNAL_URL`; clients use `PUBLIC_PARTYKIT_HOST` and `PUBLIC_PARTYKIT_PROTOCOL=ws` in local Compose. Without that override, the provider retains its normal cloud/localhost protocol selection. The existing Y.js persistence model is unchanged.
 
 To extend local storage, keep path validation and signed upload verification centralized; preserve the object keys stored in the database. To change realtime runtimes, preserve both named parties, their persistent snapshots, and their authenticated database callback contract. Changing schema is a separate operator-controlled migration.
 

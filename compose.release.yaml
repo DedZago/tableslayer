@@ -21,10 +21,13 @@ services:
       CLOUDFLARE_R2_BUCKET_URL: /assets
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run containers/host.sh setup first}
       PARTYKIT_INTERNAL_URL: http://party:1999
-      PUBLIC_PARTYKIT_HOST: ${LAN_HOST:?Set the host LAN IP or hostname}:8443
-      PUBLIC_PARTYKIT_PROTOCOL: wss
-      BASE_URL: https://${LAN_HOST}:8443
-      ORIGIN: https://${LAN_HOST}:8443
+      PUBLIC_PARTYKIT_HOST: ${LAN_HOST:?Set the host LAN IP or hostname}:2000
+      PUBLIC_PARTYKIT_PROTOCOL: ws
+      BASE_URL: http://${LAN_HOST}:8080
+      ORIGIN: http://${LAN_HOST}:8080
+      SESSION_COOKIE_SECURE: 'false'
+    ports:
+      - '${BIND_ADDRESS:-127.0.0.1}:8080:3000'
   party:
     <<: *release
     command: ['node', '../../containers/party.mjs']
@@ -32,17 +35,5 @@ services:
       APP_API_URL: http://web:3000
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run containers/host.sh setup first}
       DO_NOT_TRACK: '1'
-  proxy:
-    image: docker.io/library/caddy:2.8.4-alpine
-    restart: unless-stopped
-    depends_on:
-      - web
-      - party
-    environment:
-      LAN_HOST: ${LAN_HOST:?Set the host LAN IP or hostname}
-    volumes:
-      - ./containers/Caddyfile:/etc/caddy/Caddyfile:ro,z
-      - ${DATA_ROOT:?Set an absolute DATA_ROOT}/tls:/tls:ro,z
     ports:
-      - '${BIND_ADDRESS:-127.0.0.1}:8080:8080'
-      - '${BIND_ADDRESS:-127.0.0.1}:8443:8443'
+      - '${BIND_ADDRESS:-127.0.0.1}:2000:1999'

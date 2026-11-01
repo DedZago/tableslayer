@@ -3,6 +3,7 @@ set -euo pipefail
 cd /workspace
 rm -f /tmp/tableslayer-warm
 pnpm install --frozen-lockfile
+pnpm --filter web migrate
 
 # The watchers below rebuild on change; build up front only when the output is missing or stale
 needs_build() {

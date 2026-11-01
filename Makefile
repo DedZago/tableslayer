@@ -6,8 +6,8 @@ SENTINEL := map/pirateking-30x60.jpg
 .PHONY: dev release stop logs-dev logs-release backup-release help
 
 help:
-	@echo "make dev      build, migrate and start the development stack (http://$(LAN_HOST):5174)"
-	@echo "make release  build, migrate and start the release stack (http://$(LAN_HOST):8080)"
+	@echo "make dev      build and start the development stack (http://$(LAN_HOST):5174)"
+	@echo "make release  build and start the release stack (http://$(LAN_HOST):8080)"
 	@echo "make stop     stop both stacks"
 	@echo "make backup-release  archive the release data folder"
 
@@ -17,7 +17,6 @@ help:
 
 dev: .env
 	-$(HOST) down development
-	$(HOST) migrate development
 	@test -f "$(DATA_ROOT)/development/assets/$(SENTINEL)" || $(HOST) assets development
 	$(HOST) up development
 	@echo "App: http://$(LAN_HOST):5174  Docs: http://$(LAN_HOST):5173"
@@ -25,7 +24,6 @@ dev: .env
 
 release: .env
 	-$(HOST) down release
-	$(HOST) migrate release
 	@test -f "$(DATA_ROOT)/release/assets/$(SENTINEL)" || $(HOST) assets release
 	$(HOST) up release
 	@echo "App: http://$(LAN_HOST):8080"

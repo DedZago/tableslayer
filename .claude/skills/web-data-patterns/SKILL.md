@@ -5,7 +5,7 @@ description: Data-layer patterns for apps/web — apiFactory error semantics, mu
 
 # apps/web data & server patterns
 
-> **Freshness**: last verified 2026-10-26.
+> **Freshness**: last verified 2026-11-01.
 > Authoritative deep-dives (verified current): `docs/yjs-sync-architecture.md`, `docs/undo-redo-architecture.md`, `docs/grid-system-architecture.md`, `docs/playwright-testing-guide.md`. Prefer them over re-deriving.
 > Anchor files at the bottom — if one is missing/renamed, the code wins; update this skill.
 
@@ -38,7 +38,7 @@ All in `src/lib/queries/*.ts`, one file per domain. `mutationFactory` (`src/lib/
 - **One** app database. Schema: `src/lib/db/app/schema.ts` (21 tables). Per-table convention: `sqliteTable` → `InsertX`/`SelectX` inferred types → `insertXSchema`/`selectXSchema`/`updateXSchema` via drizzle-zod, `.extend()`ed where needed.
 - Timestamps: `integer({ mode: 'timestamp' })` = **Unix seconds** (CLAUDE.md D-5 — use `date -d @<ts>`). Booleans: `integer({ mode: 'boolean' })`. JSON: `text({ mode: 'json' }).$type<…>()`.
 - Client (`src/lib/db/app/index.ts`): a `file:` URL selects a persistent local SQLite database in all environments with no sync. Otherwise, in production an **embedded replica** (`/app/data/turso_local.db`, syncInterval 30s) with remote fallback; dev is remote-only. Wrapped in `makeResilientClient` (`resilientClient.ts`) — a Proxy that reconnect-retries once on Hrana stream errors; transactions deliberately not retried (rationale: `spec/embedded-replica-stream-recovery.md`).
-- Migrations live in `src/lib/db/app/migrations/`. **Never generate/run migrations or `pnpm run push`** — ask the user (CLAUDE.md D-3/D-4).
+- Migrations live in `src/lib/db/app/migrations/`. **Never generate/run migrations or `pnpm run push`** — ask the user (CLAUDE.md D-3/D-4). Local container stacks (release `web`, dev container) run `scripts/migrate.js` at startup: it compares the journal with `__drizzle_migrations`, takes a `VACUUM INTO` backup in `<db dir>/backups/` only when behind, applies pending migrations, and exits non-zero on failure (see `spec/automatic-startup-migrations.md`).
 
 ## Realtime (the biggest thing to internalize)
 

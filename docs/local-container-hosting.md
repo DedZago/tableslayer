@@ -31,11 +31,10 @@ The root `.env` configures Compose; `apps/web/.env` is for the original host-bas
 
 ## Development
 
-Build the development image, then **run the existing migrations yourself** to initialize its SQLite file:
+Build the development image. The development container applies pending migrations to its SQLite file each time it starts:
 
 ```sh
 docker compose -f compose.dev.yaml build
-./containers/host.sh migrate development
 ./containers/host.sh assets development
 ./containers/host.sh up development
 ```
@@ -49,24 +48,23 @@ Open `http://192.168.1.50:5174` for the app and `http://192.168.1.50:5173` for U
 ./containers/host.sh down development
 ```
 
-For an editor devcontainer, do the setup and migration steps above first, stop any standalone development stack, then reopen the repository in its container. It uses the same Compose service and data folder. Command-line development does not depend on an editor extension. Workspace dependency caches live in named container volumes; campaign data lives in your selected directory. The development container runs as root inside the container; on rootful Docker generated files can need ownership adjustment on the host. Rootless Podman maps container root to your user. Bind mounts use `:z` for SELinux sharing.
+For an editor devcontainer, do the setup steps above first, stop any standalone development stack, then reopen the repository in its container. It uses the same Compose service and data folder. Command-line development does not depend on an editor extension. Workspace dependency caches live in named container volumes; campaign data lives in your selected directory. The development container runs as root inside the container; on rootful Docker generated files can need ownership adjustment on the host. Rootless Podman maps container root to your user. Bind mounts use `:z` for SELinux sharing.
 
 The UI documentation contains upstream examples that still load sample maps from the original CDN; campaign assets and the actual application use your local backend.
 
 ## Release
 
-The release image serves the built Node application rather than Vite. Build and initialize the **separate release database**:
+The release image serves the built Node application rather than Vite. Build the release image. It uses a **separate release database**, created and migrated when the `web` service starts:
 
 ```sh
 docker compose -f compose.release.yaml build
-./containers/host.sh migrate release
 ./containers/host.sh assets release
 ./containers/host.sh up release
 ```
 
 Open `http://192.168.1.50:8080`. Local realtime uses port 2000. Allow these ports through your host firewall for your LAN clients; development additionally needs 5173, 5174, and 1999. Ports for the database and an object-store service are unnecessary: both are embedded/local. Release services restart after a host reboot when your runtime starts, and data survives container replacement or `down`.
 
-The release image deliberately keeps the migration CLI and PartyKit dependencies so operator migrations and the realtime service use the same built source. Image builds do not run migrations, contact a campaign database, or include `.env` files. The production app uses the existing Node adapter. PartyKit runs its persistent **local development emulator**, not Cloudflare Workers; this is a personal trusted-LAN deployment, not an internet production or multi-host installation. Do not run multiple app instances against these files.
+The release image deliberately keeps the migration CLI and PartyKit dependencies so startup migrations and the realtime service use the same built source. Image builds do not run migrations, contact a campaign database, or include `.env` files. The production app uses the existing Node adapter. PartyKit runs its persistent **local development emulator**, not Cloudflare Workers; this is a personal trusted-LAN deployment, not an internet production or multi-host installation. Do not run multiple app instances against these files.
 
 Wait for edits to settle before stopping the app. PartyKit persists its Y.js snapshots to `realtime/` and sends application database updates through authenticated internal callbacks. Keeping **both** directories ensures room state survives restarts even if the last database update was pending.
 
@@ -94,7 +92,7 @@ Change `DATA_ROOT` in `.env` to `/home/you/TableSlayerRestored`, then:
 ./containers/host.sh up release
 ```
 
-The archive retains its mode directory, so release backups restore as `release/` and development backups as `development/`. Restore refuses links, special files, traversal paths, and an existing destination. A restored root initially contains only the restored mode; create the other mode's folders if you also need it. Restore using the same source version first. Schema upgrades require an explicit migration step and a fresh backup; never downgrade the app against a newer schema.
+The archive retains its mode directory, so release backups restore as `release/` and development backups as `development/`. Restore refuses links, special files, traversal paths, and an existing destination. A restored root initially contains only the restored mode; create the other mode's folders if you also need it. Restore using the same source version first. Starting a newer build applies its migrations automatically (see Updating and configuration); never downgrade the app against a newer schema.
 
 ## Google Drive, Dropbox, and MEGA
 
@@ -104,7 +102,7 @@ The preferred arrangement is to exclude the live folders from sync and synchroni
 
 ## Updating and configuration
 
-Before pulling changes, make a backup and stop the selected stack with `down`. Rebuild the release image, then run migrations yourself when the upstream schema changes, before starting the updated app. The migration helper refuses to run while that stack is serving. Containers never apply migrations automatically. The existing `pnpm run push` is not part of this workflow.
+Before pulling changes, make a backup and stop the selected stack with `down`. Rebuild the release image and start the stack. On startup the `web` service (release) and the `dev` container compare the database with the migrations in the image. If the database is current, one line is logged and the app starts. If it is behind, the SQLite file is first copied with `VACUUM INTO` to `backups/app-<UTC timestamp>-before-<first pending migration>.db` next to the database (for example `release/database/backups/`), then only the pending migrations are applied in one transaction. A failed backup or migration exits the container non-zero and the app does not start; the database is left unchanged and the backup stays in place. Because the release service restarts on failure, each retry replaces the earlier backup taken before the same migration, so only one is kept per pending migration. Backups are otherwise never pruned. `./containers/host.sh migrate <mode>` remains available for manual runs. The existing `pnpm run push` is not part of this workflow.
 
 Edit root `.env` to change `DATA_ROOT`, `LAN_HOST`, or `BIND_ADDRESS`, then recreate services with `up`. If `LAN_HOST` changes, update bookmarks. The public address used by browsers differs from the internal callback addresses used by containers.
 
@@ -122,7 +120,7 @@ Compose owns environment separation, port publication, and bind mounts. The app 
 
 `containers/party.mjs` writes a temporary private PartyKit configuration with absolute source paths and passes `--persist /data/realtime` explicitly; PartyKit CLI defaults otherwise override the config-file persistence path. PartyKit calls the web service at `APP_API_URL`; web resync calls use `PARTYKIT_INTERNAL_URL`; clients use `PUBLIC_PARTYKIT_HOST` and `PUBLIC_PARTYKIT_PROTOCOL=ws` in local Compose. Without that override, the provider retains its normal cloud/localhost protocol selection. The existing Y.js persistence model is unchanged.
 
-To extend local storage, keep path validation and signed upload verification centralized; preserve the object keys stored in the database. To change realtime runtimes, preserve both named parties, their persistent snapshots, and their authenticated database callback contract. Changing schema is a separate operator-controlled migration.
+To extend local storage, keep path validation and signed upload verification centralized; preserve the object keys stored in the database. To change realtime runtimes, preserve both named parties, their persistent snapshots, and their authenticated database callback contract. Changing schema is a separate step: generated migrations are applied automatically at the next container start, after a backup.
 
 ## Verification
 

@@ -22,4 +22,4 @@ RUN pnpm --filter web build
 FROM build AS release
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 BODY_SIZE_LIMIT=20M
 WORKDIR /workspace/apps/web
-CMD ["node", "build"]
+CMD ["sh", "-c", "node scripts/migrate.js && exec node build"]

@@ -153,9 +153,12 @@
     const mid = touchMidpoint(a, b);
     const moved = Math.hypot(mid.x - twist.startMid.x, mid.y - twist.startMid.y);
     if (moved > TWO_FINGER_MOVE_PX || Math.abs(twist.total) > TWIST_START_DEG) cancelTwoFingerHold();
+    // Start following from here so the menu does not jump by the threshold
     if (!twist.active && Math.abs(twist.total) > TWIST_START_DEG) {
       twist.active = true;
       twisted = true;
+      twist.total = 0;
+      twist.startRotation = menuRotation;
     }
     if (!twist.active) return;
     // The menu turns the same way as the fingers; the container is drawn rotated by -menuRotation
@@ -274,7 +277,6 @@
       style:left="{adjustedPosition.x}px"
       style:top="{adjustedPosition.y}px"
       style:transform="rotate({-menuRotation}deg)"
-      style:will-change={twist?.active ? 'transform' : undefined}
     >
       <div class="radialMenu__ring" style:width="{radius * 2}px" style:height="{radius * 2}px"></div>
 
@@ -338,6 +340,7 @@
     width: 0;
     height: 0;
     pointer-events: none;
+    will-change: transform;
   }
 
   .radialMenu__ring {

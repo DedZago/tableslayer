@@ -55,17 +55,17 @@ players had to ask the GM to apply conditions.
 
 ## General menu (empty map)
 
-| Option   | Action                                                                   |
-| -------- | ------------------------------------------------------------------------ |
-| Measure  | Ring: line, circle, square, cone (30/60/90°), beam (5–20 ft)             |
-| Distance | Toggles distance mode                                                    |
-| AoE      | Ring: circle, cube, cone, line; selects the AoE tool with that shape     |
-| Draw     | Ring: Color (6 colors) or Effect (8 animated effects); temporary drawing |
-| Select   | Toggles select mode                                                      |
-| Clear    | Only with a selection; deselects everything                              |
-| Undo     | Keeps the menu open; disabled with "Nothing to undo"                     |
-| Redo     | Keeps the menu open; disabled with "Nothing to redo"                     |
-| Fit view | Only when zoomed                                                         |
+| Option   | Action                                                                    |
+| -------- | ------------------------------------------------------------------------- |
+| Measure  | Ring: line, circle, square, cone (30/60/90°), beam (5–20 ft)              |
+| Distance | Toggles distance mode                                                     |
+| AoE      | Ring: circle, cube, cone, line; selects the AoE tool with that shape      |
+| Draw     | Ring: colors, effect categories, eraser, clear (see `spec/tv-drawing.md`) |
+| Select   | Toggles select mode                                                       |
+| Clear    | Only with a selection; deselects everything                               |
+| Undo     | Keeps the menu open; disabled with "Nothing to undo"                      |
+| Redo     | Keeps the menu open; disabled with "Nothing to redo"                      |
+| Fit view | Only when zoomed                                                          |
 
 ## Token menu
 

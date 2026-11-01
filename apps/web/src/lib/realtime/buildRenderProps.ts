@@ -37,6 +37,8 @@ export interface LocalView {
     activeLayer?: string | null;
     lineWidth?: number;
     smoothingEnabled?: boolean;
+    tool?: 'draw' | 'erase';
+    eraseLayerIds?: string[];
   };
   /** Active measurement tool configuration (type, cone angle, beam width). */
   measurement?: { type?: number; coneAngle?: number; beamWidth?: number };
@@ -128,6 +130,8 @@ export const buildRenderProps = (snapshot: SceneSnapshot, view: LocalView, bucke
   if (view.annotations?.smoothingEnabled !== undefined) {
     props.annotations.smoothingEnabled = view.annotations.smoothingEnabled;
   }
+  if (view.annotations?.tool !== undefined) props.annotations.tool = view.annotations.tool;
+  if (view.annotations?.eraseLayerIds !== undefined) props.annotations.eraseLayerIds = view.annotations.eraseLayerIds;
 
   if (view.measurement?.type !== undefined) props.measurement.type = view.measurement.type;
   if (view.measurement?.coneAngle !== undefined) props.measurement.coneAngle = view.measurement.coneAngle;

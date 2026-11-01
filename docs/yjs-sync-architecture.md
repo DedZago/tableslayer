@@ -218,9 +218,9 @@ legacy ordinal URLs 301-redirect.
 
 ### Presence (`presence.svelte.ts`)
 
-Cursors (33ms throttle), measurements, hovered/pinned markers, and temporary player drawings ride
-the awareness protocol with a 15s heartbeat. Temporary drawings expire after 10s unless persisted
-into the doc as annotations. `suspend()` (called by `SessionDocClient.disconnect()`) stops the
+Cursors (33ms throttle), measurements, hovered/pinned markers, and the stage performance setting ride
+the awareness protocol with a 15s heartbeat. TV drawings are not presence: every stroke is written to
+the doc as a player annotation layer (`playerDrawn`), one undo step per stroke. `suspend()` (called by `SessionDocClient.disconnect()`) stops the
 heartbeat and clears every ephemeral field while keeping `stagePerformance` — never a null state,
 since y-protocols ignores `setLocalStateField` on null — so a stale cursor cannot reappear when
 the provider re-sends local state on reconnect; `resume()` restarts the heartbeat.

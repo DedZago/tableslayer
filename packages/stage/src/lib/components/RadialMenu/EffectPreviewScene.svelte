@@ -2,7 +2,9 @@
   import * as THREE from 'three';
   import { T, useTask, useThrelte } from '@threlte/core';
   import { onDestroy } from 'svelte';
+  import chroma from 'chroma-js';
   import { AnnotationEffect, getDefaultEffectProps } from '../Stage/components/AnnotationLayer/types';
+  import { annotationEffectDefinition } from '../Stage/helpers/annotationEffects';
 
   import annotationEffectsFragmentShader from '../Stage/shaders/AnnotationEffects.frag?raw';
   import annotationVertexShader from '../Stage/shaders/default.vert?raw';
@@ -99,28 +101,13 @@
   const maskTexture = shape === 'rounded' ? createRoundedSquareMaskTexture() : createCircularMaskTexture();
 
   const getEffectColor = (effect: AnnotationEffect): THREE.Vector3 => {
-    switch (effect) {
-      case AnnotationEffect.Fire:
-        return new THREE.Vector3(1.0, 0.3, 0.1);
-      case AnnotationEffect.Water:
-        return new THREE.Vector3(0.2, 0.5, 0.8);
-      case AnnotationEffect.Ice:
-        return new THREE.Vector3(0.7, 0.85, 1.0);
-      case AnnotationEffect.Magic:
-        // Saturated purple (#9333ea) to match AnnotationMaterial
-        return new THREE.Vector3(0.576, 0.2, 0.918);
-      case AnnotationEffect.Grease:
-        return new THREE.Vector3(0.3, 0.2, 0.1);
-      case AnnotationEffect.SpaceTear:
-        return new THREE.Vector3(0.2, 0.0, 0.4);
-      case AnnotationEffect.Web:
-        return new THREE.Vector3(0.9, 0.91, 0.93);
-      case AnnotationEffect.Entangle:
-        return new THREE.Vector3(0.18, 0.42, 0.12);
-      default:
-        return new THREE.Vector3(1.0, 1.0, 1.0);
-    }
+    // Same sRGB → uniform conversion as AnnotationMaterial, so previews match the map
+    const [r, g, b] = chroma(annotationEffectDefinition(effect)?.color ?? '#ffffff').gl();
+    return new THREE.Vector3(r, g, b);
   };
+
+  // A 512px preview spans about four grid cells, which suits the effects scaled by cell size
+  const PREVIEW_CELL_SIZE = 128;
 
   const emptyClippingPlanes = [
     new THREE.Vector4(0, 0, 0, 0),
@@ -152,6 +139,7 @@
       uSoftness: { value: effectProps.softness },
       uBorder: { value: previewBorder },
       uRoughness: { value: effectProps.roughness },
+      uCellSize: { value: PREVIEW_CELL_SIZE },
       uEdgeMinMipMapLevel: { value: 0 },
       uEdgeMaxMipMapLevel: { value: 4 },
       uPerformanceTier: { value: 0 },

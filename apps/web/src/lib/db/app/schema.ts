@@ -744,7 +744,8 @@ export const annotationsTable = sqliteTable(
     mask: text('mask'), // Base64-encoded RLE mask data
     visibility: integer('visibility').notNull().default(1), // StageMode enum (0=DM, 1=Player)
     order: integer('order').notNull().default(0), // For layer ordering
-    effectType: integer('effect_type') // AnnotationEffect enum (0=None, 1=Fire, etc.)
+    effectType: integer('effect_type'), // AnnotationEffect enum (0=None, 1=Fire, etc.)
+    playerDrawn: integer('player_drawn', { mode: 'boolean' }).notNull().default(false) // Drawn from the playfield (TV)
   },
   (table) => [
     index('idx_annotations_scene_id').on(table.sceneId),

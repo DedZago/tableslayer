@@ -461,12 +461,14 @@
             ? {
                 activeLayer: null,
                 lineWidth: snapAnnotationBrush(getPreference('annotationLineWidthGridUnits') || 0.5),
-                smoothingEnabled: getPreference('annotationSmoothing') ?? true
+                smoothingEnabled: getPreference('annotationSmoothing') ?? true,
+                tool: 'draw'
               }
             : {
                 activeLayer: prev.annotations.activeLayer,
                 lineWidth: prev.annotations.lineWidth,
-                smoothingEnabled: prev.annotations.smoothingEnabled
+                smoothingEnabled: prev.annotations.smoothingEnabled,
+                tool: prev.annotations.tool
               },
           marker: isSceneSwitch
             ? { snapToGrid: getPreference('markerSnapToGrid') ?? true }
@@ -2643,6 +2645,9 @@
             onBrushSizeChange={handleBrushSizeChange}
             onColorChange={handleColorChange}
             onEffectChange={handleEffectChange}
+            erasing={stageProps.annotations.tool === 'erase'}
+            onEraserToggle={() =>
+              (stageProps.annotations.tool = stageProps.annotations.tool === 'erase' ? 'draw' : 'erase')}
             onLayersClick={handleToggleAnnotationPanel}
           />
         {/if}

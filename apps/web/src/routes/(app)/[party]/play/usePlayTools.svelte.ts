@@ -1,4 +1,4 @@
-import { base64ToUint8, uint8ToBase64, type AnnotationRow, type MarkerRow } from '$lib/realtime';
+import type { MarkerRow } from '$lib/realtime';
 import { aoeFieldsFromPatch, aoeRowFromTemplate } from '$lib/utils/aoeTemplateRows';
 import {
   expandToGroups,
@@ -30,9 +30,10 @@ import {
   type StageExports
 } from '@tableslayer/stage';
 import { v4 as uuidv4 } from 'uuid';
+import { DRAW_COLORS, newPlayerLayer, playerDrawings, playerLayerFor, type DrawBrush } from './playDrawing';
 import {
   aoeMenu,
-  DRAW_COLORS,
+  drawItem,
   generalMenu,
   groupItems,
   MENU_ID,
@@ -45,8 +46,9 @@ import type { PlaySession, SessionRoute } from './usePlaySession.svelte';
 // Fog brush size in grid units (number of grid squares the brush spans)
 const PLAYFIELD_FOG_BRUSH_SIZE = 2;
 const FOG_COMMIT_DEBOUNCE_MS = 500;
-const DRAWING_IDLE_RESET_MS = 3000;
-const PERSIST_BUTTON_HIDE_MS = 3000;
+const FOG_IDLE_RESET_MS = 3000;
+// The draw tool (and its panel) turns off after this long without a stroke
+const DRAW_IDLE_MS = 30000;
 const NOTICE_MS = 2500;
 // Touchscreens may report a long press as both a hold and a contextmenu; the second open is ignored
 const MENU_REOPEN_GUARD_MS = 600;
@@ -63,13 +65,13 @@ export interface PlayToolsOptions {
 
 /**
  * Touch-play editing tools: every edit commits straight to the shared doc (fog
- * masks, persisted drawings, scene switches) or to awareness (temporary
- * drawings). There is no save pipeline here — the PartyKit server persists.
+ * masks, drawings, scene switches). There is no save pipeline here — the
+ * PartyKit server persists.
  */
 export class PlayTools {
   // Local-only view state (never shared)
   activeLayer = $state<MapLayerType>(MapLayerType.None);
-  annotationsActiveLayer = $state<string | null>(null);
+  /** Brush size in grid squares (local, applies to the next stroke) */
   lineWidth = $state(0.25);
   fogTool = $state<{ mode: DrawMode; size: number }>({ mode: DrawMode.Erase, size: PLAYFIELD_FOG_BRUSH_SIZE });
   measurement = $state<{ type: number; coneAngle?: number; beamWidth?: number }>({ type: MeasurementType.Line });
@@ -93,81 +95,72 @@ export class PlayTools {
   /** Short feedback line ("Grouped 3 items") */
   notice = $state<string | null>(null);
 
-  // Temporary drawing state
-  currentTemporaryLayerId = $state<string | null>(null);
-  tempLayerUrls = $state<Record<string, string>>({});
-
-  // Persist button
-  showPersistButton = $state(false);
-  persistButtonPosition = $state({ x: 0, y: 0 });
+  /** The draw tool's brush; the tool is on while it is set */
+  drawBrush = $state<DrawBrush | null>(null);
+  /** Where the draw panel sits (the point the menu was opened at) */
+  drawPanel = $state<{ x: number; y: number } | null>(null);
 
   #options: PlayToolsOptions;
   #menuOpenedAt = 0;
   #noticeTimer: ReturnType<typeof setTimeout> | null = null;
-  #persistButtonLayerId: string | null = null;
-  #pendingPersistPosition: { x: number; y: number } | null = null;
-  #persistButtonTimer: ReturnType<typeof setTimeout> | null = null;
+  // Id the next new player layer gets; it is shown as an empty draft layer until its first stroke saves it
+  #draftLayerId = $state(uuidv4());
+  #lastPaintBrush: Exclude<DrawBrush, { kind: 'erase' }> = { kind: 'color', color: DRAW_COLORS[0].color };
+  #drawIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  #strokeLayerIds = new Set<string>();
+  #strokeWrites: Promise<void> = Promise.resolve();
   #resetLayerTimer: ReturnType<typeof setTimeout> | null = null;
   #pendingFogCommit: { timer: ReturnType<typeof setTimeout>; sceneId: string } | null = null;
-  #expiryTicker: ReturnType<typeof setInterval>;
-  #now = $state(Date.now());
-  // Memoized base64 → bytes per layer so mask references stay stable across rebuilds
-  #tempMaskCache = new Map<string, { b64: string; bytes: Uint8Array }>();
 
   constructor(options: PlayToolsOptions) {
     this.#options = options;
-
-    // Tick once a second: expires temporary layers (display + own awareness state).
-    // Only touch the reactive clock while temp layers exist, so an idle playfield
-    // doesn't rebuild its render props every second.
-    this.#expiryTicker = setInterval(() => {
-      if (this.#temporaryLayers().length === 0) {
-        if (this.#tempMaskCache.size > 0) this.#tempMaskCache.clear();
-        return;
-      }
-      this.#now = Date.now();
-      this.#options.session.presence?.cleanupExpiredTemporaryLayers();
-      if (
-        this.currentTemporaryLayerId &&
-        !this.#temporaryLayers().some((layer) => layer.id === this.currentTemporaryLayerId)
-      ) {
-        this.currentTemporaryLayerId = null;
-      }
-    }, 1000);
   }
 
-  #decodeTempMask(layerId: string, b64: string): Uint8Array {
-    const cached = this.#tempMaskCache.get(layerId);
-    if (cached && cached.b64 === b64) return cached.bytes;
-    const bytes = base64ToUint8(b64);
-    this.#tempMaskCache.set(layerId, { b64, bytes });
-    return bytes;
+  #annotations() {
+    return this.#options.session.activeScene?.annotations ?? [];
   }
 
-  #temporaryLayers() {
-    return this.#options.session.presence?.temporaryLayers ?? [];
+  /** Another tool (measure, AoE) replaces the draw tool without clearing the brush */
+  get isDrawActive() {
+    return this.drawBrush !== null && this.activeLayer === MapLayerType.Annotation;
   }
 
-  /** Temporary drawings (all clients) as annotation layers, expired ones dropped. */
-  get tempAnnotationLayers(): AnnotationLayerData[] {
-    const layers = this.#temporaryLayers();
-    if (layers.length === 0) return []; // skip the ticking clock when idle
-    const now = this.#now;
-    return layers
-      .filter((layer) => layer.expiresAt > now || layer.id === this.currentTemporaryLayerId)
-      .map((layer) => ({
-        id: layer.id,
-        name: layer.name,
-        color: layer.color,
-        opacity: layer.opacity,
-        url: this.tempLayerUrls[layer.id] ?? null,
-        mask: layer.maskData ? this.#decodeTempMask(layer.id, layer.maskData) : null,
+  /** The layer strokes paint on: this brush's player layer, or the draft that becomes it */
+  get annotationsActiveLayer(): string | null {
+    const brush = this.drawBrush;
+    if (!brush || brush.kind === 'erase') return null;
+    return playerLayerFor(this.#annotations(), brush)?.id ?? this.#draftLayerId;
+  }
+
+  /** Eraser targets: player drawings only, so GM drawings can never be erased from the TV */
+  get eraseLayerIds(): string[] {
+    return playerDrawings(this.#annotations()).map((annotation) => annotation.id);
+  }
+
+  get playerDrawingCount() {
+    return playerDrawings(this.#annotations()).length;
+  }
+
+  /** The empty layer a new brush paints on until its first stroke writes it to the doc */
+  get draftLayers(): AnnotationLayerData[] {
+    const brush = this.drawBrush;
+    const id = this.annotationsActiveLayer;
+    if (!this.isDrawActive || !brush || brush.kind === 'erase' || id !== this.#draftLayerId) return [];
+    // Saved: the doc row takes over under the same id, so the layer never remounts
+    if (this.#annotations().some((annotation) => annotation.id === id)) return [];
+    const row = newPlayerLayer(id, '', [], brush);
+    return [
+      {
+        id,
+        name: row.name,
+        color: row.color,
+        opacity: row.opacity,
+        url: null,
+        mask: null,
         visibility: StageMode.Player,
-        effect:
-          layer.effectType && layer.effectType !== AnnotationEffect.None
-            ? getDefaultEffectProps(layer.effectType as AnnotationEffect)
-            : undefined
-      }));
+        effect: brush.kind === 'effect' ? getDefaultEffectProps(brush.effect) : undefined
+      }
+    ];
   }
 
   get selectedMarkerIds(): string[] {
@@ -259,19 +252,25 @@ export class PlayTools {
     this.menu = { target, ...point };
   }
 
+  /** The draw panel's brush button: pick another color, effect or the eraser */
+  openDrawMenu(point: { x: number; y: number }) {
+    this.#openMenu({ kind: 'draw' }, point);
+  }
+
   closeMenu() {
     this.menu = null;
   }
 
   #menuIds(collection: GroupMember['collection']): string[] {
     const target = this.menu?.target;
-    if (!target || target.kind === 'general') return [];
+    if (!target || !('members' in target)) return [];
     return target.members.filter((member) => member.collection === collection).map((member) => member.id);
   }
 
   get menuItems(): RadialMenuItemProps[] {
     const target = this.menu?.target;
     if (!target) return [];
+    if (target.kind === 'draw') return drawItem(this.playerDrawingCount).submenu ?? [];
     if (target.kind === 'general') {
       return generalMenu({
         canUndo: this.canUndo,
@@ -279,7 +278,8 @@ export class PlayTools {
         canFit: this.#options.canFit(),
         groupSelect: this.groupSelect,
         distanceMode: this.distanceMode,
-        selectionCount: this.selection.length
+        selectionCount: this.selection.length,
+        playerDrawingCount: this.playerDrawingCount
       });
     }
     const rows = this.#rows();
@@ -308,7 +308,8 @@ export class PlayTools {
   /** Hub text when nothing is pressed: what the menu acts on */
   get menuTitle(): string {
     const target = this.menu?.target;
-    if (!target || target.kind === 'general') return 'Map';
+    if (target?.kind === 'draw') return 'Draw';
+    if (!target || !('members' in target)) return 'Map';
     if (target.members.length > 1) return `${target.members.length} selected`;
     if (target.kind === 'aoe') return 'Spell area';
     return this.#markerRows([target.markerId])[0]?.title || 'Token';
@@ -317,7 +318,7 @@ export class PlayTools {
   /** The menu closes when what it acts on is gone (deleted on the GM screen, or another scene) */
   get menuTargetGone(): boolean {
     const target = this.menu?.target;
-    if (!target || target.kind === 'general') return false;
+    if (!target || !('members' in target)) return false;
     const rows = this.#rows();
     return target.kind === 'token'
       ? !rows.markers.some((marker) => marker.id === target.markerId)
@@ -342,7 +343,7 @@ export class PlayTools {
 
   toggleAoe() {
     this.activeLayer = this.isAoeActive ? MapLayerType.None : MapLayerType.AoeTemplate;
-    this.annotationsActiveLayer = null;
+    this.drawBrush = null;
     if (!this.isAoeActive) this.aoeSelectedIds = [];
   }
 
@@ -451,37 +452,60 @@ export class PlayTools {
 
   clearActiveTool() {
     this.activeLayer = MapLayerType.None;
-    this.annotationsActiveLayer = null;
-    this.currentTemporaryLayerId = null;
+    this.drawBrush = null;
+    this.drawPanel = null;
+    if (this.#drawIdleTimer) clearTimeout(this.#drawIdleTimer);
   }
 
-  /**
-   * Reset the tool 3s after the user stops drawing, and surface the persist
-   * button for the finished temporary drawing. Restarts itself while a stroke
-   * is still in progress.
-   */
+  /** Fog: reset the tool 3s after the user stops painting. Restarts itself while a stroke is in progress. */
   resetToNoneAfterDelay() {
     if (this.#resetLayerTimer) clearTimeout(this.#resetLayerTimer);
     this.#resetLayerTimer = setTimeout(() => {
-      const stage = this.#options.getStage();
-      if (stage?.annotations?.isDrawing() || stage?.fogOfWar?.isDrawing()) {
-        this.#resetLayerTimer = null;
-        this.resetToNoneAfterDelay();
-        return;
-      }
-
-      if (this.#pendingPersistPosition && this.currentTemporaryLayerId) {
-        if (this.#persistButtonTimer) clearTimeout(this.#persistButtonTimer);
-        this.#persistButtonLayerId = this.currentTemporaryLayerId;
-        this.persistButtonPosition = this.#pendingPersistPosition;
-        this.showPersistButton = true;
-        this.#pendingPersistPosition = null;
-        this.#persistButtonTimer = setTimeout(() => this.dismissPersistButton(), PERSIST_BUTTON_HIDE_MS);
-      }
-
-      this.clearActiveTool();
       this.#resetLayerTimer = null;
-    }, DRAWING_IDLE_RESET_MS);
+      if (this.#options.getStage()?.fogOfWar?.isDrawing()) return this.resetToNoneAfterDelay();
+      if (this.activeLayer === MapLayerType.FogOfWar) this.clearActiveTool();
+    }, FOG_IDLE_RESET_MS);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drawing: every stroke is saved to the doc as one undo step
+  // ---------------------------------------------------------------------------
+
+  /** Turns the draw tool on with a brush; the panel opens at `anchor` (or stays where it is) */
+  setDrawBrush(brush: DrawBrush, anchor?: { x: number; y: number }) {
+    if (brush.kind !== 'erase') this.#lastPaintBrush = brush;
+    // A fresh draft for a new brush (unsaved pixels never change color) or once the draft became a layer
+    const draftTaken = this.#annotations().some((annotation) => annotation.id === this.#draftLayerId);
+    if (draftTaken || JSON.stringify(brush) !== JSON.stringify(this.drawBrush)) this.#draftLayerId = uuidv4();
+    this.drawBrush = brush;
+    this.activeLayer = MapLayerType.Annotation;
+    if (anchor || !this.drawPanel) this.drawPanel = anchor ?? { x: window.innerWidth / 2, y: window.innerHeight };
+    this.#armDrawIdle();
+  }
+
+  /** Draw panel toggle: eraser ↔ the last color or effect */
+  toggleEraser() {
+    this.setDrawBrush(this.drawBrush?.kind === 'erase' ? this.#lastPaintBrush : { kind: 'erase' });
+  }
+
+  #armDrawIdle() {
+    if (this.#drawIdleTimer) clearTimeout(this.#drawIdleTimer);
+    this.#drawIdleTimer = setTimeout(() => {
+      this.#drawIdleTimer = null;
+      if (this.#options.getStage()?.annotations?.isDrawing()) return this.#armDrawIdle();
+      if (this.isDrawActive) this.clearActiveTool();
+    }, DRAW_IDLE_MS);
+  }
+
+  /** Removes every player drawing in the scene as one undo step */
+  clearPlayerDrawings() {
+    const ids = this.eraseLayerIds;
+    if (ids.length === 0) return;
+    this.#write((write, sceneId) => ids.forEach((id) => write.deleteAnnotation(sceneId, id)));
+    if (this.drawBrush?.kind === 'erase') this.clearActiveTool();
+    this.#say(
+      `Cleared ${ids.length === 1 ? 'the player drawing' : `${ids.length} player drawings`}. Undo brings ${ids.length === 1 ? 'it' : 'them'} back`
+    );
   }
 
   /** Several doc writes as one undo step, kept apart from the steps around it */
@@ -545,7 +569,7 @@ export class PlayTools {
   selectMenuItem(itemId: string) {
     devLog('play', 'Menu item selected:', itemId);
     const target = this.menu?.target;
-    const members = target && target.kind !== 'general' ? target.members : [];
+    const members = target && 'members' in target ? target.members : [];
     const markerIds = this.#menuIds('markers');
     const aoeIds = this.#menuIds('aoeTemplates');
     const valueOf = (prefix: string) => itemId.slice(prefix.length);
@@ -578,13 +602,15 @@ export class PlayTools {
       this.setAoeShape(valueOf(MENU_ID.aoeShape) as AoeShape);
       return;
     }
+    // The panel opens where the menu was; switching brushes from the panel leaves it in place
+    const anchor = this.menu && this.menu.target.kind !== 'draw' ? { x: this.menu.x, y: this.menu.y } : undefined;
     if (itemId.startsWith(MENU_ID.drawColor)) {
       const color = DRAW_COLORS.find(({ id }) => id === valueOf(MENU_ID.drawColor))?.color;
-      if (color) this.#startTemporaryDrawing(color);
+      if (color) this.setDrawBrush({ kind: 'color', color }, anchor);
       return;
     }
     if (itemId.startsWith(MENU_ID.drawEffect)) {
-      this.#startTemporaryDrawing('#ffffff', Number(valueOf(MENU_ID.drawEffect)) as AnnotationEffect);
+      this.setDrawBrush({ kind: 'effect', effect: Number(valueOf(MENU_ID.drawEffect)) as AnnotationEffect }, anchor);
       return;
     }
     if (itemId.startsWith(MENU_ID.aoeEffect)) {
@@ -631,6 +657,12 @@ export class PlayTools {
       case MENU_ID.fit:
         this.#options.onFit();
         return;
+      case MENU_ID.drawEraser:
+        this.setDrawBrush({ kind: 'erase' }, anchor);
+        return;
+      case MENU_ID.drawClear:
+        this.clearPlayerDrawings();
+        return;
       case MENU_ID.newCondition:
         if (this.menu) this.conditionForm = { x: this.menu.x, y: this.menu.y, markerIds };
         return;
@@ -653,28 +685,6 @@ export class PlayTools {
       default:
         this.#groupAction(itemId, members);
     }
-  }
-
-  #startTemporaryDrawing(color: string, effectType?: AnnotationEffect) {
-    const presence = this.#options.session.presence;
-    if (!presence) return;
-
-    // Continue on the existing layer when the same color is picked again
-    const existing = this.currentTemporaryLayerId
-      ? this.#temporaryLayers().find((l) => l.id === this.currentTemporaryLayerId && l.color === color && !effectType)
-      : null;
-
-    if (!existing) {
-      this.currentTemporaryLayerId = uuidv4();
-      presence.broadcastTemporaryLayer(
-        presence.createTemporaryLayer(this.currentTemporaryLayerId, color, '', { effectType })
-      );
-    }
-
-    this.annotationsActiveLayer = this.currentTemporaryLayerId;
-    this.activeLayer = MapLayerType.Annotation;
-    this.lineWidth = 0.25;
-    this.resetToNoneAfterDelay();
   }
 
   /** Stage callback: a fog stroke changed — commit the RLE to the doc, debounced. */
@@ -721,107 +731,55 @@ export class PlayTools {
     }
   }
 
-  /** Stage callback: an annotation stroke finished. */
-  onAnnotationUpdate = (layerId: string, getBlob: () => Promise<Blob>, endPosition?: { x: number; y: number }) => {
-    this.resetToNoneAfterDelay();
-
-    getBlob().then(async (resolved) => {
-      this.tempLayerUrls[layerId] = URL.createObjectURL(resolved);
-
-      const presence = this.#options.session.presence;
-      const stage = this.#options.getStage();
-      const tempLayerId = this.currentTemporaryLayerId;
-      if (!presence || !stage?.annotations || !tempLayerId) return;
-
-      try {
-        const current = this.#temporaryLayers().find((l) => l.id === tempLayerId);
-        const rle = await stage.annotations.toRLE();
-        if (rle && rle.length > 0) {
-          presence.broadcastTemporaryLayer(
-            presence.createTemporaryLayer(tempLayerId, current?.color ?? '#ffffff', uint8ToBase64(rle), {
-              effectType: current?.effectType
-            })
-          );
-          if (endPosition) this.#pendingPersistPosition = endPosition;
-        }
-      } catch (error) {
-        devError('play', 'Failed to broadcast temporary layer', error);
-      }
-    });
+  /**
+   * Stage callback, once per layer a stroke touched (an eraser stroke can touch several).
+   * The masks are read back at once, in stroke order, and written together as one undo step.
+   */
+  onAnnotationUpdate = (layerId: string) => {
+    this.#armDrawIdle();
+    if (this.#strokeLayerIds.size === 0) queueMicrotask(() => this.#saveStroke());
+    this.#strokeLayerIds.add(layerId);
   };
 
-  /** Persist the finished temporary drawing as a permanent annotation in the doc. */
-  async persistCurrentDrawing() {
-    const layerId = this.#persistButtonLayerId;
-    const { session } = this.#options;
+  #saveStroke() {
+    const { session, getStage } = this.#options;
+    const ids = [...this.#strokeLayerIds];
+    this.#strokeLayerIds.clear();
+    const stage = getStage();
     const sceneId = session.activeSceneId;
-    const snapshot = session.activeScene;
-    this.dismissPersistButton();
+    const brush = this.drawBrush;
+    const draftId = this.#draftLayerId;
+    if (!stage?.annotations || !sceneId) return;
 
-    if (!layerId || !sceneId || !snapshot || !session.client) return;
-    const tempLayer = this.#temporaryLayers().find((l) => l.id === layerId);
-    if (!tempLayer?.maskData) return;
-
-    try {
-      const mask = base64ToUint8(tempLayer.maskData);
-      const minOrder = Math.min(1, ...snapshot.annotations.map((a) => a.order));
-      const annotation: AnnotationRow = {
-        id: uuidv4(),
-        sceneId,
-        name: tempLayer.effectType ? 'Player effect' : 'Player drawing',
-        opacity: 1,
-        color: tempLayer.color,
-        url: null,
-        visibility: StageMode.Player,
-        order: minOrder - 1,
-        effectType: tempLayer.effectType ?? null
-      };
-
-      // The mask rides into the doc with the row and reaches the new layer
-      // component as a declarative prop — nothing to coordinate here.
-      session.client.write.upsertAnnotation(sceneId, annotation, mask);
-
-      session.presence?.removeTemporaryLayer(layerId);
-      this.#tempMaskCache.delete(layerId);
-      if (this.currentTemporaryLayerId === layerId) this.currentTemporaryLayerId = null;
-      devLog('play', 'Persisted drawing as annotation', annotation.id);
-    } catch (error) {
-      devError('play', 'Failed to persist drawing', error);
-    }
-  }
-
-  dismissPersistButton() {
-    if (this.#persistButtonTimer) {
-      clearTimeout(this.#persistButtonTimer);
-      this.#persistButtonTimer = null;
-    }
-    this.showPersistButton = false;
-    this.#persistButtonLayerId = null;
-  }
-
-  #deleteAllDrawings() {
-    const { session } = this.#options;
-    const sceneId = session.activeSceneId;
-    const snapshot = session.activeScene;
-    if (!sceneId || !snapshot || !session.client) return;
-
-    for (const annotation of snapshot.annotations) {
-      session.client.write.deleteAnnotation(sceneId, annotation.id);
-    }
-    for (const layer of this.#temporaryLayers()) {
-      session.presence?.removeTemporaryLayer(layer.id);
-    }
-    this.tempLayerUrls = {};
-    this.#tempMaskCache.clear();
-    this.clearActiveTool();
-    devLog('play', 'Deleted all drawings for scene', sceneId);
+    // The readback snapshots each mask now; awaiting comes later
+    const masks = Promise.all(ids.map((id) => stage.annotations.toRLE(id)));
+    this.#strokeWrites = this.#strokeWrites.then(async () => {
+      try {
+        const rles = await masks;
+        const { client } = session;
+        if (!client) return;
+        const annotations = session.activeSceneId === sceneId ? this.#annotations() : [];
+        client.stopCapturing();
+        ids.forEach((id, index) => {
+          const rle = rles[index];
+          if (rle.length === 0) return;
+          if (annotations.some((annotation) => annotation.id === id) || session.activeSceneId !== sceneId) {
+            client.write.setAnnotationMask(sceneId, id, rle);
+          } else if (id === draftId && brush && brush.kind !== 'erase') {
+            client.write.upsertAnnotation(sceneId, newPlayerLayer(id, sceneId, annotations, brush), rle);
+          }
+        });
+        client.stopCapturing();
+      } catch (error) {
+        devError('play', 'Failed to save drawing', error);
+      }
+    });
   }
 
   destroy() {
-    clearInterval(this.#expiryTicker);
     if (this.#noticeTimer) clearTimeout(this.#noticeTimer);
     if (this.#resetLayerTimer) clearTimeout(this.#resetLayerTimer);
-    if (this.#persistButtonTimer) clearTimeout(this.#persistButtonTimer);
+    if (this.#drawIdleTimer) clearTimeout(this.#drawIdleTimer);
     if (this.#pendingFogCommit) clearTimeout(this.#pendingFogCommit.timer);
   }
 }

@@ -12,7 +12,22 @@ export enum AnnotationEffect {
   Grease = 5,
   Ice = 6,
   Web = 7,
-  Entangle = 8
+  Entangle = 8,
+  // Persisted as annotations.effect_type: append new effects, never renumber
+  Lava = 9,
+  Lightning = 10,
+  Acid = 11,
+  Radiant = 12,
+  Necrotic = 13,
+  Force = 14,
+  Darkness = 15,
+  Mud = 16,
+  Blood = 17,
+  Thorns = 18,
+  PoisonGas = 19,
+  FogCloud = 20,
+  Sleet = 21,
+  InsectSwarm = 22
 }
 
 /**
@@ -80,6 +95,16 @@ export interface AnnotationsLayerProps {
    * Default: true in editor, false in play view
    */
   smoothingEnabled?: boolean;
+
+  /**
+   * 'erase' removes painted pixels instead of painting. Default 'draw'
+   */
+  tool?: 'draw' | 'erase';
+
+  /**
+   * Layers the eraser works on. Without it the eraser works on the active layer only
+   */
+  eraseLayerIds?: string[];
 }
 
 /**
@@ -131,8 +156,8 @@ export interface AnnotationLayerData {
 
 export interface AnnotationExports {
   clear: (layerId: string) => void;
-  toPng: () => Promise<Blob>;
-  toRLE: () => Promise<Uint8Array>;
+  toPng: (layerId?: string) => Promise<Blob>;
+  toRLE: (layerId?: string) => Promise<Uint8Array>;
   fromRLE: (rleData: Uint8Array, width: number, height: number) => Promise<void>;
   loadMask: (layerId: string, rleData: Uint8Array) => Promise<void>;
   isDrawing: () => boolean;
@@ -204,7 +229,21 @@ export const AnnotationEffectDefaults: Record<AnnotationEffect, Omit<AnnotationE
     softness: 0.3,
     border: 0.5,
     roughness: 0.5
-  }
+  },
+  [AnnotationEffect.Lava]: { speed: 0.6, intensity: 1.0, softness: 0.25, border: 0, roughness: 0.4 },
+  [AnnotationEffect.Lightning]: { speed: 1.0, intensity: 1.0, softness: 0.3, border: 0, roughness: 0.3 },
+  [AnnotationEffect.Acid]: { speed: 0.8, intensity: 1.0, softness: 0.3, border: 0, roughness: 0.4 },
+  [AnnotationEffect.Radiant]: { speed: 0.8, intensity: 1.0, softness: 0.4, border: 0, roughness: 0.2 },
+  [AnnotationEffect.Necrotic]: { speed: 0.8, intensity: 1.0, softness: 0.3, border: 0, roughness: 0.4 },
+  [AnnotationEffect.Force]: { speed: 1.0, intensity: 1.0, softness: 0.2, border: 0, roughness: 0.1 },
+  [AnnotationEffect.Darkness]: { speed: 0.8, intensity: 1.0, softness: 0.5, border: 0, roughness: 0.5 },
+  [AnnotationEffect.Mud]: { speed: 0.6, intensity: 1.0, softness: 0.3, border: 0, roughness: 0.5 },
+  [AnnotationEffect.Blood]: { speed: 0.5, intensity: 1.0, softness: 0.2, border: 0, roughness: 0.55 },
+  [AnnotationEffect.Thorns]: { speed: 1.0, intensity: 1.0, softness: 0.25, border: 0, roughness: 0.5 },
+  [AnnotationEffect.PoisonGas]: { speed: 1.0, intensity: 1.0, softness: 0.7, border: 0, roughness: 0.4 },
+  [AnnotationEffect.FogCloud]: { speed: 1.0, intensity: 1.0, softness: 0.7, border: 0, roughness: 0.4 },
+  [AnnotationEffect.Sleet]: { speed: 0.6, intensity: 1.0, softness: 0.4, border: 0, roughness: 0.3 },
+  [AnnotationEffect.InsectSwarm]: { speed: 0.8, intensity: 1.0, softness: 0.5, border: 0, roughness: 0.4 }
 };
 
 /**

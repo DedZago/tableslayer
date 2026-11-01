@@ -141,6 +141,8 @@ export interface AnnotationRow {
   visibility: number;
   order: number;
   effectType: number | null;
+  /** Drawn from the playfield (TV): the only layers the TV eraser and Clear drawings touch */
+  playerDrawn?: boolean;
 }
 
 export interface AoeTemplateRow {

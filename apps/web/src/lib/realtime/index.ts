@@ -36,14 +36,7 @@ export {
   type SleepReason,
   type WakeReason
 } from './idlePolicy';
-export {
-  PresenceChannel,
-  TEMPORARY_LAYER_TTL_MS,
-  type CursorData,
-  type MeasurementData,
-  type MeasurementStyleProps,
-  type TemporaryLayer
-} from './presence.svelte';
+export { PresenceChannel, type CursorData, type MeasurementData, type MeasurementStyleProps } from './presence.svelte';
 export { SessionDocClient, type ConnectionState, type SessionDocClientOptions } from './SessionDocClient.svelte';
 export { SleepController, type SleepControllerOptions } from './SleepController.svelte';
 export { reuseUnchanged } from './structuralSharing';

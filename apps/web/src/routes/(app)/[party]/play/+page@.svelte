@@ -26,10 +26,10 @@
     type StageExports,
     type StageProps
   } from '@tableslayer/stage';
-  import { PersistButton } from '@tableslayer/ui';
   import { IconArrowBackUp, IconX } from '@tabler/icons-svelte';
   import { onMount, untrack } from 'svelte';
   import TvConditionForm from './TvConditionForm.svelte';
+  import TvDrawPanel from './TvDrawPanel.svelte';
   import PauseOverlay from './PauseOverlay.svelte';
   import PlayToolbar from './PlayToolbar.svelte';
   import SleepOverlay from './SleepOverlay.svelte';
@@ -204,7 +204,9 @@
         annotations: {
           activeLayer: tools.annotationsActiveLayer,
           lineWidth: tools.lineWidth,
-          smoothingEnabled: false
+          smoothingEnabled: false,
+          tool: tools.drawBrush?.kind === 'erase' ? 'erase' : 'draw',
+          eraseLayerIds: tools.eraseLayerIds
         },
         measurement: tools.measurement,
         aoeTemplates: {
@@ -216,7 +218,7 @@
       },
       data.bucketUrl
     );
-    props.annotations.layers = [...tools.tempAnnotationLayers, ...props.annotations.layers];
+    props.annotations.layers = [...tools.draftLayers, ...props.annotations.layers];
     props.performanceTier = stagePerformance.effectiveTier;
     props.display.maxPixelRatio = stagePerformance.maxPixelRatio;
     // Structural sharing: unchanged subtrees keep their identity so stage-internal
@@ -255,6 +257,13 @@
     if (remote && remote !== stagePerformance.setting) {
       stagePerformance.setSetting(remote);
     }
+  });
+
+  // The draw panel's brush preview: one grid cell in screen pixels, refreshed as the view zooms
+  const viewCellSize = $derived.by(() => {
+    void renderedProps.scene.zoom;
+    void renderedProps.display.resolution.x;
+    return tools.drawPanel && stage ? stage.scene.gridCellScreenSize() : 0;
   });
 
   const sceneIsChanging = $derived(session.activeSceneId !== null && session.activeSceneId !== renderedSceneId);
@@ -506,11 +515,16 @@
     };
   });
 
-  // The menu closes with the scene it was opened on, on pause, and when its token or shape is deleted
+  // The menu and the draw tool close with the scene they were opened on, on pause, and when the menu's token or shape is deleted
   $effect(() => {
     void session.activeSceneId;
-    if (gameIsPaused) untrack(() => tools.closeMenu());
-    return () => untrack(() => tools.closeMenu());
+    const close = () =>
+      untrack(() => {
+        tools.closeMenu();
+        if (tools.isDrawActive) tools.clearActiveTool();
+      });
+    if (gameIsPaused) close();
+    return close;
   });
   $effect(() => {
     if (tools.menuTargetGone) untrack(() => tools.closeMenu());
@@ -588,7 +602,7 @@
       ? createConditionalActivityTimer(
           5000,
           () => tools.clearActiveTool(),
-          () => tools.activeLayer !== MapLayerType.None && !tools.isAoeActive,
+          () => tools.activeLayer !== MapLayerType.None && !tools.isAoeActive && !tools.isDrawActive,
           ['mousedown', 'mousemove', 'touchstart', 'touchmove'],
           stageElement
         )
@@ -731,6 +745,25 @@
   <div class="playNotice" role="status">{tools.notice}</div>
 {/if}
 
+{#if tools.isDrawActive && tools.drawBrush && tools.drawPanel && !gameIsPaused}
+  <TvDrawPanel
+    position={tools.drawPanel}
+    brush={tools.drawBrush}
+    brushSize={tools.lineWidth}
+    cellSize={viewCellSize}
+    canUndo={tools.canUndo}
+    canErase={tools.playerDrawingCount > 0}
+    onBrushSizeChange={(size) => (tools.lineWidth = size)}
+    onBrushClick={(point) => {
+      tools.closeMenu();
+      tools.openDrawMenu(point);
+    }}
+    onEraserToggle={() => tools.toggleEraser()}
+    onUndo={() => tools.undo()}
+    onDone={() => tools.clearActiveTool()}
+  />
+{/if}
+
 {#if tools.conditionForm}
   <TvConditionForm
     position={tools.conditionForm}
@@ -760,13 +793,6 @@
     tools.closeMenu();
     tools.openMenuAt(point);
   }}
-/>
-
-<PersistButton
-  visible={tools.showPersistButton}
-  position={tools.persistButtonPosition}
-  onPersist={() => tools.persistCurrentDrawing()}
-  onDismiss={() => tools.dismissPersistButton()}
 />
 
 <style>

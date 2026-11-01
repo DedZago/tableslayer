@@ -266,7 +266,8 @@ export const POST = async ({ request, locals }: RequestEvent) => {
             mask: annotationData.mask || null, // Preserve the RLE mask data
             visibility: annotationData.visibility,
             order: annotationData.order,
-            effectType: annotationData.effectType ?? null
+            effectType: annotationData.effectType ?? null,
+            playerDrawn: annotationData.playerDrawn ?? false
           };
 
           await db

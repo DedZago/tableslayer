@@ -51,34 +51,18 @@ export interface MeasurementStyleProps {
   coneAngle?: number;
 }
 
-export interface TemporaryLayer {
-  id: string;
-  isTemporary: boolean;
-  createdAt: number;
-  expiresAt: number;
-  color: string;
-  maskData: string; // Base64 RLE data (small enough for awareness payloads)
-  creatorId: string;
-  opacity: number;
-  name: string;
-  effectType?: number;
-}
-
-export const TEMPORARY_LAYER_TTL_MS = 10000;
-
 /** Refresh awareness before Y.js's 30s timeout drops idle clients. */
 const HEARTBEAT_INTERVAL_MS = 15000;
 
 /**
  * Reactive wrapper around Y.js awareness for all ephemeral, never-persisted state:
- * cursors, measurements, hovered/pinned markers, and temporary player drawings.
+ * cursors, measurements, hovered and pinned markers, and the stage performance setting.
  */
 export class PresenceChannel {
   cursors = $state<Record<string, CursorData>>({});
   measurements = $state<Record<string, MeasurementData>>({});
   hoveredMarker = $state<HoveredMarker | null>(null);
   pinnedMarkers = $state<string[]>([]);
-  temporaryLayers = $state<TemporaryLayer[]>([]);
   stagePerformance = $state<StagePerformanceSetting | null>(null);
 
   #awareness: Awareness;
@@ -124,7 +108,6 @@ export class PresenceChannel {
     const measurements: Record<string, MeasurementData> = {};
     let hoveredMarker: HoveredMarker | null = null;
     let pinnedMarkers: string[] = [];
-    const temporaryLayers: TemporaryLayer[] = [];
     let stagePerformance: StagePerformanceSetting | null = null;
 
     this.#awareness.getStates().forEach((state, clientId) => {
@@ -140,9 +123,6 @@ export class PresenceChannel {
       if (Array.isArray(state.pinnedMarkers) && state.pinnedMarkers.length > 0) {
         pinnedMarkers = state.pinnedMarkers;
       }
-      if (Array.isArray(state.temporaryLayers)) {
-        temporaryLayers.push(...state.temporaryLayers);
-      }
       if (state.stagePerformance?.setting) {
         stagePerformance = state.stagePerformance.setting as StagePerformanceSetting;
       }
@@ -152,7 +132,6 @@ export class PresenceChannel {
     this.measurements = measurements;
     this.hoveredMarker = hoveredMarker;
     this.pinnedMarkers = pinnedMarkers;
-    this.temporaryLayers = temporaryLayers;
     this.stagePerformance = stagePerformance;
   };
 
@@ -218,59 +197,6 @@ export class PresenceChannel {
    */
   updateStagePerformance(setting: StagePerformanceSetting) {
     this.#awareness.setLocalStateField('stagePerformance', { setting, userId: this.#userId });
-  }
-
-  #ownTemporaryLayers(): TemporaryLayer[] {
-    const layers = this.#awareness.getLocalState()?.temporaryLayers;
-    return Array.isArray(layers) ? layers : [];
-  }
-
-  broadcastTemporaryLayer(layer: TemporaryLayer) {
-    // Never mutate the stored array: y-protocols deep-compares prev vs next
-    // state to decide whether to emit 'change', and an in-place edit makes the
-    // comparison see "no change" — our own reactive state would go stale.
-    const layers = this.#ownTemporaryLayers();
-    const index = layers.findIndex((l) => l.id === layer.id);
-    const next = index >= 0 ? layers.map((l, i) => (i === index ? layer : l)) : [...layers, layer];
-    this.#awareness.setLocalStateField('temporaryLayers', next);
-  }
-
-  removeTemporaryLayer(layerId: string) {
-    this.#awareness.setLocalStateField(
-      'temporaryLayers',
-      this.#ownTemporaryLayers().filter((l) => l.id !== layerId)
-    );
-  }
-
-  /** Drop this client's expired temporary layers; call on a coarse interval. */
-  cleanupExpiredTemporaryLayers() {
-    const now = Date.now();
-    const layers = this.#ownTemporaryLayers();
-    const valid = layers.filter((l) => l.expiresAt > now);
-    if (valid.length !== layers.length) {
-      this.#awareness.setLocalStateField('temporaryLayers', valid);
-    }
-  }
-
-  createTemporaryLayer(
-    layerId: string,
-    color: string,
-    maskData: string,
-    options?: { ttlMs?: number; effectType?: number }
-  ): TemporaryLayer {
-    const now = Date.now();
-    return {
-      id: layerId,
-      isTemporary: true,
-      createdAt: now,
-      expiresAt: now + (options?.ttlMs ?? TEMPORARY_LAYER_TTL_MS),
-      color,
-      maskData,
-      creatorId: this.#userId,
-      opacity: 1,
-      name: 'Temporary drawing',
-      effectType: options?.effectType
-    };
   }
 
   destroy() {

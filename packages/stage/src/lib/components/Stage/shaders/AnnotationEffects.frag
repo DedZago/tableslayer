@@ -16,6 +16,8 @@ uniform float uIntensity;
 uniform float uSoftness;
 uniform float uBorder;
 uniform float uRoughness;
+// Grid cell size in mask texture pixels (scales effects 9-22 like AoE templates)
+uniform float uCellSize;
 
 uniform int uEdgeMinMipMapLevel;
 uniform int uEdgeMaxMipMapLevel;
@@ -1372,6 +1374,226 @@ vec4 entangleEffect(vec2 uv, vec2 texSize, float time) {
 }
 #endif
 
+#if EFFECT_TYPE >= 9 && EFFECT_TYPE <= 22
+// Effects 9-22 are ported from AoeTemplate.frag. They work in grid cells (c),
+// feet (p), the distance to the drawn edge in feet (d, negative inside) and a
+// depth that reaches 1 about a cell inside the drawing.
+float hash12(vec2 p) {
+  vec3 q = fract(p.xyx * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+
+vec2 hash22(vec2 p) {
+  vec3 q = fract(p.xyx * vec3(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.xx + q.yz) * q.zy);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
+    mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+float fbmV(vec2 p) {
+  int octaves = uPerformanceTier == 0 ? 4 : (uPerformanceTier == 1 ? 3 : 2);
+  float s = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    if (i >= octaves) break;
+    s += a * vnoise(p);
+    p = p * 2.03 + 17.0;
+    a *= 0.5;
+  }
+  return s;
+}
+
+// Returns (F1, F2 - F1) for a jittered 3x3 Voronoi; the jitter is animated by t
+vec2 voronoi(vec2 p, float t) {
+  vec2 n = floor(p);
+  vec2 f = fract(p);
+  float d1 = 8.0;
+  float d2 = 8.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 g = vec2(float(i), float(j));
+      vec2 o = 0.5 + 0.5 * sin(t + 6.2831853 * hash22(n + g));
+      vec2 r = g + o - f;
+      float dd = dot(r, r);
+      if (dd < d1) {
+        d2 = d1;
+        d1 = dd;
+      } else if (dd < d2) {
+        d2 = dd;
+      }
+    }
+  }
+  return vec2(sqrt(d1), sqrt(d2) - sqrt(d1));
+}
+
+vec4 groundEffect(vec2 p, vec2 c, float d, float depth, float inside, float t) {
+#if EFFECT_TYPE == 9
+  // Lava: dark crust split by glowing, slowly drifting cracks
+  float heat = fbmV(c * 1.6 - vec2(0.0, t * 0.25));
+  vec2 v = voronoi(c * 1.2 + vec2(t * 0.04, t * 0.025) + heat * 0.7, t * 0.15);
+  float cracks = 1.0 - smoothstep(0.0, 0.1 + 0.08 * depth, v.y);
+  float pulse = 0.75 + 0.25 * sin(t * 2.0 + heat * 6.0);
+  vec3 crust = mix(vec3(0.07, 0.025, 0.015), vec3(0.24, 0.07, 0.03), heat);
+  vec3 glow = mix(vec3(1.0, 0.22, 0.02), vec3(1.4, 0.9, 0.3), heat) * pulse;
+  float molten = max(cracks, (1.0 - depth) * 0.45 * heat);
+  return vec4(mix(crust, glow, molten), inside * 0.95);
+
+#elif EFFECT_TYPE == 10
+  // Lightning
+  vec2 v = voronoi(c * 1.6, floor(t * 12.0));
+  float arcs = (1.0 - smoothstep(0.0, 0.07, v.y)) * step(0.3, hash12(floor(c * 1.6) + vec2(floor(t * 12.0))));
+  float flicker = 0.7 + 0.3 * hash12(vec2(floor(t * 20.0)));
+  float arc = arcs * flicker * inside;
+  float haze = 0.5 + 0.5 * fbmV(c * 1.5 + vec2(t * 0.6, -t * 0.4));
+  vec3 col = mix(vec3(0.15, 0.3, 0.9) * (0.6 + 0.6 * haze), vec3(1.2, 1.3, 1.6), arc);
+  return vec4(col, max(inside * (0.3 + 0.25 * haze), arc));
+
+#elif EFFECT_TYPE == 11 || EFFECT_TYPE == 19
+  // Acid (11) and poison gas (19)
+#if EFFECT_TYPE == 19
+  vec3 gasColor = vec3(0.35, 0.8, 0.2);
+#else
+  vec3 gasColor = vec3(0.7, 0.9, 0.1);
+#endif
+  float g = fbmV(c * 0.8 + vec2(t * 0.15, t * 0.07)) * fbmV(c * 1.6 - vec2(t * 0.1));
+  float bubble = 0.0;
+#if EFFECT_TYPE == 11
+  vec2 bubbleCoord = c * 5.0 + vec2(0.0, -t * 1.2);
+  vec2 bubbleCell = floor(bubbleCoord);
+  float bubbleDist = length(fract(bubbleCoord) - (0.25 + 0.5 * hash22(bubbleCell)));
+  bubble = step(0.65, hash12(bubbleCell)) * (1.0 - smoothstep(0.08, 0.16, bubbleDist)) * inside;
+  float a = inside * (0.45 + 0.45 * g);
+#else
+  float a = smoothstep(-2.5, 0.0, -d) * (0.5 + 0.7 * g) * max(inside, 0.4);
+#endif
+  return vec4(gasColor + bubble * 0.3, clamp(a + bubble * 0.3, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 12
+  // Radiant: drifting shafts of golden light with rising motes
+  float shafts = pow(0.5 + 0.5 * sin(c.x * 3.5 + c.y * 1.7 + fbmV(c * 0.7 + vec2(t * 0.1)) * 4.0 + t * 1.5), 4.0);
+  float glow = 0.75 + 0.25 * fbmV(c * 1.2 - vec2(0.0, t * 0.2));
+  float motes = step(0.99, hash12(floor(c * 10.0 + vec2(0.0, t))));
+  vec3 col = vec3(1.1, 0.88, 0.45) * (glow + 0.6 * shafts) + vec3(motes * 1.5, motes * 1.4, motes);
+  return vec4(col, clamp(inside * (0.45 + 0.45 * shafts) + motes * inside, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 13
+  // Necrotic: dark ground with pulsing sickly veins
+  float veins = 1.0 - smoothstep(0.0, 0.07, voronoi(c * 1.5, 0.0).y);
+  float pulse = 0.6 + 0.4 * sin(t * 2.0 - fbmV(c * 0.5) * 8.0);
+  vec3 base = vec3(0.08, 0.14, 0.07) * (0.7 + 0.3 * fbmV(c));
+  vec3 col = base + vec3(0.4, 1.0, 0.3) * pulse * veins;
+  return vec4(col, clamp(0.75 * inside + veins * pulse * 0.5 * inside, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 14
+  // Force: shimmering hexagonal lattice in the layer color
+  float u0 = c.y * 2.0;
+  float u1 = (c.x * 0.8660254 + c.y * 0.5) * 2.0;
+  float u2 = (-c.x * 0.8660254 + c.y * 0.5) * 2.0;
+  float dl = min(min(min(fract(u0), 1.0 - fract(u0)), min(fract(u1), 1.0 - fract(u1))), min(fract(u2), 1.0 - fract(u2)));
+  float lines = 1.0 - smoothstep(0.0, 0.05, dl);
+  float shimmer = 0.7 + 0.3 * sin(t * 3.0 + c.x * 2.0);
+  return vec4(uBaseColor * (0.6 + lines * shimmer), clamp(inside * (0.3 + 0.6 * lines * shimmer), 0.0, 1.0));
+
+#elif EFFECT_TYPE == 15
+  // Darkness: near-black with creeping tendrils past the edge
+  float w = fbmV(c + vec2(fbmV(c * 2.0 + vec2(t * 0.2))));
+  vec3 col = vec3(0.02, 0.0, 0.04) + vec3(0.25, 0.1, 0.4) * w * 0.15;
+  float tendrils = (1.0 - smoothstep(0.0, 1.5, d)) * fbmV(c * 3.0 + vec2(t * 0.3));
+  float a = 0.92 * inside + tendrils * 0.8 * (1.0 - inside);
+  return vec4(col, clamp(a, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 16
+  // Mud
+  float m = fbmV(c * 1.3);
+  float puddle = smoothstep(0.55, 0.6, m);
+  float ripple = sin(length(fract(c) - 0.5) * 20.0 - t * 2.0) * 0.05;
+  vec3 mud = mix(vec3(0.25, 0.16, 0.08), vec3(0.42, 0.3, 0.16), m);
+  vec3 water = vec3(0.2, 0.18, 0.12) + ripple;
+  vec3 col = mix(mud, water, puddle) + step(0.9, fract((c.x + c.y) * 2.0)) * 0.15;
+  return vec4(col, 0.85 * inside);
+
+#elif EFFECT_TYPE == 17
+  // Blood: dark red pools with a slow wet sheen
+  float n = fbmV(c * 1.5 + vec2(t * 0.02));
+  float pool = smoothstep(0.3, 0.6, n + depth * 0.4);
+  vec3 col = mix(vec3(0.38, 0.02, 0.03), vec3(0.17, 0.0, 0.01), pool);
+  float gloss = pow(clamp((fbmV(c * 4.0 + vec2(t * 0.05, -t * 0.03)) - 0.55) * 2.2, 0.0, 1.0), 3.0);
+  col += vec3(0.55, 0.25, 0.25) * gloss * depth;
+  return vec4(col, inside * (0.72 + 0.2 * pool));
+
+#elif EFFECT_TYPE == 18
+  // Thorns (spike growth)
+  vec2 id = floor(c * 2.0);
+  vec2 q = fract(c * 2.0) - 0.5;
+  float h = hash12(id);
+  float ang = atan(q.y, q.x) + 0.05 * sin(t + h * 6.0);
+  float r = length(q);
+  float spikeRadius = 0.35 * pow(abs(cos(ang * (3.0 + floor(h * 3.0)))), 8.0);
+  float spikes = 1.0 - smoothstep(0.0, 0.02, r - spikeRadius);
+  float g = fbmV(c * 1.5);
+  vec3 ground = mix(vec3(0.12, 0.09, 0.05), vec3(0.1, 0.18, 0.06), g);
+  vec3 thorn = mix(vec3(0.45, 0.3, 0.12), vec3(0.3, 0.5, 0.2), h);
+  return vec4(mix(ground, thorn, spikes), inside * 0.8);
+
+#elif EFFECT_TYPE == 20
+  // Fog cloud
+  float f1 = fbmV(c * 0.7 + vec2(t * 0.05, 0.0));
+  float f2 = fbmV(c * 1.3 - vec2(t * 0.08));
+  float dens = 0.5 * (f1 + f2);
+  vec3 col = vec3(0.85, 0.87, 0.9) * (0.9 + 0.2 * dens);
+  return vec4(col, 0.75 * smoothstep(-2.5, 0.0, -d) * (0.6 + 0.4 * dens) * max(inside, 0.4));
+
+#elif EFFECT_TYPE == 21
+  // Sleet: slanted icy streaks
+  vec2 sk = c + c.yx * 0.3;
+  float streakId = floor(sk.x * 12.0);
+  float s = fract(sk.y * 3.0 + t * 4.0 + hash12(vec2(streakId)));
+  float streak = smoothstep(0.86, 1.0, s);
+  float slush = fbmV(c * 2.0 + vec2(t * 0.05));
+  vec3 col = mix(vec3(0.5, 0.64, 0.78) * (0.85 + 0.3 * slush), vec3(0.95, 0.98, 1.0), streak);
+  return vec4(col, inside * (0.5 + 0.45 * streak));
+
+#else
+  // Insect swarm
+  float swarm = 0.0;
+  for (int layer = 0; layer < 2; layer++) {
+    float scale = 3.0 + float(layer) * 2.3;
+    vec2 cell = floor(c * scale);
+    float h = hash12(cell + float(layer) * 17.0);
+    vec2 orbit = vec2(0.5) + 0.3 * vec2(cos(t * 3.0 + h * 6.0), sin(t * 4.0 + h * 9.0));
+    swarm = max(swarm, 1.0 - smoothstep(0.04, 0.11, length(fract(c * scale) - orbit)));
+  }
+  float haze = 0.25 * fbmV(c * 2.0 + vec2(t * 0.1));
+  vec3 col = mix(vec3(0.3, 0.2, 0.08), vec3(0.04, 0.03, 0.01), swarm);
+  return vec4(col, clamp(inside * (0.5 + haze) + swarm * inside * 0.5, 0.0, 1.0));
+#endif
+}
+
+// Feeds a ported effect from the mask: one mip level averages about a grid cell,
+// which stands in for the AoE shapes' signed distance
+vec4 portedEffect(vec2 uv, vec2 texSize, float time) {
+  float inside = getVolumeMask(uv, texSize, time, 1.5, 0.1, 0.4);
+  float cell = max(uCellSize, 1.0);
+  float averaged = textureLod(uMaskTexture, uv, log2(cell)).a;
+  float d = (0.5 - averaged) * 10.0;
+  float depth = clamp(-d / 5.0, 0.0, 1.0);
+  vec2 c = uv * texSize / cell;
+  vec4 col = groundEffect(c * 5.0, c, d, depth, inside, time);
+  return vec4(col.rgb * uIntensity, clamp(col.a, 0.0, 1.0) * uOpacity);
+}
+#endif
+
 void main() {
   // Clipping planes
   vec4 plane;
@@ -1451,6 +1673,8 @@ void main() {
   result = webEffect(vUv, texSize, time);
 #elif EFFECT_TYPE == 8
   result = entangleEffect(vUv, texSize, time);
+#elif EFFECT_TYPE >= 9 && EFFECT_TYPE <= 22
+  result = portedEffect(vUv, texSize, time);
 #else
   // No effect - solid color
   float mask = texture2D(uMaskTexture, vUv).a;

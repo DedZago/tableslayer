@@ -1,10 +1,17 @@
 import type { MarkerRow } from '$lib/realtime';
 import type { GroupedRows, GroupMember } from '$lib/utils/assetGroups';
-import { AoeEffect, MARKER_CONDITION_CATEGORIES, type RadialMenuItemProps } from '@tableslayer/stage';
+import {
+  ANNOTATION_EFFECT_CATEGORIES,
+  ANNOTATION_EFFECTS,
+  AoeEffect,
+  MARKER_CONDITION_CATEGORIES,
+  type RadialMenuItemProps
+} from '@tableslayer/stage';
 import { describe, expect, it } from 'vitest';
 import {
   aoeMenu,
   conditionsItem,
+  drawItem,
   generalMenu,
   groupItems,
   MENU_ID,
@@ -40,7 +47,8 @@ const idle: GeneralMenuState = {
   canFit: false,
   groupSelect: false,
   distanceMode: false,
-  selectionCount: 0
+  selectionCount: 0,
+  playerDrawingCount: 0
 };
 
 describe('generalMenu', () => {
@@ -68,6 +76,28 @@ describe('generalMenu', () => {
     check(generalMenu({ ...idle, canFit: true, selectionCount: 1 }));
     check(aoeMenu({ count: 1, effect: AoeEffect.Fire, opacity: 1, groupItems: [] }));
     check([conditionsItem([marker('a')], [])]);
+    check([drawItem(3)]);
+  });
+});
+
+describe('drawItem', () => {
+  it('offers colors, one ring per effect category, the eraser and Clear drawings', () => {
+    const submenu = drawItem(2).submenu!;
+    expect(ids(submenu)).toEqual([
+      'draw-colors',
+      ...ANNOTATION_EFFECT_CATEGORIES.map(({ id }) => `draw-category:${id}`),
+      MENU_ID.drawEraser,
+      MENU_ID.drawClear
+    ]);
+    const effects = submenu.flatMap((item) => (item.id.startsWith('draw-category:') ? item.submenu! : []));
+    expect(effects).toHaveLength(ANNOTATION_EFFECTS.length);
+    expect(find(submenu, MENU_ID.drawClear)).toMatchObject({ danger: true, disabled: false });
+  });
+
+  it('explains why the eraser and Clear drawings are off with nothing drawn', () => {
+    const submenu = drawItem(0).submenu!;
+    expect(find(submenu, MENU_ID.drawEraser)).toMatchObject({ disabled: true, hint: 'No player drawings to erase' });
+    expect(find(submenu, MENU_ID.drawClear)?.disabled).toBe(true);
   });
 });
 

@@ -16,9 +16,11 @@ import {
   IconArrowsMaximize,
   IconBandage,
   IconCircle,
+  IconCloud,
   IconCone2,
   IconContrast,
   IconDeselect,
+  IconEraser,
   IconFlame,
   IconLine,
   IconLink,
@@ -41,7 +43,8 @@ import {
   IconX
 } from '@tabler/icons-svelte';
 import {
-  AnnotationEffect,
+  ANNOTATION_EFFECT_CATEGORIES,
+  annotationEffectsInCategory,
   AOE_EFFECT_LABELS,
   AoeEffect,
   AoeShape,
@@ -49,9 +52,12 @@ import {
   MARKER_CONDITION_CATEGORIES,
   MARKER_CONDITIONS,
   resolveCondition,
+  type AnnotationEffectCategory,
+  type IconComponent,
   type MarkerCondition,
   type RadialMenuItemProps
 } from '@tableslayer/stage';
+import { DRAW_COLORS } from './playDrawing';
 
 // Item ids. Prefixed ids carry a value after the colon.
 export const MENU_ID = {
@@ -64,6 +70,8 @@ export const MENU_ID = {
   aoeShape: 'aoe-shape:',
   drawColor: 'draw-color:',
   drawEffect: 'draw-effect:',
+  drawEraser: 'draw-eraser',
+  drawClear: 'draw-clear',
   select: 'select',
   clearSelection: 'clear-selection',
   undo: 'undo',
@@ -82,26 +90,6 @@ export const MENU_ID = {
   aoeOpacity: 'aoe-opacity:',
   aoeDelete: 'aoe-delete'
 } as const;
-
-export const DRAW_COLORS = [
-  { id: 'red', label: 'Red', color: '#d73e2e' },
-  { id: 'orange', label: 'Orange', color: '#ffa500' },
-  { id: 'yellow', label: 'Yellow', color: '#ffd93d' },
-  { id: 'green', label: 'Green', color: '#6bcf7f' },
-  { id: 'blue', label: 'Blue', color: '#2e86ab' },
-  { id: 'purple', label: 'Purple', color: '#b197fc' }
-];
-
-export const DRAW_EFFECTS = [
-  { effect: AnnotationEffect.Fire, label: 'Fire', hint: 'Flames that flicker' },
-  { effect: AnnotationEffect.Water, label: 'Water', hint: 'Rippling water' },
-  { effect: AnnotationEffect.Ice, label: 'Ice', hint: 'Frozen ground' },
-  { effect: AnnotationEffect.Magic, label: 'Magic', hint: 'Shimmering arcane glow' },
-  { effect: AnnotationEffect.Grease, label: 'Grease', hint: 'Slick, slippery ground' },
-  { effect: AnnotationEffect.SpaceTear, label: 'Space tear', hint: 'A rift in reality' },
-  { effect: AnnotationEffect.Web, label: 'Web', hint: 'Sticky webbing' },
-  { effect: AnnotationEffect.Entangle, label: 'Entangle', hint: 'Grasping vines' }
-];
 
 const AOE_DAMAGE_EFFECTS = [
   AoeEffect.Fire,
@@ -139,6 +127,8 @@ const EXHAUSTION_MAX = MARKER_CONDITIONS.exhaustion.maxValue ?? 6;
 /** What a TV long press acts on */
 export type MenuTarget =
   | { kind: 'general' }
+  // The Draw ring on its own, opened from the draw panel's brush
+  | { kind: 'draw' }
   | { kind: 'token'; markerId: string; members: GroupMember[] }
   | { kind: 'aoe'; aoeId: string; members: GroupMember[] };
 
@@ -332,6 +322,69 @@ export type GeneralMenuState = {
   groupSelect: boolean;
   distanceMode: boolean;
   selectionCount: number;
+  /** Player drawings in the scene, which the eraser and Clear drawings work on */
+  playerDrawingCount: number;
+};
+
+const EFFECT_CATEGORY_ICONS: Record<AnnotationEffectCategory, IconComponent> = {
+  elements: IconFlame,
+  magic: IconSparkles,
+  terrain: IconMountain,
+  clouds: IconCloud
+};
+
+export const drawItem = (playerDrawingCount: number): RadialMenuItemProps => {
+  const nothingDrawn = playerDrawingCount === 0;
+  return {
+    id: 'draw',
+    label: 'Draw',
+    hint: 'Draw on the map. Every stroke is saved and can be undone',
+    icon: IconPencil,
+    submenu: [
+      {
+        id: 'draw-colors',
+        label: 'Color',
+        hint: 'Draw a plain line',
+        icon: IconPaint,
+        submenu: DRAW_COLORS.map(({ id, label, color }) => ({
+          id: `${MENU_ID.drawColor}${id}`,
+          label,
+          hint: `Draw in ${label.toLowerCase()}`,
+          color
+        }))
+      },
+      ...ANNOTATION_EFFECT_CATEGORIES.map((category) => ({
+        id: `draw-category:${category.id}`,
+        label: category.label,
+        hint: category.description,
+        icon: EFFECT_CATEGORY_ICONS[category.id],
+        accent: category.color,
+        submenu: annotationEffectsInCategory(category.id).map(({ effect, label, hint }) => ({
+          id: `${MENU_ID.drawEffect}${effect}`,
+          label,
+          hint,
+          effectType: effect
+        }))
+      })),
+      {
+        id: MENU_ID.drawEraser,
+        label: 'Eraser',
+        hint: nothingDrawn ? 'No player drawings to erase' : 'Erase player drawings. GM drawings stay',
+        icon: IconEraser,
+        disabled: nothingDrawn
+      },
+      {
+        id: MENU_ID.drawClear,
+        label: 'Clear drawings',
+        hint: nothingDrawn
+          ? 'No player drawings to clear'
+          : `Remove ${playerDrawingCount === 1 ? 'the player drawing' : `all ${playerDrawingCount} player drawings`}. Undo brings ${playerDrawingCount === 1 ? 'it' : 'them'} back`,
+        icon: IconTrash,
+        danger: true,
+        disabled: nothingDrawn
+      }
+    ]
+  };
 };
 
 const clearSelectionItem = (count: number): RadialMenuItemProps => ({
@@ -397,38 +450,7 @@ export const generalMenu = (state: GeneralMenuState): RadialMenuItemProps[] => {
         icon
       }))
     },
-    {
-      id: 'draw',
-      label: 'Draw',
-      hint: 'Temporary drawing that fades after a while',
-      icon: IconPencil,
-      submenu: [
-        {
-          id: 'draw-colors',
-          label: 'Color',
-          hint: 'Draw a plain line',
-          icon: IconPaint,
-          submenu: DRAW_COLORS.map(({ id, label, color }) => ({
-            id: `${MENU_ID.drawColor}${id}`,
-            label,
-            hint: `Draw in ${label.toLowerCase()}`,
-            color
-          }))
-        },
-        {
-          id: 'draw-effects',
-          label: 'Effect',
-          hint: 'Paint an animated effect',
-          icon: IconSparkles,
-          submenu: DRAW_EFFECTS.map(({ effect, label, hint }) => ({
-            id: `${MENU_ID.drawEffect}${effect}`,
-            label,
-            hint,
-            effectType: effect
-          }))
-        }
-      ]
-    },
+    drawItem(state.playerDrawingCount),
     {
       id: MENU_ID.select,
       label: state.groupSelect ? 'Stop selecting' : 'Select',

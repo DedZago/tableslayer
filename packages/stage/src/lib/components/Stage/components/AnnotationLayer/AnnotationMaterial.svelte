@@ -18,6 +18,10 @@
     props: AnnotationLayerData;
     display: DisplayProps;
     lineWidthPixels: number;
+    /** Grid cell size in texture pixels; scales the effects ported from AoE templates */
+    cellSizePixels: number;
+    /** Erase removes painted pixels under the brush */
+    drawMode?: DrawMode;
     /** True while the user is actively drawing on this layer (skip mask re-apply) */
     isDrawingThisLayer?: () => boolean;
     /**
@@ -34,6 +38,8 @@
     props,
     display,
     lineWidthPixels,
+    cellSizePixels,
+    drawMode = DrawMode.Draw,
     isDrawingThisLayer = () => false,
     conversion,
     onMaskConverted
@@ -87,6 +93,7 @@
       uSoftness: { value: getEffectSoftness() },
       uBorder: { value: getEffectBorder() },
       uRoughness: { value: getEffectRoughness() },
+      uCellSize: { value: cellSizePixels },
       uEdgeMinMipMapLevel: { value: 0 },
       uEdgeMaxMipMapLevel: { value: 4 },
       uPerformanceTier: { value: shaderTier },
@@ -142,6 +149,7 @@
     material.uniforms.uSoftness.value = getEffectSoftness();
     material.uniforms.uBorder.value = getEffectBorder();
     material.uniforms.uRoughness.value = getEffectRoughness();
+    material.uniforms.uCellSize.value = cellSizePixels;
     material.uniforms.uPerformanceTier.value = shaderTier;
     // Update clipping planes in place to avoid allocating new Vector4 objects
     const planes = clippingPlaneStore.value;
@@ -266,7 +274,7 @@
       player: props.opacity
     },
     tool: {
-      mode: DrawMode.Draw,
+      mode: drawMode,
       size: lineWidthPixels,
       type: ToolType.Brush
     }

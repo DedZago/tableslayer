@@ -8,7 +8,7 @@
   import { SceneLayer, SceneLayerOrder } from '../Scene/types';
   import AnnotationMaterial from './AnnotationMaterial.svelte';
   import { LazyBrushManager } from '../../helpers/lazyBrush';
-  import { ToolType } from '../DrawingLayer/types';
+  import { DrawMode, ToolType } from '../DrawingLayer/types';
   import type { GridLayerProps } from '../GridLayer/types';
   import { getGridCellSize } from '../../helpers/grid';
   import type { MapTransform } from '../../helpers/mapSpace';
@@ -43,9 +43,8 @@
   // Convert lineWidth (grid units, line width/diameter) to texture pixels; the
   // annotation texture is display-resolution sized, so one texture pixel = one
   // display pixel. The shaders treat uBrushSize as a radius, so halve it.
-  const lineWidthPixels = $derived.by(() => {
-    return Math.max(1, Math.round(((props.lineWidth ?? 0.5) * getGridCellSize(grid, display)) / 2));
-  });
+  const cellSizePixels = $derived(getGridCellSize(grid, display));
+  const lineWidthPixels = $derived(Math.max(1, Math.round(((props.lineWidth ?? 0.5) * cellSizePixels) / 2)));
 
   // Use $state.raw() for Three.js objects to prevent proxy interference with internal properties
   let mesh: THREE.Mesh = $state.raw(new THREE.Mesh());
@@ -135,9 +134,11 @@
     displayCenterOffset.set(display.resolution.x / 2, display.resolution.y / 2);
   });
 
+  const erasing = $derived(props.tool === 'erase');
+
   // Hide outline when tool is not active
   $effect(() => {
-    if (!isActive || !props.activeLayer) {
+    if (!isActive || targetIds.length === 0) {
       outlineMesh.visible = false;
       outlineMaterial.uniforms.uStart.value.set(Infinity, Infinity);
       outlineMaterial.uniforms.uEnd.value.set(Infinity, Infinity);
@@ -154,6 +155,20 @@
       return layer.getId() === props.activeLayer;
     })
   );
+
+  // The layers a stroke paints on: the active layer, or every erasable layer while erasing
+  const targetIds = $derived.by(() => {
+    if (erasing && props.eraseLayerIds) {
+      const visible = new Set(props.layers.filter(isVisible).map((layer) => layer.id));
+      return props.eraseLayerIds.filter((id) => visible.has(id));
+    }
+    return props.activeLayer ? [props.activeLayer] : [];
+  });
+  const targetLayers = $derived(layers.filter((layer) => layer && targetIds.includes(layer.getId())));
+
+  const drawOnTargets = (start: THREE.Vector2, last: THREE.Vector2, persist: boolean) => {
+    for (const layer of targetLayers) layer.drawPath(start, last, persist);
+  };
 
   // Whenever the tool type changes, we need to reset the drawing state
   $effect(() => {
@@ -177,9 +192,9 @@
     }
   });
 
-  // Also reset cursor when active layer becomes null
+  // Also reset cursor when there is nothing to draw on
   $effect(() => {
-    if (!props.activeLayer && layers.length > 0) {
+    if (targetIds.length === 0 && layers.length > 0) {
       // No active layer selected, reset all cursors and revert changes
       lastPos = null; // Reset last position to prevent cursor from appearing
       if (!cursorsHidden) {
@@ -191,7 +206,7 @@
         });
         cursorsHidden = true;
       }
-    } else if (props.activeLayer) {
+    } else if (targetIds.length > 0) {
       // Active layer selected again
       cursorsHidden = false;
     }
@@ -221,9 +236,11 @@
   }
 
   function onMouseUp() {
-    // If we have just finished drawing, save the annotation
-    if (props.activeLayer && drawing) {
-      onAnnotationUpdate(props.activeLayer, toPng, lastScreenPos || undefined);
+    // If we have just finished drawing, save every layer the stroke touched
+    if (drawing) {
+      for (const layer of targetLayers) {
+        onAnnotationUpdate(layer.getId(), () => layer.toPng(), lastScreenPos || undefined);
+      }
     }
 
     // Reset the drawing state
@@ -238,9 +255,11 @@
     lazyBrush.reset();
 
     // Revert changes and hide cursor
-    if (activeLayer && !cursorsHidden) {
-      activeLayer.revertChanges();
-      activeLayer.resetCursor();
+    if (!cursorsHidden) {
+      for (const layer of targetLayers) {
+        layer.revertChanges();
+        layer.resetCursor();
+      }
     }
 
     // Hide outline
@@ -277,7 +296,7 @@
     }
 
     // Only process if we have an active layer and the annotation tool is active
-    if (!activeLayer || !isActive || !props.activeLayer) {
+    if (targetLayers.length === 0 || !isActive) {
       // Make sure all cursors are hidden when not active (only if not already hidden)
       if (!cursorsHidden) {
         layers.forEach((layer) => {
@@ -313,31 +332,31 @@
       for (let i = 0; i < segments.length; i += 2) {
         if (segments[i] && segments[i + 1]) {
           // Draw from last point to new point
-          activeLayer.drawPath(segments[i + 1], segments[i], true);
+          drawOnTargets(segments[i + 1], segments[i], true);
         }
       }
 
       // Update cursor to show brush position
       const brushPos = lazyBrush.getBrushPosition();
       if (brushPos) {
-        activeLayer.drawPath(brushPos, brushPos, false);
+        drawOnTargets(brushPos, brushPos, false);
         // Update outline to follow lazy brush position
         outlineMaterial.uniforms.uStart.value.copy(brushPos);
         outlineMaterial.uniforms.uEnd.value.copy(brushPos);
       } else {
         // Show cursor at actual position if no brush position
-        activeLayer.drawPath(p, p, false);
+        drawOnTargets(p, p, false);
       }
     } else if (drawing && !lazyBrush.enabled) {
       // Drawing but lazy brush is disabled
       if (!lastPos) {
         lastPos = p.clone();
       }
-      activeLayer.drawPath(p, lastPos, true);
+      drawOnTargets(p, lastPos, true);
       lastPos = p.clone();
     } else {
-      // Just hovering, show cursor
-      activeLayer.drawPath(p, p, false);
+      // Just hovering, show cursor (erasing previews nothing: the outline shows the brush)
+      if (!erasing) drawOnTargets(p, p, false);
     }
   }
 
@@ -364,21 +383,21 @@
     }
   }
 
+  const layerById = (layerId?: string) =>
+    layerId ? layers.find((layer) => layer && layer.getId() === layerId) : activeLayer;
+
   /**
-   * Serializes the annotation layer image data into a binary buffer
-   * @return A binary buffer
+   * Serializes an annotation layer (the active one by default) to PNG
    */
-  export async function toPng(): Promise<Blob> {
-    // For now, return the active layer's PNG or an empty blob
-    return (await activeLayer?.toPng()) ?? new Blob();
+  export async function toPng(layerId?: string): Promise<Blob> {
+    return (await layerById(layerId)?.toPng()) ?? new Blob();
   }
 
   /**
-   * Exports the active annotation layer state as RLE-encoded data
-   * @returns RLE encoded Uint8Array
+   * Exports an annotation layer's mask (the active one by default) as RLE-encoded data
    */
-  export async function toRLE(): Promise<Uint8Array> {
-    return (await activeLayer?.toRLE()) ?? new Uint8Array();
+  export async function toRLE(layerId?: string): Promise<Uint8Array> {
+    return (await layerById(layerId)?.toRLE()) ?? new Uint8Array();
   }
 
   /**
@@ -457,8 +476,10 @@ and markers - the trade-off is they receive post-processing (bloom etc.) there.
         props={layer}
         {display}
         {lineWidthPixels}
+        {cellSizePixels}
+        drawMode={erasing && targetIds.includes(layer.id) ? DrawMode.Erase : DrawMode.Draw}
         {conversion}
-        isDrawingThisLayer={() => drawing && props.activeLayer === layer.id}
+        isDrawingThisLayer={() => drawing && targetIds.includes(layer.id)}
         onMaskConverted={() => {
           const converted = layers.find((l) => l && l.getId() === layer.id);
           if (converted) onAnnotationUpdate(layer.id, () => converted.toPng());

@@ -10,11 +10,18 @@
     IconBoxMultiple6,
     IconBoxMultiple7,
     IconBoxMultiple8,
-    IconBoxMultiple9
+    IconBoxMultiple9,
+    IconEraser
   } from '@tabler/icons-svelte';
   import type { ComponentType } from 'svelte';
   import { AnnotationEffect } from '../Stage/components/AnnotationLayer/types';
   import EffectPreview from '../RadialMenu/EffectPreview.svelte';
+  import {
+    ANNOTATION_EFFECT_CATEGORIES,
+    annotationEffectDefinition,
+    annotationEffectsInCategory,
+    type AnnotationEffectCategory
+  } from '../Stage/helpers/annotationEffects';
 
   // Color palette - 8 colors (pink and turquoise gave up their slots to effects)
   const COLORS = [
@@ -28,30 +35,7 @@
     '#2a2a2a' // dark
   ];
 
-  // Effects array
-  const EFFECTS = [
-    AnnotationEffect.Fire,
-    AnnotationEffect.Water,
-    AnnotationEffect.Ice,
-    AnnotationEffect.Magic,
-    AnnotationEffect.Grease,
-    AnnotationEffect.SpaceTear,
-    AnnotationEffect.Web,
-    AnnotationEffect.Entangle
-  ];
-
-  // Effect colors for the opacity slider gradient
-  const EFFECT_COLORS: Record<AnnotationEffect, string> = {
-    [AnnotationEffect.None]: '#ffffff',
-    [AnnotationEffect.Fire]: '#ff4d1a',
-    [AnnotationEffect.Water]: '#3380cc',
-    [AnnotationEffect.Ice]: '#b3d9ff',
-    [AnnotationEffect.Magic]: '#9333ea',
-    [AnnotationEffect.Grease]: '#4d3319',
-    [AnnotationEffect.SpaceTear]: '#330066',
-    [AnnotationEffect.Web]: '#e6e8eb',
-    [AnnotationEffect.Entangle]: '#3a7d2c'
-  };
+  const effectColor = (effect: AnnotationEffect) => annotationEffectDefinition(effect)?.color ?? '#ffffff';
 
   interface Props {
     opacity: number;
@@ -59,10 +43,13 @@
     color: string;
     activeLayerIndex: number;
     currentEffect?: AnnotationEffect;
+    /** Eraser on: strokes remove paint from the active layer */
+    erasing?: boolean;
     onOpacityChange: (value: number) => void;
     onBrushSizeChange: (value: number) => void;
     onColorChange: (color: string, opacity: number) => void;
     onEffectChange?: (effect: AnnotationEffect) => void;
+    onEraserToggle?: () => void;
     onLayersClick: () => void;
   }
 
@@ -72,12 +59,20 @@
     color,
     activeLayerIndex,
     currentEffect = AnnotationEffect.None,
+    erasing = false,
     onOpacityChange,
     onBrushSizeChange,
     onColorChange,
     onEffectChange,
+    onEraserToggle,
     onLayersClick
   }: Props = $props();
+
+  // One category of animated previews at a time: each preview is a WebGL context and browsers keep about 16
+  let effectCategory = $state<AnnotationEffectCategory>('elements');
+  const openPalette = () => {
+    effectCategory = annotationEffectDefinition(currentEffect)?.category ?? effectCategory;
+  };
 
   // Select the appropriate icon based on layer count
   const layerIcons: ComponentType[] = [
@@ -117,6 +112,8 @@
   };
 
   const handleColorSelect = (selectedColor: string, close?: () => void) => {
+    // Picking a color or effect goes back to drawing
+    if (erasing) onEraserToggle?.();
     onColorChange(selectedColor, opacity);
     // Clear any active effect when selecting a color
     onEffectChange?.(AnnotationEffect.None);
@@ -124,8 +121,9 @@
   };
 
   const handleEffectSelect = (effect: AnnotationEffect, close?: () => void) => {
+    if (erasing) onEraserToggle?.();
     // Set color to match the effect for the opacity slider gradient
-    onColorChange(EFFECT_COLORS[effect], opacity);
+    onColorChange(effectColor(effect), opacity);
     onEffectChange?.(effect);
     close?.();
   };
@@ -145,7 +143,11 @@
 
 <div class="drawingSliders">
   <div class="drawingSliders__slider">
-    <Popover portal="body" positioning={{ placement: 'left', gutter: 12 }}>
+    <Popover
+      portal="body"
+      positioning={{ placement: 'left', gutter: 12 }}
+      onIsOpenChange={(open) => open && openPalette()}
+    >
       {#snippet trigger()}
         <button class="drawingSliders__colorSwatch" aria-label="Change annotation color or effect">
           {#if hasEffect}
@@ -166,13 +168,32 @@
               <span class="drawingSliders__gridSwatch" style:background-color={swatchColor}></span>
             </button>
           {/each}
-          {#each EFFECTS as effect}
+        </div>
+        <div class="drawingSliders__tabs" role="tablist" aria-label="Effect categories">
+          {#each ANNOTATION_EFFECT_CATEGORIES as category (category.id)}
             <button
-              class="drawingSliders__gridItem"
-              onclick={() => handleEffectSelect(effect, contentProps.close)}
-              aria-label="Select effect"
+              role="tab"
+              aria-selected={effectCategory === category.id}
+              class={['drawingSliders__tab', effectCategory === category.id && 'drawingSliders__tab--active']}
+              title={category.description}
+              onclick={() => (effectCategory = category.id)}
             >
-              <EffectPreview effectType={effect} size="2rem" shape="rounded" />
+              {category.label}
+            </button>
+          {/each}
+        </div>
+        <div class="drawingSliders__swatchGrid" role="tabpanel">
+          {#each annotationEffectsInCategory(effectCategory) as definition (definition.effect)}
+            <button
+              class={[
+                'drawingSliders__gridItem',
+                currentEffect === definition.effect && 'drawingSliders__gridItem--active'
+              ]}
+              onclick={() => handleEffectSelect(definition.effect, contentProps.close)}
+              aria-label="Select effect {definition.label}"
+              title="{definition.label}: {definition.hint}"
+            >
+              <EffectPreview effectType={definition.effect} size="2rem" shape="rounded" />
             </button>
           {/each}
         </div>
@@ -210,6 +231,18 @@
     />
     <div class="drawingSliders__value">{String(Number(brushSize.toFixed(2))).replace(/^0\./, '.')} sq</div>
   </div>
+
+  {#if onEraserToggle}
+    <IconButton
+      variant={erasing ? 'primary' : 'ghost'}
+      onclick={onEraserToggle}
+      aria-label={erasing ? 'Stop erasing' : 'Eraser'}
+      aria-pressed={erasing}
+      title={erasing ? 'Stop erasing' : 'Erase from the active layer'}
+    >
+      <Icon Icon={IconEraser} size="1.25rem" />
+    </IconButton>
+  {/if}
 
   <IconButton
     variant="ghost"
@@ -361,6 +394,33 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+  }
+
+  .drawingSliders__gridItem--active {
+    box-shadow: 0 0 0 2px var(--fg);
+  }
+
+  .drawingSliders__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    max-width: 9.5rem;
+    margin: 0.75rem 0 0.5rem;
+  }
+
+  .drawingSliders__tab {
+    padding: 0.125rem 0.375rem;
+    font-size: 0.75rem;
+    color: var(--fgMuted);
+    background: transparent;
+    border: var(--borderThin);
+    border-radius: var(--radius-1);
+    cursor: pointer;
+  }
+
+  .drawingSliders__tab--active {
+    color: var(--fg);
+    border-color: var(--fg);
   }
 
   .drawingSliders__gridSwatch {

@@ -159,7 +159,7 @@
 
   export const annotations = {
     clear: (layerId: string) => sceneRef?.annotations.clear(layerId),
-    toRLE: () => sceneRef?.annotations?.toRLE() ?? Promise.resolve(new Uint8Array()),
+    toRLE: (layerId?: string) => sceneRef?.annotations?.toRLE(layerId) ?? Promise.resolve(new Uint8Array()),
     fromRLE: (rleData: Uint8Array, width: number, height: number) =>
       sceneRef?.annotations?.fromRLE(rleData, width, height) ?? Promise.resolve(),
     loadMask: (layerId: string, rleData: Uint8Array) =>
@@ -190,7 +190,9 @@
   export const scene = {
     fill: () => sceneRef?.fill(),
     fit: () => sceneRef?.fit(),
-    generateThumbnail: () => sceneRef?.generateThumbnail() ?? Promise.resolve(new Blob())
+    generateThumbnail: () => sceneRef?.generateThumbnail() ?? Promise.resolve(new Blob()),
+    // Markers are drawn at 90% of a cell
+    gridCellScreenSize: () => (sceneRef?.getMarkerSizeInScreenSpace?.(1) ?? 0) / 0.9
   };
 
   export const markers = {

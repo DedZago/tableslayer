@@ -66,6 +66,15 @@ export {
   type WeatherLayerProps
 } from './components/WeatherLayer/types';
 export {
+  ANNOTATION_EFFECTS,
+  ANNOTATION_EFFECT_CATEGORIES,
+  annotationEffectDefinition,
+  annotationEffectsInCategory,
+  type AnnotationEffectCategory,
+  type AnnotationEffectCategoryDefinition,
+  type AnnotationEffectDefinition
+} from './helpers/annotationEffects';
+export {
   angleFromCursor,
   formatTemplateLabel,
   getTemplateHandlePoints,

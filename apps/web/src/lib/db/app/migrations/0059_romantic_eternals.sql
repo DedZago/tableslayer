@@ -1,0 +1,1 @@
+ALTER TABLE `annotations` ADD `player_drawn` integer DEFAULT false NOT NULL;

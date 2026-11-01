@@ -73,7 +73,8 @@ export interface SceneExports {
 
   annotations: {
     clear: (layerId: string) => void;
-    toRLE: () => Promise<Uint8Array>;
+    /** The active layer's mask, or the given layer's */
+    toRLE: (layerId?: string) => Promise<Uint8Array>;
     fromRLE: (rleData: Uint8Array, width: number, height: number) => Promise<void>;
     loadMask: (layerId: string, rleData: Uint8Array) => Promise<void>;
     isDrawing: () => boolean;

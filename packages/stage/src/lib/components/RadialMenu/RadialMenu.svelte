@@ -2,7 +2,7 @@
   import type { RadialMenuProps, RadialMenuItemProps } from './types';
   import RadialMenuItem from './RadialMenuItem.svelte';
   import { untrack } from 'svelte';
-  import { normalizeRotation, unwrapAngleDelta } from './rotation';
+  import { normalizeRotation, unwrapAngleDelta, wheelRotationDegrees } from './rotation';
 
   const {
     visible = false,
@@ -24,6 +24,7 @@
   const MIN_RADIUS_PX = 140;
   const TWIST_START_DEG = 8;
   const TWO_FINGER_MOVE_PX = 12;
+  const WHEEL_PERSIST_DELAY_MS = 250;
 
   // Submenu ids from the top level down. Levels are re-read from `items`, so options that change
   // while the menu is open (a condition toggled on) update in place.
@@ -129,6 +130,32 @@
     if (wasActive) onRotationChange?.(normalizeRotation(menuRotation));
   };
 
+  // Wheel turns are stored once the wheel has been still for a moment
+  let wheelPersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const flushWheelRotation = () => {
+    if (!wheelPersistTimer) return;
+    clearTimeout(wheelPersistTimer);
+    wheelPersistTimer = null;
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    flushRotation();
+    onRotationChange?.(normalizeRotation(menuRotation));
+  };
+
+  const handleWheel = (event: WheelEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (twist) return;
+    const degrees = wheelRotationDegrees(event.deltaY, event.deltaMode, window.innerHeight);
+    if (!degrees) return;
+    // Clockwise on screen lowers menuRotation, like a twist
+    pendingRotation = (pendingRotation ?? menuRotation) - degrees;
+    frameId ??= requestAnimationFrame(flushRotation);
+    if (wheelPersistTimer) clearTimeout(wheelPersistTimer);
+    wheelPersistTimer = setTimeout(flushWheelRotation, WHEEL_PERSIST_DELAY_MS);
+    restartAutoClose();
+  };
+
   const handleTouchStart = (event: TouchEvent) => {
     if (event.touches.length === 1) twisted = false;
     if (event.touches.length > 2) return endTwist();
@@ -207,7 +234,10 @@
     element.addEventListener('touchmove', handleTouchMove, options);
     element.addEventListener('touchend', handleTouchEnd, options);
     element.addEventListener('touchcancel', handleTouchEnd, options);
+    element.addEventListener('wheel', handleWheel, options);
     return () => {
+      element.removeEventListener('wheel', handleWheel, options);
+      flushWheelRotation();
       element.removeEventListener('touchstart', handleTouchStart, options);
       element.removeEventListener('touchmove', handleTouchMove, options);
       element.removeEventListener('touchend', handleTouchEnd, options);
@@ -232,7 +262,19 @@
     };
   });
 
-  // Keep the whole ring on screen; open at the remembered rotation, or toward the nearest edge the first time
+  // Open at the remembered rotation, or toward the nearest edge the first time. Only opening sets it:
+  // a new position, a submenu or a stale `rotation` prop must not undo a turn made while open
+  $effect(() => {
+    if (!visible) return;
+    untrack(() => {
+      twisted = false;
+      const remembered = rotation;
+      menuRotation = remembered ?? rotationFromEdge(position.x, position.y, window.innerWidth, window.innerHeight);
+      if (remembered === undefined) onRotationChange?.(menuRotation);
+    });
+  });
+
+  // Keep the whole ring on screen
   $effect(() => {
     if (!visible) return;
     const reach = radius + 80;
@@ -242,11 +284,6 @@
       x: Math.max(reach, Math.min(width - reach, position.x)),
       y: Math.max(reach, Math.min(height - reach, position.y))
     };
-    untrack(() => {
-      const remembered = rotation;
-      menuRotation = remembered ?? rotationFromEdge(position.x, position.y, width, height);
-      if (remembered === undefined) onRotationChange?.(menuRotation);
-    });
   });
 </script>
 

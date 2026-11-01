@@ -22,25 +22,29 @@ GM editor. Design history and requirements: `spec/tv-radial-menu.md`.
 - **The stage package stays icon-free.** The condition catalog (labels, colors, hints, categories) lives in
   `packages/stage`; the Tabler icons for conditions live in apps/web (`conditionIcons.ts`).
 
+## Orientation
+
+The menu opens at the `rotation` prop (the TV keeps it in localStorage under `tableslayer:tvRadialMenuRotation`) and only falls back to the nearest screen edge when none is stored. The whole container is drawn rotated by `-menuRotation`, so turning it is one transform per animation frame. A two-finger twist (native non-passive touch listeners) and the mouse wheel (down = clockwise, 0.15 deg per pixel, at most 15 deg per event, ignored during a twist) both feed `pendingRotation`. The wheel listener calls `preventDefault` and `stopPropagation` so the map underneath does not zoom. The angle is reported through `onRotationChange` when a twist ends, 250 ms after the last wheel event, or when the menu closes. A twist cancels the two-finger-hold reposition and suppresses the click that follows it.
+
 ## Components and responsibilities
 
-| Piece                                                            | Role                                                                                                         |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `packages/stage/.../RadialMenu/RadialMenu.svelte`                | Ring layout, level stack, back/close, hub text, remembered rotation + twist, auto-close, opening-press guard |
-| `packages/stage/.../RadialMenu/RadialMenuItem.svelte`            | One option: icon/swatch/effect preview, label, badge, active/danger/disabled styles                          |
-| `packages/stage/.../MarkerLayer/MarkerLayer.svelte`              | `onMarkerLongPress`: 500 ms still press on a token; cancels drag and release click                           |
-| `packages/stage/.../AoeTemplateLayer`                            | `onAoeTemplateMenu` for right-click or long press on a shape (unchanged)                                     |
-| `packages/stage/.../helpers/markerConditions.ts`                 | Condition catalog, `MARKER_CONDITION_CATEGORIES`, `conditionIdsInCategory`, sorting                          |
-| `apps/web/src/lib/utils/conditionIcons.ts`                       | Icon per condition and per category                                                                          |
-| `apps/web/src/lib/utils/assetGroups.ts`                          | Group selection rules and `planGroupToggle` (shared with the editor's B)                                     |
-| `apps/web/src/lib/realtime/docSchema.ts`                         | Nested conditions map, condition writers, `upgradeConditionMaps`                                             |
-| `apps/web/src/routes/(app)/[party]/play/playMenus.ts`            | Pure menu builders: `generalMenu`, `tokenMenu`, `aoeMenu`, `conditionsItem`, `groupItems`                    |
-| `apps/web/src/routes/(app)/[party]/play/usePlayTools.svelte.ts`  | Selection, menu state, `openMenuAt`, `selectMenuItem` actions, notices, custom condition form                |
-| `apps/web/src/routes/(app)/[party]/play/+page@.svelte`           | Long press on empty map, gesture detector, stage callbacks, menu/notice/form rendering                       |
-| `apps/web/src/routes/(app)/[party]/play/TvConditionForm.svelte`  | Name + color form for a new custom condition, rotated like the menu                                          |
-| `apps/web/src/routes/(app)/[party]/play/playDrawing.ts`          | Draw brushes, colors, brush sizes, player-layer lookup and creation                                          |
-| `apps/web/src/routes/(app)/[party]/play/TvDrawPanel.svelte`      | Draw panel: brush, size slider + size circle, eraser, undo, done; faces the nearest edge                     |
-| `apps/web/src/lib/components/GameSession/ConditionPicker.svelte` | Editor picker, organized by the same categories                                                              |
+| Piece                                                            | Role                                                                                                                 |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `packages/stage/.../RadialMenu/RadialMenu.svelte`                | Ring layout, level stack, back/close, hub text, remembered rotation + twist + wheel, auto-close, opening-press guard |
+| `packages/stage/.../RadialMenu/RadialMenuItem.svelte`            | One option: icon/swatch/effect preview, label, badge, active/danger/disabled styles                                  |
+| `packages/stage/.../MarkerLayer/MarkerLayer.svelte`              | `onMarkerLongPress`: 500 ms still press on a token; cancels drag and release click                                   |
+| `packages/stage/.../AoeTemplateLayer`                            | `onAoeTemplateMenu` for right-click or long press on a shape (unchanged)                                             |
+| `packages/stage/.../helpers/markerConditions.ts`                 | Condition catalog, `MARKER_CONDITION_CATEGORIES`, `conditionIdsInCategory`, sorting                                  |
+| `apps/web/src/lib/utils/conditionIcons.ts`                       | Icon per condition and per category                                                                                  |
+| `apps/web/src/lib/utils/assetGroups.ts`                          | Group selection rules and `planGroupToggle` (shared with the editor's B)                                             |
+| `apps/web/src/lib/realtime/docSchema.ts`                         | Nested conditions map, condition writers, `upgradeConditionMaps`                                                     |
+| `apps/web/src/routes/(app)/[party]/play/playMenus.ts`            | Pure menu builders: `generalMenu`, `tokenMenu`, `aoeMenu`, `conditionsItem`, `groupItems`                            |
+| `apps/web/src/routes/(app)/[party]/play/usePlayTools.svelte.ts`  | Selection, menu state, `openMenuAt`, `selectMenuItem` actions, notices, custom condition form                        |
+| `apps/web/src/routes/(app)/[party]/play/+page@.svelte`           | Long press on empty map, gesture detector, stage callbacks, menu/notice/form rendering                               |
+| `apps/web/src/routes/(app)/[party]/play/TvConditionForm.svelte`  | Name + color form for a new custom condition, rotated like the menu                                                  |
+| `apps/web/src/routes/(app)/[party]/play/playDrawing.ts`          | Draw brushes, colors, brush sizes, player-layer lookup and creation                                                  |
+| `apps/web/src/routes/(app)/[party]/play/TvDrawPanel.svelte`      | Draw panel: brush, size slider + size circle, eraser, undo, done; faces the nearest edge                             |
+| `apps/web/src/lib/components/GameSession/ConditionPicker.svelte` | Editor picker, organized by the same categories                                                                      |
 
 ## Interaction flow
 

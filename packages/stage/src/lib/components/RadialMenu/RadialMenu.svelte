@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { RadialMenuProps, RadialMenuItemProps } from './types';
   import RadialMenuItem from './RadialMenuItem.svelte';
+  import { untrack } from 'svelte';
+  import { normalizeRotation, unwrapAngleDelta } from './rotation';
 
   const {
     visible = false,
@@ -13,11 +15,15 @@
     autoCloseMs,
     onItemSelect,
     onClose,
-    onReposition
+    onReposition,
+    rotation,
+    onRotationChange
   }: RadialMenuProps = $props();
 
   const ITEM_SPACING_PX = 100; // arc length per option, room for the button and its label
   const MIN_RADIUS_PX = 140;
+  const TWIST_START_DEG = 8;
+  const TWO_FINGER_MOVE_PX = 12;
 
   // Submenu ids from the top level down. Levels are re-read from `items`, so options that change
   // while the menu is open (a condition toggled on) update in place.
@@ -27,6 +33,7 @@
   let focusedId: string | null = $state(null);
   let adjustedPosition = $state({ x: 0, y: 0 });
   let menuRotation = $state(0);
+  let rootElement: HTMLDivElement | null = $state(null);
 
   const levels = $derived.by(() => {
     const result: Array<{ parent: RadialMenuItemProps | null; items: RadialMenuItemProps[] }> = [
@@ -53,9 +60,7 @@
     return [0, 90, 180, 270][nearest];
   };
 
-  // The ring, its labels and the hub all turn by -menuRotation, so they read upright from that edge
-  const itemAngle = (index: number, total: number) =>
-    -Math.PI / 2 + ((2 * Math.PI) / total) * index - (menuRotation * Math.PI) / 180;
+  const itemAngle = (index: number, total: number) => -Math.PI / 2 + ((2 * Math.PI) / total) * index;
 
   const close = () => {
     path = [];
@@ -65,14 +70,14 @@
 
   // One level up, or closed at the top level: the hub and any tap outside the ring both do this
   const back = () => {
-    if (!armed) return;
+    if (!armed || twisted) return;
     focusedId = null;
     if (depth === 0) close();
     else path = path.slice(0, depth - 1);
   };
 
   const select = (itemId: string) => {
-    if (!armed) return;
+    if (!armed || twisted) return;
     const item = level.items.find((candidate) => candidate.id === itemId);
     if (!item) return;
     if (item.disabled) {
@@ -92,6 +97,75 @@
     path = [];
     focusedId = null;
     onReposition?.(point);
+  };
+
+  // A twist ends with a click on whatever is under the fingers; it must not count as a press
+  let twisted = false;
+  let twist: {
+    lastAngle: number;
+    total: number;
+    startRotation: number;
+    startMid: { x: number; y: number };
+    active: boolean;
+  } | null = null;
+  let pendingRotation: number | null = null;
+  let frameId: number | null = null;
+
+  const touchAngle = (a: Touch, b: Touch) => (Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX) * 180) / Math.PI;
+  const touchMidpoint = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
+
+  const flushRotation = () => {
+    frameId = null;
+    if (pendingRotation !== null) menuRotation = pendingRotation;
+    pendingRotation = null;
+  };
+
+  const endTwist = () => {
+    if (!twist) return;
+    const wasActive = twist.active;
+    twist = null;
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    flushRotation();
+    if (wasActive) onRotationChange?.(normalizeRotation(menuRotation));
+  };
+
+  const handleTouchStart = (event: TouchEvent) => {
+    if (event.touches.length === 1) twisted = false;
+    if (event.touches.length > 2) return endTwist();
+    if (event.touches.length !== 2) return;
+    const [a, b] = [event.touches[0], event.touches[1]];
+    twist = {
+      lastAngle: touchAngle(a, b),
+      total: 0,
+      startRotation: menuRotation,
+      startMid: touchMidpoint(a, b),
+      active: false
+    };
+  };
+
+  const handleTouchMove = (event: TouchEvent) => {
+    if (!twist || event.touches.length !== 2) return;
+    event.preventDefault();
+    const [a, b] = [event.touches[0], event.touches[1]];
+    const angle = touchAngle(a, b);
+    twist.total += unwrapAngleDelta(angle - twist.lastAngle);
+    twist.lastAngle = angle;
+    const mid = touchMidpoint(a, b);
+    const moved = Math.hypot(mid.x - twist.startMid.x, mid.y - twist.startMid.y);
+    if (moved > TWO_FINGER_MOVE_PX || Math.abs(twist.total) > TWIST_START_DEG) cancelTwoFingerHold();
+    if (!twist.active && Math.abs(twist.total) > TWIST_START_DEG) {
+      twist.active = true;
+      twisted = true;
+    }
+    if (!twist.active) return;
+    // The menu turns the same way as the fingers; the container is drawn rotated by -menuRotation
+    pendingRotation = twist.startRotation - twist.total;
+    frameId ??= requestAnimationFrame(flushRotation);
+    restartAutoClose();
+  };
+
+  const handleTouchEnd = (event: TouchEvent) => {
+    if (event.touches.length < 2) endTwist();
   };
 
   // Two-finger hold on the backdrop moves the menu, like opening it
@@ -121,6 +195,27 @@
     autoCloseTimer = visible && autoCloseMs ? setTimeout(close, autoCloseMs) : null;
   };
 
+  // Passive listeners cannot stop the page from pinch-zooming, so these are attached by hand
+  $effect(() => {
+    const element = rootElement;
+    if (!element) return;
+    const options = { capture: true, passive: false } as const;
+    element.addEventListener('touchstart', handleTouchStart, options);
+    element.addEventListener('touchmove', handleTouchMove, options);
+    element.addEventListener('touchend', handleTouchEnd, options);
+    element.addEventListener('touchcancel', handleTouchEnd, options);
+    return () => {
+      element.removeEventListener('touchstart', handleTouchStart, options);
+      element.removeEventListener('touchmove', handleTouchMove, options);
+      element.removeEventListener('touchend', handleTouchEnd, options);
+      element.removeEventListener('touchcancel', handleTouchEnd, options);
+      twist = null;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      frameId = null;
+      pendingRotation = null;
+    };
+  });
+
   $effect(() => {
     if (!visible) {
       path = [];
@@ -134,7 +229,7 @@
     };
   });
 
-  // Keep the whole ring on screen and turn it toward the nearest edge
+  // Keep the whole ring on screen; open at the remembered rotation, or toward the nearest edge the first time
   $effect(() => {
     if (!visible) return;
     const reach = radius + 80;
@@ -144,14 +239,20 @@
       x: Math.max(reach, Math.min(width - reach, position.x)),
       y: Math.max(reach, Math.min(height - reach, position.y))
     };
-    menuRotation = rotationFromEdge(position.x, position.y, width, height);
+    untrack(() => {
+      const remembered = rotation;
+      menuRotation = remembered ?? rotationFromEdge(position.x, position.y, width, height);
+      if (remembered === undefined) onRotationChange?.(menuRotation);
+    });
   });
 </script>
 
 {#if visible}
   <div
     class="radialMenu"
-    onpointerdowncapture={() => {
+    bind:this={rootElement}
+    onpointerdowncapture={(event) => {
+      if (event.pointerType === 'mouse') twisted = false;
       armed = true;
       restartAutoClose();
     }}
@@ -168,13 +269,19 @@
       ontouchcancel={cancelTwoFingerHold}
     ></button>
 
-    <div class="radialMenu__container" style:left="{adjustedPosition.x}px" style:top="{adjustedPosition.y}px">
+    <div
+      class="radialMenu__container"
+      style:left="{adjustedPosition.x}px"
+      style:top="{adjustedPosition.y}px"
+      style:transform="rotate({-menuRotation}deg)"
+      style:will-change={twist?.active ? 'transform' : undefined}
+    >
       <div class="radialMenu__ring" style:width="{radius * 2}px" style:height="{radius * 2}px"></div>
 
       <button
         class="radialMenu__hub"
         type="button"
-        style:transform="translate(-50%, -50%) rotate({-menuRotation}deg)"
+        style:transform="translate(-50%, -50%)"
         aria-label={depth > 0 ? `Back from ${level.parent?.label}` : 'Close menu'}
         onclick={back}
       >
@@ -199,7 +306,6 @@
           {item}
           angle={itemAngle(index, level.items.length)}
           {radius}
-          counterRotation={menuRotation}
           focused={focusedId === item.id}
           onSelect={select}
           onFocus={(id) => (focusedId = id)}
@@ -215,6 +321,7 @@
     inset: 0;
     z-index: 1000;
     pointer-events: auto;
+    touch-action: none;
   }
 
   .radialMenu__backdrop {

@@ -27,9 +27,9 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run containers/host.sh setup first}
       APP_API_URL: http://127.0.0.1:5174
       PARTYKIT_INTERNAL_URL: http://127.0.0.1:1999
-      PUBLIC_PARTYKIT_HOST: ${LAN_HOST:-localhost}:1999
+      PUBLIC_PARTYKIT_HOST: ${LAN_HOST:-localhost}:${DEV_PARTYKIT_PORT:-1999}
       PUBLIC_PARTYKIT_PROTOCOL: ws
-      BASE_URL: http://${LAN_HOST:-localhost}:5174
+      BASE_URL: http://${LAN_HOST:-localhost}:${DEV_APP_PORT:-5174}
       SESSION_COOKIE_SECURE: 'false'
       CLOUDFLARE_EMAIL_API_KEY: ''
       STRIPE_API_KEY: ''
@@ -38,9 +38,9 @@ services:
       TURBO_TELEMETRY_DISABLED: '1'
       DO_NOT_TRACK: '1'
     ports:
-      - '${BIND_ADDRESS:-127.0.0.1}:5173:5173'
-      - '${BIND_ADDRESS:-127.0.0.1}:5174:5174'
-      - '${BIND_ADDRESS:-127.0.0.1}:1999:1999'
+      - '${BIND_ADDRESS:-127.0.0.1}:${DEV_DOCS_PORT:-5173}:5173'
+      - '${BIND_ADDRESS:-127.0.0.1}:${DEV_APP_PORT:-5174}:5174'
+      - '${BIND_ADDRESS:-127.0.0.1}:${DEV_PARTYKIT_PORT:-1999}:1999'
     volumes:
       - .:/workspace:z
       - dev_modules:/workspace/node_modules

@@ -5,7 +5,7 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 
 # @tableslayer/stage rendering architecture
 
-> **Freshness**: last verified 2026-10-26 (Threlte 8.6, Three 0.186, postprocessing 6.39).
+> **Freshness**: last verified 2026-11-01 (Threlte 8.6, Three 0.186, postprocessing 6.39).
 > Anchor files at the bottom — if one is missing/renamed, the code wins; update this skill.
 > Deeper current docs: `docs/grid-system-architecture.md` (grid math), `docs/stage-performance-guide.md` (perf workflow).
 
@@ -87,7 +87,7 @@ description: Architecture and gotchas for packages/stage — the Threlte/Three.j
 
 Full design: `docs/tv-radial-menu-architecture.md`.
 
-- `RadialMenu` (`components/RadialMenu/`) is the TV's only menu. It keeps a stack of submenu ids and re-reads each level from `items`, so options that change while it is open (a condition toggled on) update in place. The hub and any tap outside the ring go back one level and close at the top level; the menu ignores clicks that did not start on it (the long press that opened it ends over it). Items take `label` (always shown), `hint` (shown in the hub while pressed or hovered), `accent`, `active`, `badge`, `danger`, `disabled` (still pressable so the hub can explain), `keepOpen` and `submenu`; the ring radius grows with the option count and everything rotates to face the nearest screen edge.
+- `RadialMenu` (`components/RadialMenu/`) is the TV's only menu. It keeps a stack of submenu ids and re-reads each level from `items`, so options that change while it is open (a condition toggled on) update in place. The hub and any tap outside the ring go back one level and close at the top level; the menu ignores clicks that did not start on it (the long press that opened it ends over it). Items take `label` (always shown), `hint` (shown in the hub while pressed or hovered), `accent`, `active`, `badge`, `danger`, `disabled` (still pressable so the hub can explain), `keepOpen` and `submenu`; the ring radius grows with the option count. The whole `.radialMenu__container` is drawn rotated by `-menuRotation` (items and hub are laid out at fixed angles). The menu opens at the `rotation` prop (the TV persists it in localStorage `tableslayer:tvRadialMenuRotation`); only when that is `undefined` does it face the nearest screen edge, reporting it through `onRotationChange`. A two-finger twist rotates it continuously (rAF-throttled, native non-passive touch listeners on the root), cancels the two-finger-hold reposition, and suppresses the following click via a `twisted` flag.
 - `onMarkerLongPress(marker, clientPoint)` fires after a 500 ms still press on a token (12 px slop) only when a consumer registers it (the editor doesn't). It cancels the pending drag and suppresses the release click, so a long press never moves or re-selects the token. Shapes report long press through `onAoeTemplateMenu`; the play page detects long press on empty map itself.
 
 ## Dev / verify workflow

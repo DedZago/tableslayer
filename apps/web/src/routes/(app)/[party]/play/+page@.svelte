@@ -468,6 +468,27 @@
   let showTouchHint = $state(false);
   let isTouchDevice = $state(false);
 
+  const RADIAL_ROTATION_KEY = 'tableslayer:tvRadialMenuRotation';
+  let radialMenuRotation: number | undefined = $state(undefined);
+
+  onMount(() => {
+    try {
+      const stored = parseFloat(localStorage.getItem(RADIAL_ROTATION_KEY) ?? '');
+      radialMenuRotation = Number.isFinite(stored) ? stored : undefined;
+    } catch {
+      radialMenuRotation = undefined;
+    }
+  });
+
+  const saveRadialMenuRotation = (rotation: number) => {
+    radialMenuRotation = rotation;
+    try {
+      localStorage.setItem(RADIAL_ROTATION_KEY, String(rotation));
+    } catch {
+      // storage unavailable: the angle lasts for this session only
+    }
+  };
+
   // Tokens and shapes have their own press handling (drag, long press); empty map is ours
   const pressHitsItem = (point: { x: number; y: number }) => {
     if (!stage) return false;
@@ -787,6 +808,8 @@
   backIcon={IconArrowBackUp}
   closeIcon={IconX}
   autoCloseMs={15000}
+  rotation={radialMenuRotation}
+  onRotationChange={saveRadialMenuRotation}
   onItemSelect={(itemId) => tools.selectMenuItem(itemId)}
   onClose={() => tools.closeMenu()}
   onReposition={(point) => {

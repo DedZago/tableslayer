@@ -242,7 +242,7 @@
       element.removeEventListener('touchmove', handleTouchMove, options);
       element.removeEventListener('touchend', handleTouchEnd, options);
       element.removeEventListener('touchcancel', handleTouchEnd, options);
-      twist = null;
+      endTwist();
       if (frameId !== null) cancelAnimationFrame(frameId);
       frameId = null;
       pendingRotation = null;

@@ -40,7 +40,9 @@
     IconPokerChip,
     IconHandFinger,
     IconLocationPin,
-    IconPresentation
+    IconPresentation,
+    IconPin,
+    IconPinFilled
   } from '@tabler/icons-svelte';
   import {
     hasFileDrop,
@@ -53,6 +55,7 @@
   import { queuePropertyUpdate, trackChecklistItem } from '$lib/utils';
   import { setPreference } from '$lib/utils/gameSessionPreferences';
   import ConditionPicker from './ConditionPicker.svelte';
+  import TokenEditorTabs, { type TokenEditorTab } from './TokenEditorTabs.svelte';
   import { StatBlockPanel, type HitPointsFields, type StatBlockRollHandler } from '$lib/components/StatBlock';
   import type { StatBlock } from '$lib/utils/statBlock';
   import type { ComponentProps } from 'svelte';
@@ -107,6 +110,16 @@
     /** Writes a note straight to the doc, so a save flushed after a scene switch still lands on its scene */
     onNoteSave?: (sceneId: string, markerId: string, note: Marker['note']) => void;
   } = $props();
+
+  type EditorTab = 'stats' | 'look' | 'conditions' | 'notes';
+  let selectedTab = $state<EditorTab | undefined>(undefined);
+
+  const editorTabs = (hasStats: boolean, conditionCount: number): TokenEditorTab[] => [
+    ...(hasStats ? [{ id: 'stats', label: 'Stats' }] : []),
+    { id: 'look', label: 'Look' },
+    ...(conditionPickerFor ? [{ id: 'conditions', label: 'Conditions', badge: conditionCount }] : []),
+    { id: 'notes', label: 'Notes' }
+  ];
 
   let dropMarkerId = $state<string | null>(null);
 
@@ -327,65 +340,39 @@
           {#if editingMarker}
             {@const marker = editingMarker}
             {@const stat = statBlockFor?.(marker.id) ?? null}
-            {#if stat}
-              <StatBlockPanel
-                statBlock={stat.statBlock}
-                hitPoints={stat.hitPoints}
-                tempHitPoints={stat.tempHitPoints}
-                variant="compact"
-                onHitPointsChange={(fields) => onHitPointsChange?.(marker.id, fields)}
-                onRoll={onStatRoll}
-              />
-              <Spacer />
-            {/if}
-            <details class="markerManager__appearance" open={!stat}>
-              <summary>Appearance</summary>
-              <Spacer />
-              <div class="markerManager__formGrid">
-                <FormControl label="Change image" name="imageLocation">
-                  {#snippet input({ inputProps })}
-                    {@render imagePreview(marker, inputProps)}
-                  {/snippet}
-                </FormControl>
-
-                {#if onHandoutPreview}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    isDisabled={!marker.imageUrl}
-                    onclick={() => onHandoutPreview?.(marker.id)}
-                  >
-                    <Icon Icon={IconPresentation} size="1rem" />
-                    Show as handout
-                  </Button>
-                {/if}
-
-                <div class="markerManager__colorPicker">
-                  <FormControl label="Background color" name="shapeColor">
-                    {#snippet start()}
-                      <Popover>
-                        {#snippet trigger()}
-                          <ColorPickerSwatch color={marker.shapeColor} />
-                        {/snippet}
-                        {#snippet content()}
-                          <ColorPicker
-                            showOpacity={false}
-                            hex={marker.shapeColor}
-                            onUpdate={(colorData) =>
-                              updateMarkerAndSave(marker.id, (m) => (m.shapeColor = colorData.hex))}
-                          />
-                        {/snippet}
-                      </Popover>
-                    {/snippet}
+            {@const conditionProps = conditionPickerFor?.(marker.id)}
+            {@const tabs = editorTabs(!!stat, conditionProps?.active.length ?? 0)}
+            {@const currentTab =
+              selectedTab && tabs.some((tab) => tab.id === selectedTab) ? selectedTab : stat ? 'stats' : 'look'}
+            <div class="markerManager__summary">
+              <div class="markerManager__summaryTop">
+                <div class="markerManager__thumb">{@render imagePreview(marker)}</div>
+                <div class="markerManager__summaryFields">
+                  <FormControl label="Title" name="title">
                     {#snippet input({ inputProps })}
                       <Input
                         {...inputProps}
-                        value={marker.shapeColor}
-                        oninput={(e) => updateMarkerAndSave(marker.id, (m) => (m.shapeColor = e.currentTarget.value))}
+                        value={marker.title}
+                        oninput={(e) => updateMarkerAndSave(marker.id, (m) => (m.title = e.currentTarget.value))}
                       />
                     {/snippet}
                   </FormControl>
+                  <div class="markerManager__labelField">
+                    <FormControl label="Label" name="label">
+                      {#snippet input({ inputProps })}
+                        <Input
+                          {...inputProps}
+                          value={marker.label}
+                          maxlength={3}
+                          placeholder="ABC"
+                          oninput={(e) => updateMarkerAndSave(marker.id, (m) => (m.label = e.currentTarget.value))}
+                        />
+                      {/snippet}
+                    </FormControl>
+                  </div>
                 </div>
+              </div>
+              <div class="markerManager__summaryBottom">
                 <FormControl label="Visibility" name="visibility">
                   {#snippet input({ inputProps })}
                     <RadioButton
@@ -416,113 +403,150 @@
                   {/snippet}
                 </FormControl>
                 {#if marker.visibility !== MarkerVisibility.DM && onPinToggle}
-                  <FormControl label="Pin tooltip for players?" name="pin">
+                  {@const isPinned = pinnedMarkerIds.includes(marker.id)}
+                  <button
+                    type="button"
+                    class={['markerManager__pin', isPinned && 'markerManager__pin--isActive']}
+                    aria-pressed={isPinned}
+                    aria-label="Pin tooltip for players"
+                    title="Pin tooltip for players"
+                    onclick={() => onPinToggle(marker.id, !isPinned)}
+                  >
+                    <Icon Icon={isPinned ? IconPinFilled : IconPin} size="1.25rem" />
+                  </button>
+                {/if}
+              </div>
+            </div>
+
+            <TokenEditorTabs
+              {tabs}
+              selected={currentTab}
+              onSelect={(id) => (selectedTab = id as EditorTab)}
+              idPrefix="markerEditor"
+              label="Marker editor"
+            />
+
+            <div
+              class="markerManager__tabPanel"
+              role="tabpanel"
+              id="markerEditorPanel-{currentTab}"
+              aria-labelledby="markerEditorTab-{currentTab}"
+            >
+              {#if currentTab === 'stats' && stat}
+                <StatBlockPanel
+                  statBlock={stat.statBlock}
+                  hitPoints={stat.hitPoints}
+                  tempHitPoints={stat.tempHitPoints}
+                  variant="compact"
+                  onHitPointsChange={(fields) => onHitPointsChange?.(marker.id, fields)}
+                  onRoll={onStatRoll}
+                />
+              {:else if currentTab === 'look'}
+                <div class="markerManager__formGrid">
+                  <div class="markerManager__colorPicker">
+                    <FormControl label="Background color" name="shapeColor">
+                      {#snippet start()}
+                        <Popover>
+                          {#snippet trigger()}
+                            <ColorPickerSwatch color={marker.shapeColor} />
+                          {/snippet}
+                          {#snippet content()}
+                            <ColorPicker
+                              showOpacity={false}
+                              hex={marker.shapeColor}
+                              onUpdate={(colorData) =>
+                                updateMarkerAndSave(marker.id, (m) => (m.shapeColor = colorData.hex))}
+                            />
+                          {/snippet}
+                        </Popover>
+                      {/snippet}
+                      {#snippet input({ inputProps })}
+                        <Input
+                          {...inputProps}
+                          value={marker.shapeColor}
+                          oninput={(e) => updateMarkerAndSave(marker.id, (m) => (m.shapeColor = e.currentTarget.value))}
+                        />
+                      {/snippet}
+                    </FormControl>
+                  </div>
+                  <FormControl label="Shape" name="shape">
                     {#snippet input({ inputProps })}
                       <RadioButton
                         {...inputProps}
-                        selected={pinnedMarkerIds.includes(marker.id) ? 'pinned' : 'unpinned'}
+                        selected={marker.shape.toString()}
                         options={[
-                          { label: 'Yes', value: 'pinned' },
-                          { label: 'No', value: 'unpinned' }
+                          { label: circle as Snippet, value: MarkerShape.Circle.toString() },
+                          { label: square as Snippet, value: MarkerShape.Square.toString() },
+                          { label: triangle as Snippet, value: MarkerShape.Triangle.toString() }
                         ]}
                         onSelectedChange={(value) => {
-                          onPinToggle(marker.id, value === 'pinned');
+                          updateMarkerAndSave(marker.id, (m) => (m.shape = Number(value)));
+                          socketUpdate();
                         }}
                       />
                     {/snippet}
                   </FormControl>
-                {/if}
-                <FormControl label="Label" name="label">
-                  {#snippet input({ inputProps })}
-                    <Input
-                      {...inputProps}
-                      value={marker.label}
-                      maxlength={3}
-                      placeholder="ABC"
-                      oninput={(e) => updateMarkerAndSave(marker.id, (m) => (m.label = e.currentTarget.value))}
-                    />
-                  {/snippet}
-                </FormControl>
-                <FormControl label="Title" name="title">
-                  {#snippet input({ inputProps })}
-                    <Input
-                      {...inputProps}
-                      value={marker.title}
-                      oninput={(e) => updateMarkerAndSave(marker.id, (m) => (m.title = e.currentTarget.value))}
-                    />
-                  {/snippet}
-                </FormControl>
-              </div>
-              <Spacer />
-
-              <div class="markerManager__formGrid">
-                <FormControl label="Shape" name="shape">
-                  {#snippet input({ inputProps })}
-                    <RadioButton
-                      {...inputProps}
-                      selected={marker.shape.toString()}
-                      options={[
-                        { label: circle as Snippet, value: MarkerShape.Circle.toString() },
-                        { label: square as Snippet, value: MarkerShape.Square.toString() },
-                        { label: triangle as Snippet, value: MarkerShape.Triangle.toString() }
-                      ]}
-                      onSelectedChange={(value) => {
-                        updateMarkerAndSave(marker.id, (m) => (m.shape = Number(value)));
-                        socketUpdate();
-                      }}
-                    />
-                  {/snippet}
-                </FormControl>
-                <FormControl label="Size" name="size">
-                  {#snippet input({ inputProps })}
-                    <RadioButton
-                      {...inputProps}
-                      selected={marker.size.toString()}
-                      options={[
-                        { label: 'S', value: MarkerSize.Small.toString() },
-                        { label: 'M', value: MarkerSize.Medium.toString() },
-                        { label: 'L', value: MarkerSize.Large.toString() }
-                      ]}
-                      onSelectedChange={(value) => {
-                        updateMarkerAndSave(marker.id, (m) => (m.size = Number(value)));
-                        socketUpdate();
-                      }}
-                    />
-                  {/snippet}
-                </FormControl>
-              </div>
-              <Spacer />
-            </details>
-
-            {#if conditionPickerFor}
-              <section class="markerManager__conditions" aria-label="Conditions">
-                <Text weight={700}>Conditions</Text>
-                <Spacer size="0.5rem" />
-                <ConditionPicker {...conditionPickerFor(marker.id)} />
-              </section>
-              <Spacer />
-            {/if}
-
-            <div onblur={() => flushNoteSave(marker.id)}>
-              <Editor
-                debug={false}
-                content={marker.note}
-                editable={true}
-                onChange={(json) => saveNote(marker.id, json)}
-              />
+                  <FormControl label="Size" name="size">
+                    {#snippet input({ inputProps })}
+                      <RadioButton
+                        {...inputProps}
+                        selected={marker.size.toString()}
+                        options={[
+                          { label: 'S', value: MarkerSize.Small.toString() },
+                          { label: 'M', value: MarkerSize.Medium.toString() },
+                          { label: 'L', value: MarkerSize.Large.toString() }
+                        ]}
+                        onSelectedChange={(value) => {
+                          updateMarkerAndSave(marker.id, (m) => (m.size = Number(value)));
+                          socketUpdate();
+                        }}
+                      />
+                    {/snippet}
+                  </FormControl>
+                  {#if onHandoutPreview}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      isDisabled={!marker.imageUrl}
+                      onclick={() => onHandoutPreview?.(marker.id)}
+                    >
+                      <Icon Icon={IconPresentation} size="1rem" />
+                      Show as handout
+                    </Button>
+                  {/if}
+                </div>
+              {:else if currentTab === 'conditions' && conditionProps}
+                <ConditionPicker {...conditionProps} />
+              {:else if currentTab === 'notes'}
+                <div onblur={() => flushNoteSave(marker.id)}>
+                  <Editor
+                    debug={false}
+                    content={marker.note}
+                    editable={true}
+                    onChange={(json) => saveNote(marker.id, json)}
+                  />
+                </div>
+              {/if}
             </div>
-            <Spacer />
 
-            <ConfirmActionButton action={() => handleMarkerDelete(marker.id)} actionButtonText="Confirm delete">
-              {#snippet trigger({ triggerProps })}
-                <Button as="div" variant="danger" disabled={formIsLoading} isLoading={formIsLoading} {...triggerProps}>
-                  Delete marker
-                </Button>
-              {/snippet}
-              {#snippet actionMessage()}
-                Delete marker?
-              {/snippet}
-            </ConfirmActionButton>
+            <div class="markerManager__footer">
+              <ConfirmActionButton action={() => handleMarkerDelete(marker.id)} actionButtonText="Confirm delete">
+                {#snippet trigger({ triggerProps })}
+                  <Button
+                    as="div"
+                    variant="danger"
+                    disabled={formIsLoading}
+                    isLoading={formIsLoading}
+                    {...triggerProps}
+                  >
+                    Delete marker
+                  </Button>
+                {/snippet}
+                {#snippet actionMessage()}
+                  Delete marker?
+                {/snippet}
+              </ConfirmActionButton>
+            </div>
           {/if}
         </div>
       </div>
@@ -815,13 +839,75 @@
     font-size: 0.75rem;
     color: var(--fgMuted);
   }
-  .markerManager__appearance summary {
-    cursor: pointer;
-    font-weight: var(--font-weight-6);
-    padding: 0.5rem 0;
+  .markerManager__summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
   }
-  .markerManager__conditions {
-    padding: 0 0.25rem;
+  .markerManager__summaryTop {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-end;
+  }
+  .markerManager__thumb {
+    flex-shrink: 0;
+    width: 3rem;
+    height: 3rem;
+    display: flex;
+    align-items: center;
+  }
+  .markerManager__thumb :global(.markerManager__imagePreview) {
+    min-width: 3rem;
+    width: 3rem;
+    min-height: 3rem;
+    height: 3rem;
+  }
+  .markerManager__summaryFields {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 0.5rem;
+  }
+  .markerManager__summaryFields > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+  .markerManager__labelField {
+    flex: 0 0 4.5rem;
+  }
+  .markerManager__summaryBottom {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+  .markerManager__pin {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex-shrink: 0;
+    color: var(--fgMuted);
+    background: none;
+    border: var(--borderThin);
+    border-radius: var(--radius-2);
+    cursor: pointer;
+  }
+  .markerManager__pin:hover {
+    background: var(--menuItemHover);
+    color: var(--fg);
+  }
+  .markerManager__pin--isActive {
+    color: var(--fgPrimary);
+    border-color: var(--fgPrimary);
+  }
+  .markerManager__tabPanel {
+    padding: 1rem 0;
+  }
+  .markerManager__footer {
+    padding: 0.75rem 0 1.5rem;
+    border-top: var(--borderThin);
   }
   .markerManager__title:hover {
     text-decoration: underline;

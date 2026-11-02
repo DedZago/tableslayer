@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Hr, RadioButton } from '@tableslayer/ui';
-  import { IconCheck } from '@tabler/icons-svelte';
+  import { Icon, RadioButton } from '@tableslayer/ui';
+  import { IconBooks, IconPin, IconPinFilled, IconPresentation, IconX } from '@tabler/icons-svelte';
   import { MarkerVisibility } from '@tableslayer/stage';
   import type { ComponentProps } from 'svelte';
   import ConditionPicker from './ConditionPicker.svelte';
+  import TokenEditorTabs from './TokenEditorTabs.svelte';
 
   type CombatAction = 'start' | 'add' | 'remove';
 
@@ -61,6 +62,14 @@
     { label: 'On hover', value: MarkerVisibility.Hover.toString() }
   ];
 
+  type PanelTab = 'conditions' | 'combat';
+  let selectedTab = $state<PanelTab>('conditions');
+  const tabs = $derived([
+    { id: 'conditions', label: 'Conditions', badge: conditions.active.length },
+    ...(onCombatAction ? [{ id: 'combat', label: 'Combat' }] : [])
+  ]);
+  const currentTab = $derived(tabs.some((tab) => tab.id === selectedTab) ? selectedTab : 'conditions');
+
   let panelElement = $state<HTMLElement>();
   let placement = $state({ left: 0, top: 0, ready: false });
 
@@ -113,73 +122,79 @@
 >
   <div class="tokenContextPanel__header">
     <span class="tokenContextPanel__title">{targetCount === 1 ? name : `${targetCount} tokens`}</span>
+    <button type="button" class="tokenContextPanel__iconButton" aria-label="Close" title="Close" onclick={onClose}>
+      <Icon Icon={IconX} size="1rem" />
+    </button>
   </div>
 
-  <div class="tokenContextPanel__body">
-    <ConditionPicker {...conditions} />
-
-    <Hr />
-
-    <div class="tokenContextPanel__actions">
+  {#if onVisibilityChange || onPinToggle || onShowAsHandout || onSaveToLibrary}
+    <div class="tokenContextPanel__quick">
       {#if onVisibilityChange}
-        <div class="tokenContextPanel__section">
-          <span class="tokenContextPanel__label">Visibility</span>
-          <RadioButton
-            selected={visibility === undefined ? '' : visibility.toString()}
-            options={visibilityOptions}
-            onSelectedChange={(value) => onVisibilityChange(Number(value) as MarkerVisibility)}
-          />
-        </div>
+        <RadioButton
+          selected={visibility === undefined ? '' : visibility.toString()}
+          options={visibilityOptions}
+          onSelectedChange={(value) => onVisibilityChange(Number(value) as MarkerVisibility)}
+        />
       {/if}
+      <div class="tokenContextPanel__quickButtons">
+        {#if onPinToggle}
+          <button
+            type="button"
+            class={['tokenContextPanel__iconButton', pinned && 'tokenContextPanel__iconButton--isActive']}
+            aria-pressed={pinned}
+            aria-label="Pin tooltip for players"
+            title="Pin tooltip for players"
+            onclick={() => onPinToggle(!pinned)}
+          >
+            <Icon Icon={pinned ? IconPinFilled : IconPin} size="1.125rem" />
+          </button>
+        {/if}
+        {#if onShowAsHandout}
+          <button
+            type="button"
+            class="tokenContextPanel__iconButton"
+            aria-label="Show as handout"
+            title="Show as handout"
+            onclick={onShowAsHandout}
+          >
+            <Icon Icon={IconPresentation} size="1.125rem" />
+          </button>
+        {/if}
+        {#if onSaveToLibrary}
+          <button
+            type="button"
+            class="tokenContextPanel__iconButton"
+            aria-label="Save to library"
+            title="Save to library"
+            onclick={onSaveToLibrary}
+          >
+            <Icon Icon={IconBooks} size="1.125rem" />
+          </button>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
-      {#if onPinToggle}
-        <button
-          type="button"
-          class="tokenContextPanel__action"
-          aria-pressed={pinned}
-          onclick={() => onPinToggle(!pinned)}
-        >
-          Pin tooltip for players
-          {#if pinned}<IconCheck size="1rem" />{/if}
-        </button>
-      {/if}
+  {#if tabs.length > 1}
+    <TokenEditorTabs
+      {tabs}
+      selected={currentTab}
+      onSelect={(id) => (selectedTab = id as PanelTab)}
+      idPrefix="tokenContext"
+      label="Token actions"
+    />
+  {/if}
 
-      {#if onShowAsHandout}
-        <button type="button" class="tokenContextPanel__action" onclick={onShowAsHandout}>Show as handout</button>
-      {/if}
-
-      {#if onSaveToLibrary}
-        <button type="button" class="tokenContextPanel__action" onclick={onSaveToLibrary}>Save to library</button>
-      {/if}
-
-      {#if onEndConcentration}
-        <button
-          type="button"
-          class="tokenContextPanel__action"
-          onclick={() => {
-            onEndConcentration();
-            onClose();
-          }}
-        >
-          End concentration{concentratingOn ? ` (${concentratingOn})` : ''}
-        </button>
-      {/if}
-
-      {#each spellEffects as effect (effect.templateId)}
-        <button
-          type="button"
-          class="tokenContextPanel__action"
-          onclick={() => {
-            onRemoveSpellEffect?.(effect.templateId);
-            onClose();
-          }}
-        >
-          Remove {effect.spellName}
-        </button>
-      {/each}
-
-      {#if onCombatAction}
-        <Hr />
+  <div
+    class="tokenContextPanel__body"
+    role={tabs.length > 1 ? 'tabpanel' : undefined}
+    id="tokenContextPanel-{currentTab}"
+    aria-labelledby={tabs.length > 1 ? `tokenContextTab-${currentTab}` : undefined}
+  >
+    {#if currentTab === 'conditions'}
+      <ConditionPicker {...conditions} />
+    {:else if onCombatAction}
+      <div class="tokenContextPanel__actions">
         {#if combatState === 'none'}
           <button type="button" class="tokenContextPanel__action" onclick={() => onCombatAction('start')}>
             Start combat ({targetCount})
@@ -196,13 +211,38 @@
             </button>
           {/if}
         {/if}
-      {/if}
+      </div>
+    {/if}
+  </div>
 
-      <Hr />
-      <button type="button" class="tokenContextPanel__action tokenContextPanel__action--danger" onclick={handleDelete}>
-        {summonedBy && targetCount === 1 ? `Dismiss ${summonedBy}` : 'Delete marker'}
+  <div class="tokenContextPanel__footer">
+    {#if onEndConcentration}
+      <button
+        type="button"
+        class="tokenContextPanel__action"
+        onclick={() => {
+          onEndConcentration();
+          onClose();
+        }}
+      >
+        End concentration{concentratingOn ? ` (${concentratingOn})` : ''}
       </button>
-    </div>
+    {/if}
+    {#each spellEffects as effect (effect.templateId)}
+      <button
+        type="button"
+        class="tokenContextPanel__action"
+        onclick={() => {
+          onRemoveSpellEffect?.(effect.templateId);
+          onClose();
+        }}
+      >
+        Remove {effect.spellName}
+      </button>
+    {/each}
+    <button type="button" class="tokenContextPanel__action tokenContextPanel__action--danger" onclick={handleDelete}>
+      {summonedBy && targetCount === 1 ? `Dismiss ${summonedBy}` : 'Delete marker'}
+    </button>
   </div>
 </div>
 
@@ -223,18 +263,59 @@
   }
 
   .tokenContextPanel__header {
-    padding: 0.75rem 1rem 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 0.5rem 0.5rem 1rem;
     border-bottom: var(--borderThin);
   }
 
   .tokenContextPanel__title {
+    min-width: 0;
+    overflow: hidden;
     font-weight: var(--font-weight-6);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tokenContextPanel__quick {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+  }
+
+  .tokenContextPanel__quickButtons {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .tokenContextPanel__iconButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    flex-shrink: 0;
+    color: var(--fgMuted);
+    background: none;
+    border: none;
+    border-radius: var(--radius-2);
+    cursor: pointer;
+  }
+
+  .tokenContextPanel__iconButton:hover {
+    background: var(--menuItemHover);
+    color: var(--fg);
+  }
+
+  .tokenContextPanel__iconButton--isActive {
+    color: var(--fgPrimary);
   }
 
   .tokenContextPanel__body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
     padding: 0.75rem 1rem;
     overflow-y: auto;
     min-height: 0;
@@ -246,18 +327,9 @@
     gap: 0.125rem;
   }
 
-  .tokenContextPanel__section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+  .tokenContextPanel__footer {
     padding: 0.25rem 0.5rem;
-  }
-
-  .tokenContextPanel__label {
-    font-size: 0.75rem;
-    color: var(--fgMuted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    border-top: var(--borderThin);
   }
 
   .tokenContextPanel__action {

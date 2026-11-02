@@ -6,13 +6,12 @@
     item: RadialMenuItemProps;
     angle: number;
     radius: number;
-    counterRotation: number;
     focused: boolean;
     onSelect: (itemId: string) => void;
     onFocus: (itemId: string) => void;
   }
 
-  const { item, angle, radius, counterRotation, focused, onSelect, onFocus }: Props = $props();
+  const { item, angle, radius, focused, onSelect, onFocus }: Props = $props();
 
   const x = $derived(Math.cos(angle) * radius);
   const y = $derived(Math.sin(angle) * radius);
@@ -30,7 +29,7 @@
     item.submenu?.length && 'radialMenuItem--hasSubmenu'
   ]}
   style:--accent={item.accent ?? 'var(--fg)'}
-  style:transform="translate({x}px, {y}px) rotate({-counterRotation}deg)"
+  style:transform="translate({x}px, {y}px)"
   type="button"
   aria-label={item.label}
   aria-disabled={item.disabled}

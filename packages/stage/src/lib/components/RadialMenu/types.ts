@@ -43,4 +43,8 @@ export interface RadialMenuProps {
   onSubmenuOpen?: (itemId: string) => void;
   onClose?: () => void;
   onReposition?: (position: { x: number; y: number }) => void;
+  /** Degrees the menu opens at; when undefined it opens facing the nearest screen edge */
+  rotation?: number;
+  /** Called with the rotation in [0, 360) when a twist ends, and when the nearest edge was used on open */
+  onRotationChange?: (rotation: number) => void;
 }

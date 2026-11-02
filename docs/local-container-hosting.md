@@ -50,6 +50,20 @@ Open `http://192.168.1.50:5174` for the app and `http://192.168.1.50:5173` for U
 
 For an editor devcontainer, do the setup steps above first, stop any standalone development stack, then reopen the repository in its container. It uses the same Compose service and data folder. Command-line development does not depend on an editor extension. Workspace dependency caches live in named container volumes; campaign data lives in your selected directory. The development container runs as root inside the container; on rootful Docker generated files can need ownership adjustment on the host. Rootless Podman maps container root to your user. Bind mounts use `:z` for SELinux sharing.
 
+### Running several development stacks in parallel
+
+The development stack uses a fixed Compose project name (`tableslayer-dev`) and host ports 5173, 5174 and 1999. To run a second checkout (for example a git worktree) beside it, give that checkout its own `.env` with a different project name, ports and data folder:
+
+```sh
+COMPOSE_PROJECT_NAME=tableslayer-uipolish
+DEV_DOCS_PORT=5273
+DEV_APP_PORT=5274
+DEV_PARTYKIT_PORT=2099
+DATA_ROOT=/absolute/path/to/another/data
+```
+
+`COMPOSE_PROJECT_NAME` overrides the `name:` in `compose.dev.yaml`, so containers, networks and cache volumes stay separate. The three port variables only change the host side of the mappings and the URLs the browser uses; the ports inside the container are unchanged. Unset variables keep the defaults above. `make dev` stops only the stack of the checkout it runs in, and prints the configured URLs.
+
 The UI documentation contains upstream examples that still load sample maps from the original CDN; campaign assets and the actual application use your local backend.
 
 ## Release

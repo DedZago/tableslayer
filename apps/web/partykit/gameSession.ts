@@ -1,3 +1,4 @@
+import type { Ruleset } from '@tableslayer/stage';
 import type * as Party from 'partykit/server';
 import { onConnect, unstable_getYDoc, type YPartyKitOptions } from 'y-partykit';
 import type * as Y from 'yjs';
@@ -7,6 +8,7 @@ import {
   hydrateGameSessionDoc,
   isDocHydrated,
   pruneRowFragments,
+  setDocRuleset,
   upgradeConditionMaps
 } from '../src/lib/realtime/docSchema';
 import type { ScenePart } from '../src/lib/realtime/types';
@@ -234,6 +236,18 @@ export default class GameSessionServer implements Party.Server {
         // The resynced doc now matches the DB; drop any stale dirty state
         this.#dirty.clear();
         this.#deletedSceneIds.clear();
+        return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+      }
+
+      // The app changed game_session.ruleset: mirror it into the live doc so connected clients follow
+      if (body.type === 'setRuleset') {
+        const token = (this.room.env.INTERNAL_API_TOKEN as string | undefined) ?? 'dev-internal-token';
+        if (req.headers.get('x-internal-token') !== token) {
+          return new Response('Unauthorized', { status: 401 });
+        }
+        const { ruleset } = body as { ruleset?: Ruleset };
+        if (!ruleset) return new Response('Missing ruleset', { status: 400 });
+        setDocRuleset(await unstable_getYDoc(this.room, this.#options), ruleset, HYDRATION_ORIGIN);
         return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
       }
 

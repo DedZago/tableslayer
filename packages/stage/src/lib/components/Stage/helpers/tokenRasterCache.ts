@@ -118,6 +118,24 @@ export const syncRingColors = () => {
 const IMAGE_CACHE_LIMIT = 128;
 const imageCache = new Map<string, Promise<ImageBitmap>>();
 
+const isSvg = (blob: Blob, url: string) => blob.type === 'image/svg+xml' || /\.svg(?:[?#]|$)/i.test(url);
+
+// createImageBitmap rejects SVG blobs in some browsers, and an SVG without an intrinsic size rasterizes
+// at 0x0, so it is decoded through an Image with an explicit size and drawn onto a canvas
+const decodeSvg = async (blob: Blob): Promise<ImageBitmap> => {
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = new Image(TOKEN_CANVAS_SIZE, TOKEN_CANVAS_SIZE);
+    image.src = objectUrl;
+    await image.decode();
+    const canvas = new OffscreenCanvas(TOKEN_CANVAS_SIZE, TOKEN_CANVAS_SIZE);
+    canvas.getContext('2d')!.drawImage(image, 0, 0, TOKEN_CANVAS_SIZE, TOKEN_CANVAS_SIZE);
+    return await createImageBitmap(canvas);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+};
+
 export const loadTokenImage = (url: string): Promise<ImageBitmap> => {
   const cached = imageCache.get(url);
   if (cached) {
@@ -127,7 +145,7 @@ export const loadTokenImage = (url: string): Promise<ImageBitmap> => {
   }
   const request = fetch(url, { mode: 'cors' })
     .then((response) => response.blob())
-    .then((blob) => createImageBitmap(blob))
+    .then((blob) => (isSvg(blob, url) ? decodeSvg(blob) : createImageBitmap(blob)))
     .catch((error: unknown) => {
       imageCache.delete(url);
       throw error;

@@ -10,6 +10,29 @@ import {
   type GroupMember
 } from '$lib/utils/assetGroups';
 import { devError, devLog } from '$lib/utils/debug';
+import { readRecentSpells, withRecentSpell, writeRecentSpells, type RecentSpell } from '$lib/utils/recentSpells';
+import {
+  buildSpellAim,
+  castSpell,
+  concentratingSpellName,
+  deleteMarkersWithSpells,
+  endConcentration,
+  NO_AIM_PICKS,
+  placeAimArea,
+  removeSpellRows,
+  selfPlacement,
+  spellAimProgress,
+  spellAimPrompt,
+  spellNeedsCaster,
+  spellPickedMarkerIds,
+  spellRowsOwnedBy,
+  targetCastRequest,
+  toggleAimPick,
+  type CasterMarker,
+  type SpellAimPicks,
+  type SpellCastRequest
+} from '$lib/utils/spellCasting';
+import { parseSpellItemId, spellFxToPrewarm, TV_NO_CASTER_HINT, type SpellMenuState } from '$lib/utils/spellMenus';
 import {
   AnnotationEffect,
   AOE_EFFECT_DEFAULT_COLORS,
@@ -20,6 +43,8 @@ import {
   MapLayerType,
   MeasurementType,
   resolveCondition,
+  resolveSpell,
+  resolveSpellAnyRuleset,
   StageMode,
   type AnnotationLayerData,
   type AoeTemplate,
@@ -27,6 +52,9 @@ import {
   type Marker,
   type MarkerCondition,
   type RadialMenuItemProps,
+  type SpellAimed,
+  type SpellAreaTargets,
+  type SpellTargeted,
   type StageExports
 } from '@tableslayer/stage';
 import { v4 as uuidv4 } from 'uuid';
@@ -94,6 +122,11 @@ export class PlayTools {
   conditionForm = $state<{ x: number; y: number; markerIds: string[] } | null>(null);
   /** Short feedback line ("Grouped 3 items") */
   notice = $state<string | null>(null);
+
+  /** The spell being aimed: the AoE layer is active with its preset locked until a tap places it */
+  spellAim = $state<({ spellId: string; variantId?: string; casterId?: string } & SpellAimPicks) | null>(null);
+  /** Spells cast lately on this device, offered first in the spell ring */
+  recentSpells = $state<RecentSpell[]>(readRecentSpells());
 
   /** The draw tool's brush; the tool is on while it is set */
   drawBrush = $state<DrawBrush | null>(null);
@@ -279,7 +312,8 @@ export class PlayTools {
         groupSelect: this.groupSelect,
         distanceMode: this.distanceMode,
         selectionCount: this.selection.length,
-        playerDrawingCount: this.playerDrawingCount
+        playerDrawingCount: this.playerDrawingCount,
+        spells: this.#spellMenuState(false)
       });
     }
     const rows = this.#rows();
@@ -289,7 +323,10 @@ export class PlayTools {
         markers: this.#markerRows(this.#menuIds('markers')),
         customSuggestions: this.#customSuggestions(),
         groupItems: groups,
-        selectionCount: this.selection.length
+        selectionCount: this.selection.length,
+        spells: this.#spellMenuState(true),
+        concentratingOn: this.#concentratingOn(target.members),
+        ...this.#tokenSpellRows(target.members)
       });
     }
     const aoeIds = this.#menuIds('aoeTemplates');
@@ -299,6 +336,7 @@ export class PlayTools {
     const shared = <T>(values: T[]) => (values.every((value) => value === values[0]) ? values[0] : undefined);
     return aoeMenu({
       count: templates.length,
+      spellName: templates.length === 1 ? this.#spellNameOf(templates[0].spellId) : null,
       effect: shared(templates.map((template) => template.effect)),
       opacity: shared(templates.map((template) => template.opacity)),
       groupItems: groups
@@ -371,7 +409,7 @@ export class PlayTools {
 
   /** Stage callback: a token was tapped; select mode toggles it with its group, distance mode makes it the origin. */
   onMarkerSelected = (marker: Marker | null) => {
-    if (!marker) return;
+    if (!marker || this.spellAim) return;
     const member: GroupMember = { collection: 'markers', id: marker.id };
     if (this.groupSelect) this.selection = toggleGroupInSelection(this.#rows(), member, this.selection);
     else if (this.distanceMode) this.selection = [member];
@@ -411,10 +449,15 @@ export class PlayTools {
   };
 
   onAoeTemplateDeleted = (id: string) => {
-    const sceneId = this.#options.session.activeSceneId;
-    this.aoeSelectedIds = this.aoeSelectedIds.filter((selected) => selected !== id);
-    if (sceneId) this.#options.session.client?.write.deleteAoeTemplate(sceneId, id);
+    this.#removeTemplates([id]);
   };
+
+  /** Removes areas from the doc; a spell area that was a caster's last row clears its concentration too */
+  #removeTemplates(ids: string[]) {
+    const { client, activeSceneId } = this.#options.session;
+    this.aoeSelectedIds = this.aoeSelectedIds.filter((selected) => !ids.includes(selected));
+    if (client && activeSceneId) removeSpellRows(client, activeSceneId, { templateIds: ids });
+  }
 
   // Right-click or a long press on a shape opens its radial menu
   onAoeTemplateMenu = (id: string, position: { x: number; y: number }) => {
@@ -431,7 +474,200 @@ export class PlayTools {
   }
 
   deleteSelectedAoeTemplates() {
-    [...this.aoeSelectedIds].forEach(this.onAoeTemplateDeleted);
+    this.#removeTemplates([...this.aoeSelectedIds]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Spells: the ring picks one, the AoE layer aims it, `castSpell` plays and writes it
+  // ---------------------------------------------------------------------------
+
+  #spellMenuState(hasCaster: boolean): SpellMenuState {
+    return {
+      ruleset: this.#options.session.ruleset,
+      recent: this.recentSpells,
+      hasCaster,
+      noCasterHint: TV_NO_CASTER_HINT
+    };
+  }
+
+  #casterRow(markerId: string | undefined): CasterMarker | undefined {
+    return markerId ? this.#markerRows([markerId])[0] : undefined;
+  }
+
+  /** The spell the pressed token concentrates on, when it is the only token pressed */
+  #concentratingOn(members: GroupMember[]): string | null {
+    const ids = members.filter((member) => member.collection === 'markers').map((member) => member.id);
+    if (ids.length !== 1) return null;
+    return concentratingSpellName(this.#markerRows(ids)[0], this.#options.session.activeScene);
+  }
+
+  #spellNameOf(spellId: string | null | undefined) {
+    return spellId ? (resolveSpellAnyRuleset(spellId)?.name ?? null) : null;
+  }
+
+  /** The effects and summoner of the single pressed token, for the "Spell effects" and "Dismiss" items */
+  #tokenSpellRows(members: GroupMember[]) {
+    const ids = members.filter((member) => member.collection === 'markers').map((member) => member.id);
+    const snapshot = this.#options.session.activeScene;
+    if (ids.length !== 1 || !snapshot) return {};
+    const owned = spellRowsOwnedBy(snapshot, ids[0]);
+    // The TV never names effects the GM keeps hidden
+    const shown = new Set(
+      snapshot.aoeTemplates.filter((row) => row.visibility === StageMode.Player).map((row) => row.id)
+    );
+    return {
+      spellEffects: owned.effects.filter((effect) => shown.has(effect.templateId)),
+      summonedBy: owned.summonedBy
+    };
+  }
+
+  #spellAimSettings() {
+    const aim = this.spellAim;
+    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    return spell && aim
+      ? buildSpellAim(spell, aim.variantId, this.#casterRow(aim.casterId), spellAimProgress(spell, aim))
+      : null;
+  }
+
+  /** The AoE tool as the stage gets it: while a spell is aimed it carries the spell's preset */
+  get stageAoeTool(): Partial<AoeToolSettings> {
+    const spell = this.#spellAimSettings();
+    return spell ? { ...this.aoeTool, spell } : this.aoeTool;
+  }
+
+  /** What to do next while a spell is aimed ("Tap where to cast Fireball") */
+  get spellAimPrompt(): string | null {
+    const aim = this.spellAim;
+    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const settings = this.#spellAimSettings();
+    return spell && aim && settings
+      ? spellAimPrompt(spell.name, settings, { picked: this.#pickedCount(), inside: aim.inside.length })
+      : null;
+  }
+
+  #pickedCount() {
+    const aim = this.spellAim;
+    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    return aim && spell ? spellPickedMarkerIds(spell, aim).length : 0;
+  }
+
+  /** Target or area-pick aim with at least one token picked: the label of the button that casts it */
+  get spellCastLabel(): string | null {
+    const mode = this.#spellAimSettings()?.mode;
+    return this.#pickedCount() > 0 && (mode === 'target' || mode === 'area-targets') ? 'Cast' : null;
+  }
+
+  /** Aiming stops when its caster is deleted on the GM screen */
+  get spellAimCasterGone(): boolean {
+    const casterId = this.spellAim?.casterId;
+    return !!casterId && !this.#casterRow(casterId);
+  }
+
+  cancelSpellAim() {
+    if (!this.spellAim) return;
+    this.spellAim = null;
+    if (this.isAoeActive) this.activeLayer = MapLayerType.None;
+  }
+
+  /** Opening a spell ring links just the programs its spells use, so none compiles mid-animation */
+  onMenuSubmenuOpen = (itemId: string) => {
+    const { cast, token } = spellFxToPrewarm(itemId, {
+      ruleset: this.#options.session.ruleset,
+      recent: this.recentSpells
+    });
+    if (cast.length > 0 || token.length > 0) this.#options.getStage()?.spells.prewarm(cast, token);
+  };
+
+  #startSpell({ spellId, variantId }: RecentSpell) {
+    const spell = resolveSpell(spellId, this.#options.session.ruleset);
+    if (!spell) return;
+    const markerIds = this.#menuIds('markers');
+    const caster = markerIds.length === 1 ? this.#casterRow(markerIds[0]) : undefined;
+    if (spellNeedsCaster(spell) && !caster) {
+      this.#say(TV_NO_CASTER_HINT);
+      return;
+    }
+    if (!buildSpellAim(spell, variantId, caster)) {
+      if (caster) this.#cast({ spellId, variantId, placement: selfPlacement(caster), caster });
+      return;
+    }
+    this.drawBrush = null;
+    this.spellAim = { spellId, variantId, casterId: caster?.id, ...NO_AIM_PICKS };
+    this.activeLayer = MapLayerType.AoeTemplate;
+  }
+
+  /** Stage callback: a token was tapped while a targeted spell is aimed; it toggles in or out of the picks */
+  onSpellTargeted = ({ spellId, markerId }: SpellTargeted) => {
+    const aim = this.spellAim;
+    if (!aim || aim.spellId !== spellId || this.#markerRows([markerId]).length === 0) return;
+    this.spellAim = toggleAimPick(aim, markerId);
+  };
+
+  /** Stage callback: an area-pick spell was placed or moved, or the tokens inside it changed */
+  onSpellAreaTargets = ({ spellId, placement, markerIds }: SpellAreaTargets) => {
+    const aim = this.spellAim;
+    if (!aim || aim.spellId !== spellId) return;
+    this.spellAim = placeAimArea(aim, { placement, markerIds });
+  };
+
+  /** Casts the targeted spell once on every picked token that still exists */
+  confirmSpellTargets() {
+    const aim = this.spellAim;
+    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const targets = aim && spell ? this.#markerRows(spellPickedMarkerIds(spell, aim)) : [];
+    if (!aim || targets.length === 0) return;
+    this.cancelSpellAim();
+    this.#cast(targetCastRequest(aim, this.#casterRow(aim.casterId), targets));
+  }
+
+  /** Ends the pressed token's concentration, removing the effects it holds */
+  #endConcentration(markerId: string | undefined) {
+    const { client, activeSceneId } = this.#options.session;
+    if (!client || !activeSceneId || !markerId) return;
+    if (endConcentration(client, activeSceneId, markerId)) this.#say('Concentration ended');
+  }
+
+  /** Removes a summoned token with the areas that follow it and the entry of the caster that listed it */
+  #dismissSummon(markerId: string | undefined) {
+    const { client, activeSceneId } = this.#options.session;
+    if (!client || !activeSceneId || !markerId) return;
+    deleteMarkersWithSpells(client, activeSceneId, [markerId]);
+    this.#say('Dismissed');
+  }
+
+  /** Stage callback: the aimed spell was placed */
+  onSpellAimed = ({ spellId, position, angle }: SpellAimed) => {
+    const aim = this.spellAim;
+    if (!aim || aim.spellId !== spellId) return;
+    this.cancelSpellAim();
+    this.#cast({
+      spellId,
+      variantId: aim.variantId,
+      placement: { position, angle },
+      caster: this.#casterRow(aim.casterId)
+    });
+  };
+
+  #cast(request: SpellCastRequest) {
+    const { client, activeSceneId, presence, ruleset } = this.#options.session;
+    if (!client || !activeSceneId) return;
+    const stage = this.#options.getStage();
+    const recent = castSpell(
+      {
+        client,
+        presence,
+        sceneId: activeSceneId,
+        ruleset,
+        templateVisibility: StageMode.Player,
+        snapToGrid: (point) => stage?.markers.snapPosition(point) ?? point,
+        notify: (message) => this.#say(message),
+        newId: uuidv4
+      },
+      request
+    );
+    if (!recent) return;
+    this.recentSpells = withRecentSpell(this.recentSpells, recent);
+    writeRecentSpells(this.recentSpells);
   }
 
   get canUndo() {
@@ -451,6 +687,7 @@ export class PlayTools {
   }
 
   clearActiveTool() {
+    this.spellAim = null;
     this.activeLayer = MapLayerType.None;
     this.drawBrush = null;
     this.drawPanel = null;
@@ -574,6 +811,24 @@ export class PlayTools {
     const aoeIds = this.#menuIds('aoeTemplates');
     const valueOf = (prefix: string) => itemId.slice(prefix.length);
 
+    const spell = parseSpellItemId(itemId);
+    if (spell) {
+      this.#startSpell(spell);
+      return;
+    }
+    if (itemId === MENU_ID.endConcentration) {
+      this.#endConcentration(markerIds[0]);
+      return;
+    }
+    if (itemId === MENU_ID.dismissSpell) {
+      this.#dismissSummon(markerIds[0]);
+      return;
+    }
+    if (itemId.startsWith(MENU_ID.removeSpellEffect)) {
+      this.#removeTemplates([valueOf(MENU_ID.removeSpellEffect)]);
+      this.#say('Spell removed');
+      return;
+    }
     if (itemId.startsWith(MENU_ID.condition)) {
       const id = valueOf(MENU_ID.condition);
       const known = [...this.#customSuggestions(), ...this.#markerRows(markerIds).flatMap((m) => m.conditions ?? [])];
@@ -680,7 +935,7 @@ export class PlayTools {
         return;
       }
       case MENU_ID.aoeDelete:
-        this.#write(() => aoeIds.forEach(this.onAoeTemplateDeleted));
+        this.#removeTemplates(aoeIds);
         return;
       default:
         this.#groupAction(itemId, members);

@@ -7,6 +7,7 @@ import {
   createPartyWriter,
   createSessionWriter,
   getAnnotationMask,
+  getDocRuleset,
   getFogMask,
   getPartyState,
   getSceneSnapshot,
@@ -529,6 +530,92 @@ describe('asynchronous token artwork replacement', () => {
     expect(getSceneSnapshot(doc, 's1')!.markers.some((marker) => marker.id === 'target')).toBe(false);
     writer.deleteScene('s1');
     expect(writer.setExistingMarkerFields('s1', 'target', { imageLocation: 'originals/late.png' })).toBe(false);
+  });
+});
+
+describe('spell template fields', () => {
+  it('stores spellId and expiresAt on upsert and keeps them through field patches', () => {
+    const doc = new Y.Doc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.createScene(makeSettings('s1'));
+    writer.upsertAoeTemplate(
+      's1',
+      makeAoeTemplate('t1', { spellId: 'fireball', expiresAt: 1700000060, anchorMarkerId: 'm1' })
+    );
+    writer.setAoeTemplateFields('s1', 't1', { positionX: 25 });
+
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates[0]).toMatchObject({
+      spellId: 'fireball',
+      expiresAt: 1700000060,
+      anchorMarkerId: 'm1',
+      positionX: 25
+    });
+  });
+
+  it('reads rows written without the optional fields', () => {
+    const doc = new Y.Doc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.createScene(makeSettings('s1'));
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t1'));
+    const row = getSceneSnapshot(doc, 's1')!.aoeTemplates[0];
+    expect(row.spellId).toBeUndefined();
+    expect(row.expiresAt).toBeUndefined();
+  });
+
+  it('clears an expiry with null', () => {
+    const doc = new Y.Doc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.createScene(makeSettings('s1'));
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t1', { expiresAt: 1700000060 }));
+    writer.setAoeTemplateFields('s1', 't1', { expiresAt: null });
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates[0].expiresAt).toBeNull();
+  });
+
+  it('deletes through an untracked origin without touching the undo history', () => {
+    const doc = new Y.Doc();
+    const writer = createSessionWriter(doc, 'me');
+    const system = createSessionWriter(doc, 'system');
+    writer.createScene(makeSettings('s1'));
+    const undoManager = new Y.UndoManager(doc.getMap('scenes').get('s1') as Y.Map<unknown>, {
+      trackedOrigins: new Set(['me']),
+      captureTimeout: 0
+    });
+    writer.upsertAoeTemplate('s1', makeAoeTemplate('t1', { expiresAt: 1700000060 }));
+    expect(undoManager.undoStack).toHaveLength(1);
+
+    system.deleteAoeTemplate('s1', 't1');
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates).toEqual([]);
+    expect(undoManager.undoStack).toHaveLength(1);
+    undoManager.undo();
+    expect(getSceneSnapshot(doc, 's1')!.aoeTemplates).toEqual([]);
+  });
+});
+
+describe('ruleset mirror', () => {
+  it('is unset until written and then follows the writer', () => {
+    const doc = new Y.Doc();
+    expect(getDocRuleset(doc)).toBeNull();
+    const writer = createSessionWriter(doc, 'me');
+    writer.setRuleset('dnd5e-2014');
+    expect(getDocRuleset(doc)).toBe('dnd5e-2014');
+    writer.setRuleset('dnd5e-2024');
+    expect(getDocRuleset(doc)).toBe('dnd5e-2024');
+  });
+
+  it('does not write a transaction when the ruleset already matches', () => {
+    const doc = new Y.Doc();
+    const writer = createSessionWriter(doc, 'me');
+    writer.setRuleset('dnd5e-2024');
+    let updates = 0;
+    doc.on('update', () => updates++);
+    writer.setRuleset('dnd5e-2024');
+    expect(updates).toBe(0);
+  });
+
+  it('is written on hydration when the data carries one', () => {
+    const doc = new Y.Doc();
+    hydrateGameSessionDoc(doc, { ruleset: 'dnd5e-2014', scenes: [] }, 'server-hydration');
+    expect(getDocRuleset(doc)).toBe('dnd5e-2014');
   });
 });
 
@@ -1063,5 +1150,27 @@ describe('marker conditions', () => {
 
     expect(conditionsOf(doc, 'm1')).toEqual([]);
     expect(conditionsOf(doc, 'm2')).toEqual([]);
+  });
+});
+
+describe('marker concentration', () => {
+  const concentrationOf = (doc: Y.Doc, id: string) =>
+    getSceneSnapshot(doc, 's1')!.markers.find((marker) => marker.id === id)!.concentration;
+  const value = { spellId: 'hold-person', startedAt: 100, templateIds: ['t1'], markerIds: ['m2'] };
+
+  it('stores, syncs and clears the field', () => {
+    const a = hydratedDoc();
+    const b = new Y.Doc();
+    syncOnce(a, b);
+    createSessionWriter(a, 'gm').setMarkerFields('s1', 'm1', { concentration: value });
+    syncOnce(a, b);
+    for (const doc of [a, b]) expect(concentrationOf(doc, 'm1')).toEqual(value);
+    createSessionWriter(b, 'tv').setMarkerFields('s1', 'm1', { concentration: null });
+    syncOnce(b, a);
+    for (const doc of [a, b]) expect(concentrationOf(doc, 'm1')).toBeNull();
+  });
+
+  it('leaves rooms without the field reading as unset', () => {
+    expect(concentrationOf(hydratedDoc(), 'm1') ?? null).toBeNull();
   });
 });

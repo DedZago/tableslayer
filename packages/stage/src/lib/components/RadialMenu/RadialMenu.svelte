@@ -12,6 +12,7 @@
     closeIcon,
     autoCloseMs,
     onItemSelect,
+    onSubmenuOpen,
     onClose,
     onReposition
   }: RadialMenuProps = $props();
@@ -82,6 +83,7 @@
     if (item.submenu?.length) {
       path = [...path.slice(0, depth), item.id];
       focusedId = null;
+      onSubmenuOpen?.(item.id);
       return;
     }
     onItemSelect?.(item.id);

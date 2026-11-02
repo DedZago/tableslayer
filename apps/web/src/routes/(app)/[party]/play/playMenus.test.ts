@@ -1,5 +1,6 @@
 import type { MarkerRow } from '$lib/realtime';
 import type { GroupedRows, GroupMember } from '$lib/utils/assetGroups';
+import { SPELL_MENU_ROOT_ID, type SpellMenuState } from '$lib/utils/spellMenus';
 import {
   ANNOTATION_EFFECT_CATEGORIES,
   ANNOTATION_EFFECTS,
@@ -41,6 +42,8 @@ const marker = (id: string, overrides: Partial<MarkerRow> = {}): MarkerRow => ({
 const ids = (items: RadialMenuItemProps[]) => items.map((item) => item.id);
 const find = (items: RadialMenuItemProps[] | undefined, id: string) => items?.find((item) => item.id === id);
 
+const spells: SpellMenuState = { ruleset: 'dnd5e-2024', recent: [], hasCaster: false, noCasterHint: 'Pick a token' };
+
 const idle: GeneralMenuState = {
   canUndo: false,
   canRedo: false,
@@ -48,13 +51,14 @@ const idle: GeneralMenuState = {
   groupSelect: false,
   distanceMode: false,
   selectionCount: 0,
-  playerDrawingCount: 0
+  playerDrawingCount: 0,
+  spells
 };
 
 describe('generalMenu', () => {
   it('offers the table tools with labels and hints', () => {
     const items = generalMenu(idle);
-    expect(ids(items)).toEqual(['measure', 'distance', 'aoe', 'draw', 'select', 'undo', 'redo']);
+    expect(ids(items)).toEqual(['measure', 'distance', 'aoe', SPELL_MENU_ROOT_ID, 'draw', 'select', 'undo', 'redo']);
     for (const item of items) {
       expect(item.label).not.toBe('');
       expect(item.hint).toBeTruthy();
@@ -68,6 +72,23 @@ describe('generalMenu', () => {
     expect(ids(items)).toContain(MENU_ID.clearSelection);
   });
 
+  it('casts spells from the pressed token, so auras are available there', () => {
+    const items = tokenMenu({
+      markers: [marker('a')],
+      customSuggestions: [],
+      groupItems: [],
+      selectionCount: 0,
+      spells
+    });
+    const auras = find(find(items, SPELL_MENU_ROOT_ID)!.submenu, 'spell-category:aura')!;
+    expect(find(auras.submenu, 'spell:spirit-guardians')?.disabled).toBeUndefined();
+    const general = find(generalMenu(idle), SPELL_MENU_ROOT_ID)!;
+    expect(find(find(general.submenu, 'spell-category:aura')!.submenu, 'spell:spirit-guardians')).toMatchObject({
+      disabled: true,
+      hint: 'Pick a token'
+    });
+  });
+
   it('keeps every ring small enough to read', () => {
     const check = (items: RadialMenuItemProps[]) => {
       expect(items.length).toBeLessThanOrEqual(10);
@@ -77,6 +98,7 @@ describe('generalMenu', () => {
     check(aoeMenu({ count: 1, effect: AoeEffect.Fire, opacity: 1, groupItems: [] }));
     check([conditionsItem([marker('a')], [])]);
     check([drawItem(3)]);
+    check(tokenMenu({ markers: [marker('a')], customSuggestions: [], groupItems: [], selectionCount: 1, spells }));
   });
 });
 
@@ -197,15 +219,72 @@ describe('menuMembers', () => {
 
 describe('tokenMenu and aoeMenu', () => {
   it('offers distance and pin for one token only', () => {
-    const one = tokenMenu({ markers: [marker('a')], customSuggestions: [], groupItems: [], selectionCount: 0 });
-    expect(ids(one)).toEqual(['conditions', MENU_ID.distanceFrom, MENU_ID.pin]);
+    const one = tokenMenu({
+      markers: [marker('a')],
+      customSuggestions: [],
+      groupItems: [],
+      selectionCount: 0,
+      spells
+    });
+    expect(ids(one)).toEqual(['conditions', SPELL_MENU_ROOT_ID, MENU_ID.distanceFrom, MENU_ID.pin]);
     const two = tokenMenu({
       markers: [marker('a'), marker('b')],
       customSuggestions: [],
       groupItems: [],
-      selectionCount: 2
+      selectionCount: 2,
+      spells
     });
     expect(ids(two)).toEqual(['conditions', MENU_ID.clearSelection]);
+  });
+
+  it('offers End concentration only while the token concentrates, within the ring limit', () => {
+    const base = {
+      markers: [marker('a')],
+      customSuggestions: [],
+      groupItems: [
+        { id: MENU_ID.ungroup, label: 'Ungroup' },
+        { id: MENU_ID.leaveGroup, label: 'Leave group' }
+      ],
+      selectionCount: 1,
+      spells
+    };
+    expect(ids(tokenMenu(base))).not.toContain(MENU_ID.endConcentration);
+    const items = tokenMenu({ ...base, concentratingOn: 'Hold person' });
+    expect(find(items, MENU_ID.endConcentration)).toMatchObject({ label: 'End concentration', danger: true });
+    expect(items.length).toBeLessThanOrEqual(8);
+  });
+
+  it('lists the spells bound to the token for removal, and offers to dismiss a summon', () => {
+    const items = tokenMenu({
+      markers: [marker('a')],
+      customSuggestions: [],
+      groupItems: [],
+      selectionCount: 0,
+      spells,
+      concentratingOn: 'Bless',
+      spellEffects: [
+        { templateId: 't1', spellName: 'Bless' },
+        { templateId: 't2', spellName: 'Hold person' }
+      ],
+      summonedBy: 'Find familiar'
+    });
+    const effects = find(items, MENU_ID.spellEffects);
+    expect(effects?.submenu?.map((item) => [item.id, item.label, item.danger])).toEqual([
+      [`${MENU_ID.removeSpellEffect}t1`, 'Bless', true],
+      [`${MENU_ID.removeSpellEffect}t2`, 'Hold person', true]
+    ]);
+    expect(find(items, MENU_ID.dismissSpell)).toMatchObject({ label: 'Dismiss Find familiar', danger: true });
+    expect(items.length).toBeLessThanOrEqual(8);
+    expect(
+      ids(tokenMenu({ markers: [marker('a')], customSuggestions: [], groupItems: [], selectionCount: 0, spells }))
+    ).not.toContain(MENU_ID.spellEffects);
+  });
+
+  it('turns Delete into ending the spell for a single spell area', () => {
+    const area = aoeMenu({ count: 1, effect: AoeEffect.Moonbeam, opacity: 0.5, groupItems: [], spellName: 'Moonbeam' });
+    expect(area.at(-1)).toMatchObject({ id: MENU_ID.aoeDelete, label: 'End Moonbeam', danger: true });
+    const plain = aoeMenu({ count: 1, effect: AoeEffect.Fire, opacity: 0.5, groupItems: [] });
+    expect(plain.at(-1)).toMatchObject({ id: MENU_ID.aoeDelete, label: 'Delete' });
   });
 
   it('labels pin by its current state', () => {
@@ -213,7 +292,8 @@ describe('tokenMenu and aoeMenu', () => {
       markers: [marker('a', { pinnedTooltip: true })],
       customSuggestions: [],
       groupItems: [],
-      selectionCount: 0
+      selectionCount: 0,
+      spells
     });
     expect(find(items, MENU_ID.pin)).toMatchObject({ label: 'Unpin name', active: true });
   });
@@ -224,5 +304,17 @@ describe('tokenMenu and aoeMenu', () => {
     expect(find(damage.submenu, `${MENU_ID.aoeEffect}${AoeEffect.Fire}`)?.active).toBe(true);
     expect(find(find(items, 'aoe-opacity')!.submenu, `${MENU_ID.aoeOpacity}0.5`)?.active).toBe(true);
     expect(items.at(-1)).toMatchObject({ id: MENU_ID.aoeDelete, danger: true });
+  });
+
+  it('offers every AoE effect exactly once, in rings of at most 8', () => {
+    const groups = find(
+      aoeMenu({ count: 1, effect: undefined, opacity: undefined, groupItems: [] }),
+      'aoe-effect'
+    )!.submenu!;
+    const effectIds = groups.flatMap((group) => group.submenu!.map((item) => item.id));
+    const everyEffect = Object.values(AoeEffect).filter((value): value is AoeEffect => typeof value === 'number');
+    expect([...effectIds].sort()).toEqual(everyEffect.map((effect) => `${MENU_ID.aoeEffect}${effect}`).sort());
+    expect(new Set(effectIds).size).toBe(effectIds.length);
+    groups.forEach((group) => expect(group.submenu!.length).toBeLessThanOrEqual(8));
   });
 });

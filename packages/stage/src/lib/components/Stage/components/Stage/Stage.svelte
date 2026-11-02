@@ -6,6 +6,8 @@
   import Scene from '../Scene/Scene.svelte';
   import { type SceneExports, SceneLayerOrder } from '../Scene/types';
   import { setContext } from 'svelte';
+  import type { SpellCast } from '../SpellCastLayer/types';
+  import type { SpellCastFx, TokenEffectKind } from '../../helpers/spells';
   import { clippingPlaneStore } from '../../helpers/clippingPlaneStore.svelte';
   import { hasActivePostProcessing } from '../../helpers/postProcessing';
   import { PerfMonitor } from '@threlte/extras';
@@ -86,6 +88,7 @@
     dropTargetMarkerId = undefined,
     activeTurnMarkerId = null,
     distanceMode = false,
+    spellCasts = undefined,
     onPinToggle,
     onMarkerVisibilityToggle
   }: Props = $props();
@@ -128,6 +131,12 @@
     dropTargetMarkerId: undefined as string | null | undefined,
     activeTurnMarkerId: null as string | null,
     distanceMode: false,
+    spellCasts: [] as SpellCast[],
+    // Written by the AoE layer while a targeted spell is aimed: the token the pointer is over and can reach
+    spellTargetMarkerId: null as string | null,
+    spellPickedMarkerIds: [] as string[],
+    // Area-target aim: the visible tokens inside the placed area, outlined like a hover
+    spellEligibleMarkerIds: [] as string[],
     performanceTier: props.performanceTier ?? 'high',
     // Set by MarkerLayer when a pointer-down hits a marker; other layers use
     // it to yield shared gestures (e.g. fog-room double-tap) to the marker
@@ -151,6 +160,7 @@
     stageContext.dropTargetMarkerId = dropTargetMarkerId;
     stageContext.activeTurnMarkerId = activeTurnMarkerId;
     stageContext.distanceMode = distanceMode;
+    stageContext.spellCasts = spellCasts ?? [];
     stageContext.performanceTier = props.performanceTier ?? 'high';
     stageContext.mainPassUsesComposer = hasActivePostProcessing(props.postProcessing, props.performanceTier);
   });
@@ -217,6 +227,10 @@
     hitTest: (point: { x: number; y: number }) => sceneRef?.aoeTemplates?.hitTest(point) ?? null,
     inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>
       sceneRef?.aoeTemplates?.inRectangle(start, end) ?? []
+  };
+
+  export const spells = {
+    prewarm: (fxs?: SpellCastFx[], tokenFxs?: TokenEffectKind[]) => sceneRef?.spells?.prewarm(fxs, tokenFxs)
   };
 
   export const lights = {

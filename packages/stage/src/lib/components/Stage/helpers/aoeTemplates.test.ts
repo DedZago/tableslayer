@@ -1,19 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { AoeEffect, AoeShape, type AoeTemplate } from '../components/AoeTemplateLayer/types';
+import { AoeEffect, AoeShape, type AoeTemplate, type SpellAimSettings } from '../components/AoeTemplateLayer/types';
 import { StageMode } from '../components/Stage/types';
 import {
+  EXPIRY_FADE_MS,
+  anchoredTemplateMoves,
   angleFromCursor,
   formatTemplateLabel,
   getTemplateLocalBounds,
   getTemplateOutline,
+  isTemplateAnchored,
+  isTemplateExpired,
   nextTemplateInStack,
   normalizeTemplateAngle,
   rotateTemplateAngle,
   sizeFromCursor,
+  spellAimDraft,
+  spellAimPlacement,
+  spellRangeRadiusPx,
+  templateExpiryFade,
+  templateFadeMs,
   templateIntersectsRect,
   templateLocalToLayer,
   templateSdf,
   templateSeed,
+  withAnchoredPosition,
   worldToTemplateLocal
 } from './aoeTemplates';
 
@@ -151,6 +161,31 @@ describe('getTemplateOutline', () => {
   });
 });
 
+describe('spell area labels', () => {
+  it('never carries dimensions for a spell area, even while sizing it', () => {
+    const spell = makeTemplate({ size: 20, label: 'Fireball', spellId: 'fireball' });
+    expect(formatTemplateLabel(spell)).toBe('Fireball');
+    expect(formatTemplateLabel(spell, true)).toBe('Fireball');
+    expect(formatTemplateLabel(makeTemplate({ spellId: 'web' }), true)).toBe('');
+  });
+
+  it('marks the aim draft with its spell', () => {
+    const draft = spellAimDraft(
+      {
+        spellId: 'moonbeam',
+        label: 'Moonbeam',
+        area: { shape: AoeShape.Circle, size: 5 },
+        effect: AoeEffect.Moonbeam,
+        color: '#fff',
+        aim: 'point'
+      },
+      { position: { x: 0, y: 0 }, angle: 0 },
+      { id: 'd', opacity: 0.6, visibility: StageMode.Player }
+    );
+    expect(draft.spellId).toBe('moonbeam');
+  });
+});
+
 describe('formatTemplateLabel', () => {
   it('omits dimensions on request', () => {
     expect(formatTemplateLabel(makeTemplate({ label: 'Fireball' }), false)).toBe('Fireball');
@@ -239,5 +274,162 @@ describe('templateIntersectsRect', () => {
 
   it('misses a distant rectangle', () => {
     expect(templateIntersectsRect(circle, { x: 400, y: 400 }, { x: 500, y: 500 }, 0.1)).toBe(false);
+  });
+});
+
+describe('anchored templates', () => {
+  const markers = [
+    { id: 'm1', position: { x: 40, y: -10 } },
+    { id: 'm2', position: { x: 0, y: 0 } }
+  ];
+
+  it('follows the anchor marker position', () => {
+    const template = makeTemplate({ anchorMarkerId: 'm1', position: { x: 5, y: 5 } });
+    expect(isTemplateAnchored(template, markers)).toBe(true);
+    expect(withAnchoredPosition(template, markers).position).toEqual({ x: 40, y: -10 });
+  });
+
+  it('keeps its stored position when the marker is gone or unset', () => {
+    const missing = makeTemplate({ anchorMarkerId: 'gone', position: { x: 5, y: 5 } });
+    expect(isTemplateAnchored(missing, markers)).toBe(false);
+    expect(withAnchoredPosition(missing, markers)).toBe(missing);
+    const free = makeTemplate({ position: { x: 5, y: 5 } });
+    expect(withAnchoredPosition(free, markers)).toBe(free);
+  });
+
+  it('returns the same object when already at the marker', () => {
+    const template = makeTemplate({ anchorMarkerId: 'm2', position: { x: 0, y: 0 } });
+    expect(withAnchoredPosition(template, markers)).toBe(template);
+  });
+
+  it('reports stored positions to update for moved anchors only', () => {
+    const templates = [
+      makeTemplate({ id: 'a', anchorMarkerId: 'm1', position: { x: 0, y: 0 } }),
+      makeTemplate({ id: 'b', anchorMarkerId: 'm2', position: { x: 9, y: 9 } }),
+      makeTemplate({ id: 'c', position: { x: 1, y: 1 } })
+    ];
+    expect(anchoredTemplateMoves(templates, markers, ['m1'])).toEqual([{ id: 'a', position: { x: 40, y: -10 } }]);
+    expect(anchoredTemplateMoves(templates, markers, [])).toEqual([]);
+  });
+});
+
+describe('template expiry', () => {
+  const expiresAt = 100_000;
+
+  it('is fully visible until the final fade window', () => {
+    expect(templateExpiryFade(null, 0)).toBe(1);
+    expect(templateExpiryFade(undefined, 0)).toBe(1);
+    expect(templateExpiryFade(expiresAt, expiresAt - EXPIRY_FADE_MS - 1)).toBe(1);
+  });
+
+  it('fades linearly over the last window and ends at zero', () => {
+    expect(templateExpiryFade(expiresAt, expiresAt - EXPIRY_FADE_MS / 2)).toBeCloseTo(0.5);
+    expect(templateExpiryFade(expiresAt, expiresAt)).toBe(0);
+    expect(templateExpiryFade(expiresAt, expiresAt + 1000)).toBe(0);
+  });
+
+  it('is expired from the expiry instant on', () => {
+    expect(isTemplateExpired(null, 5)).toBe(false);
+    expect(isTemplateExpired(expiresAt, expiresAt - 1)).toBe(false);
+    expect(isTemplateExpired(expiresAt, expiresAt)).toBe(true);
+  });
+});
+
+describe('spell aiming', () => {
+  const spell = (overrides: Partial<SpellAimSettings> = {}): SpellAimSettings => ({
+    spellId: 'fireball',
+    area: { shape: AoeShape.Circle, size: 20 },
+    effect: AoeEffect.Fire,
+    color: '#ff6a1a',
+    aim: 'point',
+    ...overrides
+  });
+  const pointer = { pointer: { x: 100, y: 50 }, ftPerPx: 0.1, cellPx: 50, snapAngle: true };
+
+  it('places a point aim under the pointer', () => {
+    expect(spellAimPlacement(spell(), pointer)).toEqual({ position: { x: 100, y: 50 }, angle: 0 });
+  });
+
+  it('centres a point-aimed cube on the pointer', () => {
+    const cube = spell({ area: { shape: AoeShape.Square, size: 20 } });
+    expect(spellAimPlacement(cube, pointer).position).toEqual({ x: 0, y: 50 });
+  });
+
+  it('keeps a fixed origin and takes only the angle from the pointer', () => {
+    const cone = spell({ aim: 'direction', area: { shape: AoeShape.Cone, size: 15 }, origin: { x: 0, y: 50 } });
+    expect(spellAimPlacement(cone, pointer)).toEqual({ position: { x: 0, y: 50 }, angle: 0 });
+    expect(spellAimPlacement(cone, { ...pointer, pointer: { x: 0, y: 150 } }).angle).toBe(90);
+  });
+
+  it('pushes a fixed origin out to the caster edge along the angle', () => {
+    const cone = spell({
+      aim: 'direction',
+      area: { shape: AoeShape.Cone, size: 15 },
+      origin: { x: 0, y: 0 },
+      originRadiusCells: 0.5
+    });
+    const { position, angle } = spellAimPlacement(cone, { ...pointer, pointer: { x: 0, y: 200 } });
+    expect(angle).toBe(90);
+    expect(position.x).toBeCloseTo(0);
+    expect(position.y).toBeCloseTo(25);
+  });
+
+  it('starts a free direction aim at the first press and snaps its angle', () => {
+    const line = spell({ aim: 'direction', area: { shape: AoeShape.Line, size: 100, width: 5 } });
+    const placement = spellAimPlacement(line, { ...pointer, start: { x: 10, y: 10 }, pointer: { x: 110, y: 120 } });
+    expect(placement.position).toEqual({ x: 10, y: 10 });
+    expect(placement.angle).toBe(45);
+    expect(spellAimPlacement(line, { ...pointer, snapAngle: false, start: { x: 10, y: 10 } }).angle).toBeCloseTo(
+      (Math.atan2(40, 90) * 180) / Math.PI
+    );
+  });
+
+  it('builds a draft with the preset shape, size and effect', () => {
+    const line = spell({
+      aim: 'direction',
+      area: { shape: AoeShape.Line, size: 100, width: 5 },
+      label: 'Lightning bolt'
+    });
+    const draft = spellAimDraft(
+      line,
+      { position: { x: 1, y: 2 }, angle: 90 },
+      {
+        id: 'draft',
+        opacity: 0.6,
+        visibility: StageMode.Player
+      }
+    );
+    expect(draft).toMatchObject({
+      id: 'draft',
+      shape: AoeShape.Line,
+      size: 100,
+      width: 5,
+      effect: AoeEffect.Fire,
+      label: 'Lightning bolt',
+      position: { x: 1, y: 2 },
+      angle: 90
+    });
+    expect(spellAimDraft(spell(), { position: { x: 0, y: 0 }, angle: 0 }, draft).width).toBe(5);
+  });
+
+  it('sizes the range ring only for a caster with a range', () => {
+    expect(spellRangeRadiusPx({ caster: { x: 0, y: 0 }, rangeFt: 150 }, 0.1)).toBe(1500);
+    expect(spellRangeRadiusPx({ rangeFt: 150 }, 0.1)).toBe(0);
+    expect(spellRangeRadiusPx({ caster: { x: 0, y: 0 }, rangeFt: 0 }, 0.1)).toBe(0);
+  });
+});
+
+describe('per-template fade', () => {
+  it('fades instant spells over their own 3 s and everything else over the default', () => {
+    expect(templateFadeMs(makeTemplate({ spellId: 'fireball' }))).toBe(3000);
+    expect(templateFadeMs(makeTemplate({ spellId: 'web' }))).toBe(EXPIRY_FADE_MS);
+    expect(templateFadeMs(makeTemplate())).toBe(EXPIRY_FADE_MS);
+  });
+
+  it('holds full strength until the fade window opens', () => {
+    const expiresAt = 100_000;
+    expect(templateExpiryFade(expiresAt, expiresAt - 3001, 3000)).toBe(1);
+    expect(templateExpiryFade(expiresAt, expiresAt - 1500, 3000)).toBeCloseTo(0.5);
+    expect(templateExpiryFade(expiresAt, expiresAt, 3000)).toBe(0);
   });
 });

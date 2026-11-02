@@ -1,4 +1,4 @@
-import type { MarkerCondition } from '@tableslayer/stage';
+import type { MarkerCondition, Ruleset } from '@tableslayer/stage';
 import * as Y from 'yjs';
 import type {
   AnnotationRow,
@@ -21,7 +21,7 @@ import type {
 // SvelteKit app and the PartyKit server bundle.
 //
 // gameSession doc
-//   meta: Y.Map { schemaVersion, hydratedAt }
+//   meta: Y.Map { schemaVersion, hydratedAt, ruleset } (ruleset mirrors game_session.ruleset; absent in older rooms)
 //   scenes: Y.Map<sceneId, Y.Map>
 //     settings: Y.Map<SceneSettings field, primitive>
 //     markers: Y.Map<markerId, Y.Map<MarkerRow field, primitive>>
@@ -49,6 +49,14 @@ const ROW_COLLECTIONS: readonly RowCollection[] = ['markers', 'lights', 'aoeTemp
 export const getMeta = (doc: Y.Doc) => doc.getMap<unknown>('meta');
 export const getScenesMap = (doc: Y.Doc) => doc.getMap<SceneMap>('scenes');
 export const getPartyStateMap = (doc: Y.Doc) => doc.getMap<unknown>('state');
+
+/** Raw stored value: callers validate it (this module stays free of runtime stage imports) */
+export const getDocRuleset = (doc: Y.Doc): string | null => (getMeta(doc).get('ruleset') as string | undefined) ?? null;
+
+/** Mirrors game_session.ruleset into the doc; a no-op when it already matches */
+export const setDocRuleset = (doc: Y.Doc, ruleset: Ruleset, origin: unknown) => {
+  if (getDocRuleset(doc) !== ruleset) doc.transact(() => getMeta(doc).set('ruleset', ruleset), origin);
+};
 
 export const isDocHydrated = (doc: Y.Doc): boolean => getMeta(doc).get('schemaVersion') === DOC_SCHEMA_VERSION;
 
@@ -414,6 +422,10 @@ export const createSessionWriter = (doc: Y.Doc, origin: unknown) => {
       });
     },
 
+    setRuleset(ruleset: Ruleset) {
+      setDocRuleset(doc, ruleset, origin);
+    },
+
     deleteScene(sceneId: string) {
       transact(() => scenes().delete(sceneId));
     },
@@ -652,6 +664,7 @@ export const hydrateGameSessionDoc = (doc: Y.Doc, data: GameSessionHydrationData
     for (const scene of data.scenes) {
       writer.createScene(scene.settings, scene);
     }
+    if (data.ruleset) getMeta(doc).set('ruleset', data.ruleset);
     getMeta(doc).set('schemaVersion', DOC_SCHEMA_VERSION);
     getMeta(doc).set('hydratedAt', Date.now());
   }, origin);

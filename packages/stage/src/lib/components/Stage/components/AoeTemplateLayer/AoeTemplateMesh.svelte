@@ -1,12 +1,12 @@
 <script lang="ts">
   import * as THREE from 'three';
-  import { T, useThrelte } from '@threlte/core';
+  import { T, useTask, useThrelte } from '@threlte/core';
   import { getContext, onDestroy, untrack } from 'svelte';
   import type { AoeEffect, AoeTemplate } from './types';
   import type { PerformanceTier } from '../Stage/types';
   import { SceneLayer, SceneLayerOrder } from '../Scene/types';
   import { mapClippingPlaneStore } from '../../helpers/clippingPlaneStore.svelte';
-  import { getTemplateLocalBounds, templateSeed } from '../../helpers/aoeTemplates';
+  import { getTemplateLocalBounds, templateExpiryFade, templateFadeMs, templateSeed } from '../../helpers/aoeTemplates';
   import {
     aoePlaneGeometry,
     compileAoeProgram,
@@ -47,6 +47,8 @@
   const width = $derived(template.width);
   const color = $derived(template.color);
   const opacity = $derived(template.opacity);
+  const expiresAt = $derived(template.expiresAt);
+  const fadeMs = $derived(templateFadeMs(template));
   const seed = $derived(templateSeed(template.id));
   const bounds = $derived(getTemplateLocalBounds(template));
   const quadCenterX = $derived((bounds.minX + bounds.maxX) / 2);
@@ -88,6 +90,13 @@
       isDraft
     });
   });
+
+  useTask(
+    () => {
+      material.uniforms.uFade.value = templateExpiryFade(expiresAt, Date.now(), fadeMs);
+    },
+    { running: () => expiresAt != null }
+  );
 
   $effect(() => {
     writeAoeClippingPlanes(material, mapClippingPlaneStore.value);

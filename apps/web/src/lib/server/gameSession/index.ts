@@ -17,6 +17,7 @@ import { and, asc, desc, eq, getTableColumns } from 'drizzle-orm';
 import slugify from 'slugify';
 import { v4 as uuidv4 } from 'uuid';
 import type { Thumb } from '../file';
+import { requestGameSessionRulesetSync } from '../realtime';
 import { createScene, setActiveSceneForParty } from '../scene';
 import { demoSessionData } from './demoSessionData';
 
@@ -209,6 +210,10 @@ export const updateGameSession = async (gameSessionId: string, gameSessionData: 
     }
 
     await db.update(gameSessionTable).set(gameSessionData).where(eq(gameSessionTable.id, gameSessionId)).execute();
+
+    if (gameSessionData.ruleset && gameSessionData.ruleset !== gameSession.ruleset) {
+      await requestGameSessionRulesetSync(gameSessionId, gameSessionData.ruleset);
+    }
 
     return true;
   } catch (error) {

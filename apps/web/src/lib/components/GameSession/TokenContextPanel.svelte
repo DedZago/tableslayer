@@ -21,6 +21,11 @@
     combatState,
     targetsInCombat,
     onCombatAction,
+    onEndConcentration,
+    concentratingOn = null,
+    spellEffects = [],
+    onRemoveSpellEffect,
+    summonedBy = null,
     onDelete,
     onClose
   }: {
@@ -37,6 +42,14 @@
     combatState: 'none' | 'running';
     targetsInCombat: number;
     onCombatAction?: (action: CombatAction) => void;
+    onEndConcentration?: () => void;
+    /** Name of the spell the token is concentrating on */
+    concentratingOn?: string | null;
+    /** Effects of spells bound to the token, each removable */
+    spellEffects?: ReadonlyArray<{ templateId: string; spellName: string }>;
+    onRemoveSpellEffect?: (templateId: string) => void;
+    /** Name of the spell that conjured the token, when it is a summon */
+    summonedBy?: string | null;
     onDelete: () => void;
     onClose: () => void;
   } = $props();
@@ -139,6 +152,32 @@
         <button type="button" class="tokenContextPanel__action" onclick={onSaveToLibrary}>Save to library</button>
       {/if}
 
+      {#if onEndConcentration}
+        <button
+          type="button"
+          class="tokenContextPanel__action"
+          onclick={() => {
+            onEndConcentration();
+            onClose();
+          }}
+        >
+          End concentration{concentratingOn ? ` (${concentratingOn})` : ''}
+        </button>
+      {/if}
+
+      {#each spellEffects as effect (effect.templateId)}
+        <button
+          type="button"
+          class="tokenContextPanel__action"
+          onclick={() => {
+            onRemoveSpellEffect?.(effect.templateId);
+            onClose();
+          }}
+        >
+          Remove {effect.spellName}
+        </button>
+      {/each}
+
       {#if onCombatAction}
         <Hr />
         {#if combatState === 'none'}
@@ -161,7 +200,7 @@
 
       <Hr />
       <button type="button" class="tokenContextPanel__action tokenContextPanel__action--danger" onclick={handleDelete}>
-        Delete marker
+        {summonedBy && targetCount === 1 ? `Dismiss ${summonedBy}` : 'Delete marker'}
       </button>
     </div>
   </div>

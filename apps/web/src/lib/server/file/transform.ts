@@ -1,3 +1,4 @@
+import { isBuiltInAsset } from '$lib/utils/generateR2Url';
 import sharp from 'sharp';
 import { isLocalStorage, readLocalAsset } from './localStorage';
 
@@ -39,6 +40,12 @@ export const getImageDetails = async (url: string): Promise<ImageDetails> => {
   }
 };
 
+const builtInImage = (path: string): BuildImageResult => ({
+  url: path,
+  resizedUrl: path,
+  details: { width: 512, height: 512, original: { width: 512, height: 512, file_size: 0, format: 'svg' } }
+});
+
 export const getVideoUrl = (urlFragment: string): BuildImageResult => {
   const url = `${BUCKET_URL}/${urlFragment}`;
   return {
@@ -58,6 +65,7 @@ export const getVideoUrl = (urlFragment: string): BuildImageResult => {
 };
 
 export const transformImage = async (urlFragment: string, options: string): Promise<BuildImageResult> => {
+  if (isBuiltInAsset(urlFragment)) return builtInImage(urlFragment);
   const url = `${BUCKET_URL}/${urlFragment}`;
   const resizedUrl = `${BUCKET_URL}/cdn-cgi/image/${options}/${urlFragment}`;
 

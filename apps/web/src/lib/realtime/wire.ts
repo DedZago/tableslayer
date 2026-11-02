@@ -1,3 +1,4 @@
+import type { Ruleset } from '@tableslayer/stage';
 import type * as Y from 'yjs';
 import { base64ToUint8, uint8ToBase64 } from './binary';
 import { getAnnotationMask, getFogMask, getSceneSnapshot } from './docSchema';
@@ -27,6 +28,7 @@ export interface SceneWire {
 
 export interface SessionSnapshotWire {
   gameSessionId: string;
+  ruleset?: Ruleset;
   scenes: SceneWire[];
 }
 
@@ -43,6 +45,7 @@ export interface PartyStateWire {
 }
 
 export const hydrationDataFromWire = (wire: SessionSnapshotWire): GameSessionHydrationData => ({
+  ruleset: wire.ruleset,
   scenes: wire.scenes.map((scene) => ({
     settings: scene.settings,
     markers: scene.markers,

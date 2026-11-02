@@ -10,6 +10,7 @@ import {
   lightTable,
   markerTable,
   sceneTable,
+  VALID_RULESETS,
   type InsertAnnotation,
   type InsertLight,
   type InsertMarker,
@@ -20,6 +21,7 @@ import { createGameSessionForImport } from '$lib/server/gameSession';
 import { getParty, getPartyFromGameSessionId, isUserInParty } from '$lib/server/party/getParty';
 import { requestPartyRoomResync } from '$lib/server/realtime';
 import { setActiveSceneForParty } from '$lib/server/scene';
+import { remapConcentration } from '$lib/utils/concentration';
 import { error, json, type RequestEvent } from '@sveltejs/kit';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
@@ -73,13 +75,18 @@ export const POST = async ({ request, locals }: RequestEvent) => {
       }),
       gameSession: z.object({
         name: z.string(),
+        ruleset: z.enum(VALID_RULESETS).optional(),
         scenes: z.array(
           insertSceneSchema.omit({ gameSessionId: true }).extend({
             markers: z.array(insertMarkerSchema.omit({ sceneId: true })).optional(),
             lights: z.array(insertLightSchema.omit({ sceneId: true })).optional(),
             // Exports carry createdAt as an ISO string; keeping it preserves the templates' stacking order
             aoeTemplates: z
-              .array(insertAoeTemplateSchema.omit({ sceneId: true }).extend({ createdAt: z.coerce.date().optional() }))
+              .array(
+                insertAoeTemplateSchema
+                  .omit({ sceneId: true })
+                  .extend({ createdAt: z.coerce.date().optional(), expiresAt: z.coerce.date().nullish() })
+              )
               .optional(),
             annotations: z.array(insertAnnotationSchema.omit({ sceneId: true })).optional(),
             fogOfWarMask: z.string().nullable().optional()
@@ -112,7 +119,8 @@ export const POST = async ({ request, locals }: RequestEvent) => {
 
     // Create the game session without an initial scene (using our new function)
     const gameSession = await createGameSessionForImport(partyId, {
-      name: validatedData.gameSession.name
+      name: validatedData.gameSession.name,
+      ruleset: validatedData.gameSession.ruleset
     });
 
     // Create scenes with new IDs but preserve order
@@ -194,10 +202,17 @@ export const POST = async ({ request, locals }: RequestEvent) => {
         }
       }
 
+      // Rows get new ids; what a caster concentrates on and what anchored templates follow is remapped to them
+      const markerIds = new Map<string, string>();
+      for (const markerData of sceneData.markers ?? []) if (markerData.id) markerIds.set(markerData.id, uuidv4());
+      const templateIds = new Map<string, string>();
+      for (const templateData of sceneData.aoeTemplates ?? [])
+        if (templateData.id) templateIds.set(templateData.id, uuidv4());
+
       // Create all markers for this scene
       if (sceneData.markers && sceneData.markers.length > 0) {
         for (const markerData of sceneData.markers) {
-          const newMarkerId = uuidv4();
+          const newMarkerId = (markerData.id && markerIds.get(markerData.id)) || uuidv4();
 
           const markerToCreate: Partial<InsertMarker> & Record<string, unknown> = {
             id: newMarkerId,
@@ -211,6 +226,7 @@ export const POST = async ({ request, locals }: RequestEvent) => {
           markerToCreate.inCombat = false;
           markerToCreate.initiative = null;
           markerToCreate.initiativeTiebreak = 0;
+          markerToCreate.concentration = remapConcentration(markerData.concentration, templateIds, markerIds);
 
           await db
             .insert(markerTable)
@@ -247,7 +263,12 @@ export const POST = async ({ request, locals }: RequestEvent) => {
       for (const templateData of sceneData.aoeTemplates ?? []) {
         await db
           .insert(aoeTemplateTable)
-          .values({ ...templateData, id: uuidv4(), sceneId: newSceneId })
+          .values({
+            ...templateData,
+            id: (templateData.id && templateIds.get(templateData.id)) || uuidv4(),
+            sceneId: newSceneId,
+            anchorMarkerId: (templateData.anchorMarkerId && markerIds.get(templateData.anchorMarkerId)) || null
+          })
           .execute();
       }
 

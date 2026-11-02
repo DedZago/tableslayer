@@ -22,6 +22,11 @@ export const DEFAULT_MAP = 'map/pirateking-30x60.jpg';
 export const DEFAULT_MAP_GRID = { x: 30, y: 60 };
 export const DEFAULT_MAP_SIZE = { width: 1800, height: 3600 };
 
+/** Art shipped with the app (spell summon tokens): stored as an absolute path, served as is */
+export function isBuiltInAsset(location: string | null | undefined): boolean {
+  return !!location && location.startsWith('/');
+}
+
 /**
  * Check if a file is a video based on its extension
  */
@@ -43,6 +48,8 @@ export function generateR2Url(
 ): string {
   // Return empty string if no location
   if (!location) return '';
+
+  if (isBuiltInAsset(location)) return location;
 
   const baseUrl = options.bucketUrl || DEFAULT_R2_BASE_URL;
 

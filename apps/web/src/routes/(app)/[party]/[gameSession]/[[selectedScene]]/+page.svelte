@@ -47,6 +47,7 @@
   import AoeTemplateContextPanel from '$lib/components/GameSession/AoeTemplateContextPanel.svelte';
   import AoeTemplateManager from '$lib/components/GameSession/AoeTemplateManager.svelte';
   import SidePanelTabs, { type SidePanelTab } from '$lib/components/GameSession/SidePanelTabs.svelte';
+  import SpellAimBar from '$lib/components/GameSession/SpellAimBar.svelte';
   import TokenContextPanel from '$lib/components/GameSession/TokenContextPanel.svelte';
   import type { StatBlockRoll } from '$lib/components/StatBlock';
   import { HandoutLivePill, HandoutPanel, type HandoutPreview } from '$lib/components/Handouts';
@@ -100,6 +101,7 @@
     bindPropertyUpdatesToDoc,
     buildSceneProps,
     withoutSessionAoeFields,
+    writeAnchoredTemplateMoves,
     convertMarkerToDbFormat,
     extractLocationFromUrl,
     flushQueuedPropertyUpdates,
@@ -128,6 +130,7 @@
     MarkerVisibility,
     PerformanceDebugger,
     PointerInputManager,
+    RadialMenu,
     rotateTemplateAngle,
     Stage,
     StageMode,
@@ -142,10 +145,26 @@
     type StageProps
   } from '@tableslayer/stage';
   import { addToast, FogSliders, Icon, removeToast } from '@tableslayer/ui';
-  import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp } from '@tabler/icons-svelte';
+  import {
+    IconArrowBackUp,
+    IconChevronDown,
+    IconChevronLeft,
+    IconChevronRight,
+    IconChevronUp,
+    IconX
+  } from '@tabler/icons-svelte';
   import { Pane, PaneGroup, PaneResizer, type PaneAPI } from 'paneforge';
   import { onMount, untrack, type ComponentProps } from 'svelte';
+  import { startTemplateExpirySweep } from '$lib/utils/templateExpiry';
   import { EditorSession } from './useEditorSession.svelte';
+  import {
+    concentratingSpellName,
+    deleteMarkersWithSpells,
+    endConcentration,
+    removeSpellRows,
+    spellRowsOwnedBy
+  } from '$lib/utils/spellCasting';
+  import { EditorSpells } from './useEditorSpells.svelte';
 
   let { data } = $props();
   const { gameSession, party, user, isStripeEnabled, checklistState } = $derived(data);
@@ -167,6 +186,7 @@
         userId: data.user.id,
         partykitHost: data.partykitHost,
         selectedSceneId: () => selectedSceneId,
+        loadedRuleset: () => data.gameSession.ruleset,
         getStage: () => stage,
         uploadThumbnail: async (blob, sceneId, currentUrl) => {
           try {
@@ -220,6 +240,22 @@
     }
   });
 
+  // The doc mirrors game_session.ruleset so every screen follows a change without a reload
+  $effect(() => {
+    if (session.ready) session.client?.systemWrite.setRuleset(gameSession.ruleset);
+  });
+
+  // Expired spell templates are removed here; the TV only does it while no editor is connected
+  $effect(() => {
+    const client = session.client;
+    if (!client) return;
+    return startTemplateExpirySweep(
+      client,
+      () => selectedSceneId,
+      () => client.ready && !client.sleeping
+    );
+  });
+
   const scenes = $derived(session.ready && session.client ? session.client.scenes() : data.scenes);
   const partyState = $derived(
     session.ready && session.client
@@ -227,6 +263,10 @@
       : { activeSceneId: data.activeScene?.id ?? null, isPaused: data.party.gameSessionIsPaused }
   );
   const activeSceneId = $derived(partyState.activeSceneId ?? undefined);
+
+  $effect(() => {
+    session.presence?.setCastScene(selectedSceneId);
+  });
   const canEditAssets = $derived(
     data.members.some((member) => member.id === data.user.id && ['admin', 'editor'].includes(member.partyRole))
   );
@@ -1339,8 +1379,18 @@
   };
 
   // Escape-cancel already moved the members back, so the gesture's undo step is dropped
-  const onMarkersMoveEnd = ({ cancelled }: { ids: string[]; cancelled: boolean }) =>
+  const onMarkersMoveEnd = ({ ids, cancelled }: { ids: string[]; cancelled: boolean }) => {
+    if (!cancelled && session.client) {
+      writeAnchoredTemplateMoves(
+        session.client,
+        selectedSceneId,
+        stageProps.aoeTemplates?.templates ?? [],
+        stageProps.marker.markers,
+        ids
+      );
+    }
     finishGroupDrag({ discard: cancelled });
+  };
 
   // A token click shows its details and stat block, whichever tab was open
   // A plain click starts a new selection; Shift+click (the page gesture) adds to it
@@ -1398,6 +1448,41 @@
 
   const markerRowFor = (markerId: string) =>
     session.client?.scene(selectedSceneId)?.markers.find((row) => row.id === markerId);
+
+  // Spells ---------------------------------------------------------------------
+
+  const spells = new EditorSpells({
+    session,
+    getStage: () => stage,
+    getStageProps: () => stageProps,
+    getSceneId: () => selectedSceneId,
+    getSelectedMarkerIds: () => selectedMarkerIds,
+    getMarkerRow: markerRowFor,
+    setActiveLayer: (layer) => queuePropertyUpdate(stageProps, ['activeLayer'], layer, 'control'),
+    notify: (title) => addToast({ data: { title, type: 'info' } })
+  });
+
+  // Aiming ends when the scene changes, another tool takes over, or the caster is deleted
+  $effect(() => {
+    void selectedSceneId;
+    return () => untrack(() => spells.cancelAim());
+  });
+  $effect(() => {
+    const aimEnded = stageProps.activeLayer !== MapLayerType.AoeTemplate || spells.casterGone;
+    if (spells.aim && aimEnded) untrack(() => spells.cancelAim());
+  });
+
+  let lastPointer: { x: number; y: number } | null = null;
+
+  const openSpellsAtCursor = () => {
+    const bounds = stageElement?.getBoundingClientRect();
+    spells.open(
+      lastPointer ?? {
+        x: (bounds?.left ?? 0) + (bounds?.width ?? 0) / 2,
+        y: (bounds?.top ?? 0) + (bounds?.height ?? 0) / 2
+      }
+    );
+  };
 
   const customConditionSuggestions = $derived.by(() => {
     const byId = new Map<string, MarkerCondition>();
@@ -1463,9 +1548,26 @@
   const onStatRoll = (label: string, _formula: string, roll: StatBlockRoll) =>
     addToast({ data: { title: `${label}: ${roll.total}`, body: roll.text, type: 'info' } });
 
+  const tokenPanelConcentratingOn = $derived(
+    selectedMarkerIds.length === 1 && tokenPanelMarker
+      ? concentratingSpellName(markerRowFor(tokenPanelMarker.id), session.client?.scene(selectedSceneId) ?? null)
+      : null
+  );
+
+  const endTokenPanelConcentration = () => {
+    if (tokenPanelMarker && session.client) endConcentration(session.client, selectedSceneId, tokenPanelMarker.id);
+  };
+
+  const tokenPanelSpellRows = $derived.by(() => {
+    const snapshot = session.client?.scene(selectedSceneId);
+    return selectedMarkerIds.length === 1 && tokenPanelMarker && snapshot
+      ? spellRowsOwnedBy(snapshot, tokenPanelMarker.id)
+      : null;
+  });
+
   const deleteTokenPanelTargets = () => {
     const ids = [...selectedMarkerIds];
-    ids.forEach((id) => onMarkerDeleted(id));
+    deleteMarkers(ids);
     if (selectedMarkerId && ids.includes(selectedMarkerId)) selectedMarkerId = undefined;
   };
 
@@ -1651,15 +1753,19 @@
     );
   };
 
-  const onMarkerDeleted = (markerId: string) => {
+  const deleteMarkers = (markerIds: string[]) => {
     const client = session.client;
     const snapshot = client?.scene(selectedSceneId);
-    if (client && snapshot && combatantIds.has(markerId)) {
-      removeCombatants(client.systemWrite, selectedSceneId, snapshot, [markerId]);
+    const combatants = markerIds.filter((id) => combatantIds.has(id));
+    if (client && snapshot && combatants.length > 0) {
+      removeCombatants(client.systemWrite, selectedSceneId, snapshot, combatants);
     }
-    stageProps.marker.markers = stageProps.marker.markers.filter((m) => m.id !== markerId);
-    session.client?.write.deleteMarker(selectedSceneId, markerId);
+    stageProps.marker.markers = stageProps.marker.markers.filter((m) => !markerIds.includes(m.id));
+    // Casters' concentrations, the rows spells tied to the tokens and the entries that listed them: one undo step
+    if (client) deleteMarkersWithSpells(client, selectedSceneId, markerIds);
   };
+
+  const onMarkerDeleted = (markerId: string) => deleteMarkers([markerId]);
 
   const updateMarkerAndSave = (markerId: string, updateFn: (marker: Marker) => void) => {
     const markerIndex = stageProps.marker.markers.findIndex((m: Marker) => m.id === markerId);
@@ -1770,13 +1876,15 @@
     });
   };
 
-  const removeAoeTemplate = (id: string) => {
+  const removeAoeTemplates = (ids: string[]) => {
     const layer = stageProps.aoeTemplates;
-    if (!layer) return;
-    layer.templates = layer.templates.filter((template) => template.id !== id);
-    selectAoeTemplates((layer.selectedIds ?? []).filter((selected) => selected !== id));
-    session.client?.write.deleteAoeTemplate(selectedSceneId, id);
+    if (!layer || ids.length === 0) return;
+    layer.templates = layer.templates.filter((template) => !ids.includes(template.id));
+    selectAoeTemplates((layer.selectedIds ?? []).filter((selected) => !ids.includes(selected)));
+    if (session.client) removeSpellRows(session.client, selectedSceneId, { templateIds: ids });
   };
+
+  const removeAoeTemplate = (id: string) => removeAoeTemplates([id]);
 
   const selectAoeTemplates = (ids: string[]) => {
     const layer = stageProps.aoeTemplates;
@@ -1805,7 +1913,7 @@
   };
   const selectAoeTemplateFromMap = (id: string | null) => selectAoeTemplatesFromMap(id ? [id] : []);
 
-  const removeSelectedAoeTemplates = () => [...(stageProps.aoeTemplates?.selectedIds ?? [])].forEach(removeAoeTemplate);
+  const removeSelectedAoeTemplates = () => removeAoeTemplates([...(stageProps.aoeTemplates?.selectedIds ?? [])]);
 
   // Right-click or hold on a shape opens a quick editor for it (or for the whole selection it belongs to)
   let aoeMenu = $state<{ ids: string[]; x: number; y: number } | null>(null);
@@ -2205,6 +2313,7 @@
   }, 50);
 
   const onMouseMove = (e: MouseEvent) => {
+    lastPointer = { x: e.clientX, y: e.clientY };
     if (e.target instanceof HTMLCanvasElement) {
       const point = stage?.markers.clientToPosition({ x: e.clientX, y: e.clientY }, true);
       if (point) clipboardPointer = { sceneId: selectedSceneId, point };
@@ -2340,6 +2449,17 @@
       return;
     }
 
+    if (spells.aim) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        spells.cancelAim();
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        spells.confirmTargets();
+      }
+      return;
+    }
+
     if (event.key === 'Escape' && !event.defaultPrevented && !stage?.markers?.isDraggingMarker) {
       if (stageProps.activeLayer === MapLayerType.None) selectItems([]);
     }
@@ -2350,6 +2470,7 @@
       if (key === 'i') return event.shiftKey ? removeSelectedFromCombat() : startOrAddCombat();
       if (key === 'n') return event.shiftKey ? rewindCombat() : advanceCombat();
       if (key === 'b' && !event.shiftKey) return toggleGroup();
+      if (key === 's' && !event.shiftKey && !event.repeat) return openSpellsAtCursor();
     }
 
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
@@ -2701,6 +2822,7 @@
             {selectedMarkerIds}
             {selectedLightIds}
             {distanceMode}
+            spellCasts={session.presence?.activeCasts}
             onMarkerVisibilityToggle={toggleMarkerVisibility}
             dropTargetMarkerId={artworkDropTargetId}
             {activeTurnMarkerId}
@@ -2734,6 +2856,10 @@
               onAoeTemplatesSelected: selectAoeTemplatesFromMap,
               onAoeTemplateDeleted: removeAoeTemplate,
               onAoeTemplateMenu,
+              onSpellAimed: spells.onSpellAimed,
+              onSpellTargeted: spells.onSpellTargeted,
+              onSpellAreaTargets: spells.onSpellAreaTargets,
+              onSpellAimCancelled: () => spells.cancelAim(),
               onCursorMove: handleCursorMove
             }}
             trackLocalCursor={true}
@@ -2775,7 +2901,7 @@
               onEffectChange={changeAoeMenuEffect}
               onOpacityChange={(opacity) => changeAoeMenuField({ opacity })}
               onVisibilityChange={(visibility) => changeAoeMenuField({ visibility })}
-              onDelete={() => aoeMenu?.ids.forEach(removeAoeTemplate)}
+              onDelete={() => removeAoeTemplates([...(aoeMenu?.ids ?? [])])}
               onClose={() => (aoeMenu = null)}
             />
           {/if}
@@ -2801,6 +2927,11 @@
               combatState={combatRunning ? 'running' : 'none'}
               {targetsInCombat}
               onCombatAction={handleTokenCombatAction}
+              onEndConcentration={tokenPanelConcentratingOn ? endTokenPanelConcentration : undefined}
+              concentratingOn={tokenPanelConcentratingOn}
+              spellEffects={tokenPanelSpellRows?.effects ?? []}
+              onRemoveSpellEffect={removeAoeTemplate}
+              summonedBy={tokenPanelSpellRows?.summonedBy ?? null}
               onDelete={deleteTokenPanelTargets}
               onClose={() => (tokenPanel = null)}
             />
@@ -2825,7 +2956,30 @@
           aoeSelectionCount={selectedAoeTemplates.length}
           aoeSelectionEffect={selectedAoeEffect}
           onAoeSelectionEffectChange={changeSelectedAoeEffect}
+          onCastSpell={(point) => spells.open(point)}
         />
+        <RadialMenu
+          visible={spells.menu !== null}
+          position={spells.menu ?? { x: 0, y: 0 }}
+          items={spells.items}
+          title={spells.menuTitle}
+          subtitle="Pick a spell, then aim it on the map"
+          backIcon={IconArrowBackUp}
+          closeIcon={IconX}
+          autoCloseMs={20000}
+          onItemSelect={(itemId) => spells.select(itemId)}
+          onSubmenuOpen={spells.onSubmenuOpen}
+          onClose={() => spells.close()}
+          onReposition={(point) => spells.open(point)}
+        />
+        {#if spells.targetPrompt}
+          <SpellAimBar
+            prompt={spells.targetPrompt}
+            castLabel={spells.pickedCount ? 'Cast (Enter)' : null}
+            onCast={() => spells.confirmTargets()}
+            onCancel={() => spells.cancelAim()}
+          />
+        {/if}
         <SceneZoom {stage} {handleSceneFit} {handleMapFill} {stageProps} />
         <Shortcuts />
         <ChecklistHelpButton onclick={handleShowChecklist} />

@@ -237,6 +237,9 @@ The frame loop always ticks, but `Scene.svelte` skips the GPU work while nothing
 tier is in `helpers/framePacing.ts` (`IDLE_FRAME_RATE`: high uncapped, medium 30 fps, low 20 fps). Any
 props change, window input, map load or resize gives full rate for 1.5 s. A layer whose transient
 animation must stay smooth calls `getContext<FramePacer>('framePacer')?.markActive()` from its `useTask`.
+A layer that only loops (an animated AoE area) calls `markAmbient()` instead: while it does, the cap is
+`AMBIENT_FRAME_RATE` (high 60, medium 30, low 24) rather than uncapped, so a Spirit Guardians area no longer
+keeps an integrated GPU rendering flat out.
 The F9 overlay reports rendered frames, so an idle medium-tier stage shows ~30 fps by design.
 
 ## Mask Readback

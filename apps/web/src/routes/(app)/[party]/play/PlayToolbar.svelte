@@ -40,7 +40,7 @@
 </script>
 
 <div class="playToolbar" data-testid="playToolbar">
-  {#if tools.isAoeActive}
+  {#if tools.isAoeActive && !tools.spellAim}
     <div class="playToolbar__row">
       {#each shapes as shape (shape.value)}
         <button

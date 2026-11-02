@@ -9,6 +9,7 @@ export {
   createPartyWriter,
   createSessionWriter,
   getAnnotationMask,
+  getDocRuleset,
   getFogMask,
   getPartyState,
   getSceneSettings,
@@ -17,6 +18,7 @@ export {
   isDocHydrated,
   listScenes,
   orderBetween,
+  setDocRuleset,
   type MoveOptions,
   type PartyWriter,
   type SessionWriter

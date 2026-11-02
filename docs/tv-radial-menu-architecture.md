@@ -35,6 +35,7 @@ GM editor. Design history and requirements: `spec/tv-radial-menu.md`.
 | `apps/web/src/lib/utils/assetGroups.ts`                          | Group selection rules and `planGroupToggle` (shared with the editor's B)                       |
 | `apps/web/src/lib/realtime/docSchema.ts`                         | Nested conditions map, condition writers, `upgradeConditionMaps`                               |
 | `apps/web/src/routes/(app)/[party]/play/playMenus.ts`            | Pure menu builders: `generalMenu`, `tokenMenu`, `aoeMenu`, `conditionsItem`, `groupItems`      |
+| `apps/web/src/lib/utils/spellMenus.ts` / `spellCasting.ts`       | Pure spell ring (`spellMenuItem`), aim settings, cast/template/summon builders, `castSpell`    |
 | `apps/web/src/routes/(app)/[party]/play/usePlayTools.svelte.ts`  | Selection, menu state, `openMenuAt`, `selectMenuItem` actions, notices, custom condition form  |
 | `apps/web/src/routes/(app)/[party]/play/+page@.svelte`           | Long press on empty map, gesture detector, stage callbacks, menu/notice/form rendering         |
 | `apps/web/src/routes/(app)/[party]/play/TvConditionForm.svelte`  | Name + color form for a new custom condition, rotated like the menu                            |
@@ -114,6 +115,56 @@ stroke end collects the touched layers (`onAnnotationUpdate`), reads their masks
 as `eraseLayerIds`, so GM drawings are never erased. The tool turns off after 30 s without a stroke, on Done, on
 scene switch and on pause. Design and decisions: `spec/tv-drawing.md`.
 
+### Spells
+
+"Cast spell" is the same ring on the TV and in the editor, built by `spellMenuItem` (`utils/spellMenus.ts`, pure and
+unit-tested): Recent (up to eight, stored per device in `localStorage` by `utils/recentSpells.ts`, left out until
+something was cast) plus one ring per category, then the spells, then a variant ring for summons (owl, cat…). A leaf
+has no hint, so the hub shows only the spell's name (players know its area and save); it is tinted by the spell's
+palette, and its preset comes from the game session's ruleset (`resolveSpell`). Leaf ids are
+`spell:<id>` or `spell:<id>:<variant>`, parsed by `parseSpellItemId`. Auras that follow the caster (Spirit guardians)
+are `disabled` without one, and the hub explains how to get one. The menu builders only take plain state
+(`SpellMenuState`): `generalMenu` offers it with no caster, `tokenMenu` offers it with the single pressed token as the
+caster.
+
+```
+leaf ──► tools.selectMenuItem ──► #startSpell ──► self spell? (caster-centred circle) ──► castSpell at once
+                                              └─► aim: tools.spellAim + activeLayer = AoE, tool.spell = preset
+stage AoE layer (aiming) ──► onSpellAimed({ spellId, position, angle }) ──► tools.onSpellAimed ──► castSpell
+castSpell ──► presence.castSpell (animation on every screen) ──► template row now, summon (and its anchored area)
+              at durationMs * 0.5, each one undo step
+```
+
+- **Aiming.** The AoE layer is activated with `AoeToolSettings.spell` (`stageAoeTool`) so the preset shape and size
+  are locked; `buildSpellAim` decides `point` vs `direction` and whether the origin is the caster's edge. A banner
+  shows "Tap where to cast Fireball" with a Cancel button. Aiming ends on Escape, Cancel, the AoE toolbar button,
+  another tool taking the layer, a scene switch, a pause, or when the caster is deleted on the GM screen.
+- **Warm-up.** `RadialMenu` reports opened rings through `onSubmenuOpen`; `spellFxToPrewarm` maps the ring to just the
+  cast archetypes and token effect kinds of its spells (a category, Recent, one summon; the root and the "Targeted"
+  group link nothing) for `stage.spells.prewarm(cast, token)`. The spell and token effect layers are loaded lazily by
+  the stage the first time they are needed.
+- **Targeted spells.** The "Targeted" item opens four rings (holds and charms, curses and marks, blessings and wards, enhancements) so the spell ring
+  stays within 8 items. A targeted spell aims in `target` mode (`buildSpellAim`, `mode: 'target'`): the stage outlines
+  the reachable token under the finger and `onSpellTargeted` casts at that token (`tools.onSpellTargeted`); Bless and
+  Bane stay aimed until three tokens are picked, and all picks share one concentration. The notice banner's Cancel (the
+  hub), Escape and right-click end the aim. Touch spells (Light, Protection from evil and good) use target mode with a
+  5 ft range; self effects (Blur, Mirror image) cast at once on the caster. Picks are no longer capped: tap tokens to
+  toggle them, then Enter or the bar's Cast applies the spell to all of them.
+- **Area-pick spells** (Slow, Calm emotions, Mass cure wounds, Hypnotic pattern, Faerie fire, Fear, Sleep; preset
+  `areaPick: 'choose' | 'saves'`) aim in `area-targets` mode. The bar first says "Tap where to place Slow" (a cone from
+  the caster, Fear, needs a caster and is aimed by angle); once placed the area can be dragged, a tap on a creature
+  inside toggles it, and the bar reads "Slow: 2 of 4 creatures · drag to move". `choose` spells start with nobody
+  picked, `saves` spells with everyone inside picked (tap a creature to untick its save). Cast writes only an effect on
+  each picked creature, never an area row (`tools.onSpellAreaTargets`, `spellPickedMarkerIds`, `targetCastRequest`).
+- **Concentration.** The token menu shows "End concentration" while the single pressed token concentrates
+  (`concentratingSpellName`); it calls `endConcentration`. Casting a new concentration spell ends the caster's previous
+  one and shows a notice. The ring itself is drawn by the stage's token effect layer, not the token canvas.
+- **The GM.** The editor opens the same ring (without the "Cast spell" level) from a "Spells" toolbar button, at the
+  button, or with the S key, at the last cursor position (`useEditorSpells.svelte.ts`); the caster is the single
+  selected token and templates use the AoE tool's visibility. Right-click is not used there.
+- **Summon art.** Summoned tokens are ordinary markers with `imageLocation: '/spell-tokens/<icon>.svg'` and the
+  spell's palette as ring colour; see `loadTokenImage` for SVG decoding.
+
 ### Undo
 
 Each TV action runs inside `PlayTools.#write`, which wraps the writes in `client.stopCapturing()`: one undo step on
@@ -151,5 +202,5 @@ the TV, and the GM can undo it too (`setUndoScope(..., { includeRemote: true })`
   on release, which also cancels the item's drag and suppresses the release click, and is only armed when the
   consumer registers the callback.
 - **Use `RadialMenu` elsewhere.** Pass `items`, `title`/`subtitle` for the hub, `onItemSelect`, `onClose`, and
-  optionally `autoCloseMs`, `backIcon`, `closeIcon`, `onReposition`. Effect previews (`effectType`) each cost a
+  optionally `autoCloseMs`, `backIcon`, `closeIcon`, `onReposition`, `onSubmenuOpen`. Effect previews (`effectType`) each cost a
   WebGL context while visible; prefer CSS swatches (`color` accepts gradients) for long lists.

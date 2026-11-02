@@ -15,7 +15,12 @@ export {
   type AoeTemplate,
   type AoeTemplateLayerExports,
   type AoeTemplateLayerProps,
-  type AoeToolSettings
+  type AoeToolSettings,
+  type SpellAimArea,
+  type SpellAimSettings,
+  type SpellAimed,
+  type SpellAreaTargets,
+  type SpellTargeted
 } from './components/AoeTemplateLayer/types';
 export { DrawMode, RenderMode, ToolType, peekRLEDimensions } from './components/DrawingLayer/types';
 export { type EdgeOverlayProps } from './components/EdgeOverlayLayer/types';
@@ -47,8 +52,16 @@ export { default as PerformanceDebugger } from './components/PerformanceDebugger
 export { default as PerformanceOverlay } from './components/PerformanceOverlay/PerformanceOverlay.svelte';
 export { default as PointerInputManager } from './components/PointerInputManager/PointerInputManager.svelte';
 export { SceneRotation, type PostProcessingProps, type SceneLayerProps } from './components/Scene/types';
+export {
+  type CameraShake,
+  type SpellCast,
+  type SpellCastLayerExports,
+  type SpellCastPoint,
+  type SpellPrewarmExports
+} from './components/SpellCastLayer/types';
 export { default as Stage } from './components/Stage/Stage.svelte';
 export * from './components/Stage/types';
+export { type TokenEffect, type TokenEffectLayerExports } from './components/TokenEffectLayer/types';
 export {
   AshPreset,
   BlizzardPreset,
@@ -75,19 +88,30 @@ export {
   type AnnotationEffectDefinition
 } from './helpers/annotationEffects';
 export {
+  EXPIRY_FADE_MS,
+  anchoredTemplateMoves,
   angleFromCursor,
   formatTemplateLabel,
   getTemplateHandlePoints,
   getTemplateLocalBounds,
   getTemplateOutline,
+  isTemplateAnchored,
+  isTemplateExpired,
   nextTemplateInStack,
   normalizeTemplateAngle,
   rotateTemplateAngle,
   sizeFromCursor,
+  spellAimDraft,
+  spellAimPlacement,
+  spellRangeRadiusPx,
+  templateExpiryFade,
+  templateFadeMs,
   templateIntersectsRect,
   templateLocalToLayer,
   templateSdf,
+  withAnchoredPosition,
   worldToTemplateLocal,
+  type AnchorMarker,
   type TemplateBounds,
   type TemplatePoint
 } from './helpers/aoeTemplates';
@@ -130,3 +154,49 @@ export {
   type PerformanceHistory,
   type PerformanceMetrics
 } from './helpers/performanceMetrics.svelte';
+export {
+  DEFAULT_RULESET,
+  RULESETS,
+  RULESET_LABELS,
+  byRuleset,
+  isRuleset,
+  type Ruleset,
+  type RulesetSpec
+} from './helpers/rulesets';
+export {
+  MAX_CONCURRENT_SPELL_CASTS,
+  SPELL_CAST_LINK_GRACE_MS,
+  SPELL_FX_LIST,
+  pruneSpellCasts,
+  receiveSpellCast,
+  spellCastProgress,
+  type BroadcastSpellCast
+} from './helpers/spellCasts';
+export {
+  INSTANT_FADE_MS,
+  SPELLS,
+  SPELL_CATEGORIES,
+  SPELL_CATEGORY_GROUPS,
+  instantTemplateExpiresAt,
+  isEffectOnlyPreset,
+  resolveSpell,
+  resolveSpellAnyRuleset,
+  resolveSummonSize,
+  spellFxKinds,
+  spellsInCategory,
+  type MarkerConcentration,
+  type ResolvedSpell,
+  type SpellArea,
+  type SpellCastFx,
+  type SpellCastSpec,
+  type SpellCategory,
+  type SpellCategoryDefinition,
+  type SpellDefinition,
+  type SpellPreset,
+  type SpellSummon,
+  type SpellSummonVariant,
+  type TokenEffectKind,
+  type TokenFx
+} from './helpers/spells';
+export { isSpellTargetInRange, spellTargetAt } from './helpers/spellTargets';
+export { TOKEN_FX_LIST } from './helpers/tokenEffects';

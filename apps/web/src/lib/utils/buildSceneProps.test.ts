@@ -234,6 +234,15 @@ describe('buildSceneProps aoe templates', () => {
     });
   });
 
+  it('carries the anchor marker and converts the expiry from Unix seconds to epoch ms', () => {
+    const props = buildSceneProps(baseScene, [], 'editor', [], [], undefined, [
+      aoeRow({ anchorMarkerId: 'marker-1', expiresAt: 1700000060 }),
+      aoeRow({ id: 'aoe-2' })
+    ]);
+    expect(props.aoeTemplates?.templates[0]).toMatchObject({ anchorMarkerId: 'marker-1', expiresAt: 1700000060000 });
+    expect(props.aoeTemplates?.templates[1]).toMatchObject({ anchorMarkerId: null, expiresAt: null });
+  });
+
   it('rotates angles of legacy display-space templates into map space', () => {
     const scene = { ...baseScene, mapRotation: 90 } as SelectScene;
     const props = buildSceneProps(scene, [], 'editor', [], [], undefined, [aoeRow()]);
@@ -300,5 +309,94 @@ describe('buildRenderProps drag preview of groups', () => {
     expect(positionOf(props.marker.markers, 'marker-1')).toEqual({ x: 310, y: 160 });
     expect(positionOf(props.marker.markers, 'familiar')).toEqual({ x: 320, y: 150 });
     expect(positionOf(props.light.lights, 'light-1')).toEqual({ x: 300, y: 150 });
+  });
+});
+
+describe('buildSceneProps spell effects', () => {
+  const caster = {
+    ...marker,
+    id: 'wizard',
+    concentration: { spellId: 'hold-person', startedAt: 100, templateIds: ['chains'], markerIds: [] }
+  };
+  const target = { ...marker, id: 'goblin' };
+  const chains = aoeRow({
+    id: 'chains',
+    spellId: 'hold-person',
+    anchorMarkerId: 'goblin',
+    effect: 0,
+    color: '#aab4c8',
+    createdAt: 100
+  });
+
+  it('marks effect-only rows so the AoE layer skips them but keeps listing them', () => {
+    const props = buildSceneProps(
+      baseScene,
+      [caster, target] as unknown as SelectMarker[],
+      'editor',
+      [],
+      [],
+      undefined,
+      [chains, aoeRow({ id: 'zone', spellId: 'web' })]
+    );
+    const templates = props.aoeTemplates!.templates;
+    expect(templates.map((t) => [t.id, t.effectOnly])).toEqual([
+      ['chains', true],
+      ['zone', undefined]
+    ]);
+  });
+
+  it('keeps drawing a saved area of a spell that is now an area pick as an area, and never as a token effect', () => {
+    const oldAreas = ['hypnotic-pattern', 'faerie-fire', 'sleep'].map((spellId) =>
+      aoeRow({ id: `old-${spellId}`, spellId, anchorMarkerId: null, effect: 19, size: 30, createdAt: 100 })
+    );
+    const picked = aoeRow({ id: 'new-slow', spellId: 'slow', anchorMarkerId: 'goblin', effect: 0, createdAt: 100 });
+    const props = buildSceneProps(
+      baseScene,
+      [caster, target] as unknown as SelectMarker[],
+      'editor',
+      [],
+      [],
+      undefined,
+      [...oldAreas, picked]
+    );
+    expect(props.aoeTemplates!.templates.map((t) => [t.id, t.effectOnly])).toEqual([
+      ['old-hypnotic-pattern', undefined],
+      ['old-faerie-fire', undefined],
+      ['old-sleep', undefined],
+      ['new-slow', true]
+    ]);
+    expect(props.tokenEffects?.map((e) => [e.markerId, e.fx])).toEqual([['goblin', 'clock']]);
+  });
+
+  it('derives token effects with a concentration ring while the caster list holds a row', () => {
+    const props = buildSceneProps(
+      baseScene,
+      [caster, target] as unknown as SelectMarker[],
+      'editor',
+      [],
+      [],
+      undefined,
+      [chains]
+    );
+    expect(props.tokenEffects?.map((e) => [e.markerId, e.fx])).toEqual([
+      ['goblin', 'chains'],
+      ['wizard', 'concentration']
+    ]);
+    expect(props.marker.markers.find((m) => m.id === 'wizard')?.concentrating).toEqual({ color: '#aab4c8' });
+    expect(props.marker.markers.find((m) => m.id === 'goblin')?.concentrating).toBeUndefined();
+  });
+
+  it('shows no ring once nothing the caster listed remains', () => {
+    const props = buildSceneProps(baseScene, [caster] as unknown as SelectMarker[], 'editor', [], [], undefined, []);
+    expect(props.tokenEffects).toEqual([]);
+    expect(props.marker.markers[0].concentrating).toBeUndefined();
+  });
+
+  it('keeps DM-only templates and tokens out of player effects', () => {
+    const hidden = aoeRow({ ...chains, visibility: 0 });
+    const props = buildSceneProps(baseScene, [target] as unknown as SelectMarker[], 'client', [], [], undefined, [
+      hidden
+    ]);
+    expect(props.tokenEffects).toEqual([]);
   });
 });

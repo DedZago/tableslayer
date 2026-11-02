@@ -1,10 +1,12 @@
 <script lang="ts">
   import Head from '$lib/components/Head/Head.svelte';
   import { InitiativeStrip } from '$lib/components/Combat';
+  import SpellAimBar from '$lib/components/GameSession/SpellAimBar.svelte';
   import { HandoutOverlay } from '$lib/components/Handouts';
   import { createPartyLiveStateQuery } from '$lib/queries';
   import { PLAY_IDLE_POLICY, SleepController, buildRenderProps, reuseUnchanged, type MarkerRow } from '$lib/realtime';
-  import { buildSceneProps, throttle } from '$lib/utils';
+  import { buildSceneProps, throttle, writeAnchoredTemplateMoves } from '$lib/utils';
+  import { startTemplateExpirySweep } from '$lib/utils/templateExpiry';
   import { transformCursorsToArray } from '$lib/utils/cursors';
   import { StageDefaultProps } from '$lib/utils/defaultMapState';
   import { createPinchGesture, createUnifiedGestureDetector } from '$lib/utils/gestureDetection';
@@ -54,6 +56,7 @@
         initialActiveSceneId: data.activeScene?.id ?? null,
         initialIsPaused: data.party.gameSessionIsPaused,
         initialHandout: data.party.activeHandout,
+        loadedRuleset: () => data.activeGameSession?.ruleset,
         bucketUrl: data.bucketUrl,
         routes: () => sceneRoutes,
         getStage: () => stage
@@ -110,6 +113,18 @@
     const client = session.client;
     if (!client) return;
     return sleep.bindClient(client);
+  });
+
+  // Expired spell templates are swept here only while no editor is connected: an editor's
+  // system-origin sweep stays out of its undo history, a TV delete arriving as a remote edit would not
+  $effect(() => {
+    const client = session.client;
+    if (!client) return;
+    return startTemplateExpirySweep(
+      client,
+      () => session.activeSceneId,
+      () => client.ready && !client.sleeping && !client.presence.editorPresent
+    );
   });
 
   $effect(() => {
@@ -210,7 +225,7 @@
         },
         measurement: tools.measurement,
         aoeTemplates: {
-          tool: tools.aoeTool,
+          tool: tools.stageAoeTool,
           selectedIds: tools.aoeSelectedIds,
           showLabels: false,
           playerSelectable: true
@@ -264,6 +279,10 @@
     void renderedProps.scene.zoom;
     void renderedProps.display.resolution.x;
     return tools.drawPanel && stage ? stage.scene.gridCellScreenSize() : 0;
+  });
+
+  $effect(() => {
+    session.presence?.setCastScene(renderedSceneId);
   });
 
   const sceneIsChanging = $derived(session.activeSceneId !== null && session.activeSceneId !== renderedSceneId);
@@ -323,6 +342,15 @@
   });
 
   function onUndoKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && tools.spellAim) {
+      tools.cancelSpellAim();
+      return;
+    }
+    if (event.key === 'Enter' && tools.spellAim) {
+      event.preventDefault();
+      tools.confirmSpellTargets();
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key !== 'z' && key !== 'y') return;
@@ -373,6 +401,18 @@
         delete dragPositions[marker.id];
         dragClearTimers.delete(marker.id);
       }, 300)
+    );
+  }
+
+  function onMarkersMoveEnd({ ids, cancelled }: { ids: string[]; cancelled: boolean }) {
+    const sceneId = session.activeSceneId;
+    if (cancelled || !sceneId || !session.client) return;
+    writeAnchoredTemplateMoves(
+      session.client,
+      sceneId,
+      renderedProps.aoeTemplates?.templates ?? [],
+      renderedProps.marker.markers,
+      ids
     );
   }
 
@@ -530,6 +570,16 @@
     if (tools.menuTargetGone) untrack(() => tools.closeMenu());
   });
 
+  // Aiming ends when another tool takes over, the scene changes, the caster is deleted, or the game pauses
+  $effect(() => {
+    void session.activeSceneId;
+    return () => untrack(() => tools.cancelSpellAim());
+  });
+  $effect(() => {
+    const aimEnded = tools.activeLayer !== MapLayerType.AoeTemplate || tools.spellAimCasterGone || gameIsPaused;
+    if (tools.spellAim && aimEnded) untrack(() => tools.cancelSpellAim());
+  });
+
   // Group select: dragging on empty space draws a rectangle that adds the tokens and shapes inside it
   let selectionRectangle = $state<{ x: number; y: number; width: number; height: number } | null>(null);
 
@@ -666,6 +716,7 @@
     {pinnedMarkerIds}
     {activeTurnMarkerId}
     distanceMode={tools.distanceMode}
+    spellCasts={session.presence?.activeCasts}
     selectedMarkerIds={tools.groupSelect || tools.distanceMode ? tools.selectedMarkerIds : undefined}
     receivedMeasurement={latestMeasurement
       ? {
@@ -697,6 +748,7 @@
       onSceneUpdate,
       onMarkerAdded: () => {},
       onMarkerMoved,
+      onMarkersMoveEnd,
       onMarkerSelected: tools.onMarkerSelected,
       onMarkerContextMenu,
       onMarkerLongPress: (marker, position) => tools.openTokenMenu(marker.id, position),
@@ -709,7 +761,11 @@
       onAoeTemplateSelected: (id) => tools.onAoeTemplatesSelected(id ? [id] : []),
       onAoeTemplatesSelected: tools.onAoeTemplatesSelected,
       onAoeTemplateDeleted: tools.onAoeTemplateDeleted,
-      onAoeTemplateMenu: tools.onAoeTemplateMenu
+      onAoeTemplateMenu: tools.onAoeTemplateMenu,
+      onSpellAimed: tools.onSpellAimed,
+      onSpellTargeted: tools.onSpellTargeted,
+      onSpellAreaTargets: tools.onSpellAreaTargets,
+      onSpellAimCancelled: () => tools.cancelSpellAim()
     }}
     cursors={cursorArray}
     trackLocalCursor={false}
@@ -743,6 +799,14 @@
 
 {#if tools.notice}
   <div class="playNotice" role="status">{tools.notice}</div>
+{:else if tools.spellAimPrompt}
+  <SpellAimBar
+    prompt={tools.spellAimPrompt}
+    castLabel={tools.spellCastLabel}
+    onCast={() => tools.confirmSpellTargets()}
+    onCancel={() => tools.cancelSpellAim()}
+    size="lg"
+  />
 {/if}
 
 {#if tools.isDrawActive && tools.drawBrush && tools.drawPanel && !gameIsPaused}
@@ -788,6 +852,7 @@
   closeIcon={IconX}
   autoCloseMs={15000}
   onItemSelect={(itemId) => tools.selectMenuItem(itemId)}
+  onSubmenuOpen={tools.onMenuSubmenuOpen}
   onClose={() => tools.closeMenu()}
   onReposition={(point) => {
     tools.closeMenu();

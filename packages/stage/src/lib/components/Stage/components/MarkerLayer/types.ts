@@ -51,6 +51,8 @@ export interface Marker {
   note: JSONContent | null;
   pinnedTooltip?: boolean;
   conditions?: MarkerCondition[];
+  /** The token's caster is concentrating on a spell; the ring itself is drawn by the TokenEffectLayer */
+  concentrating?: { color: string };
 }
 
 export interface MarkerLayerProps {

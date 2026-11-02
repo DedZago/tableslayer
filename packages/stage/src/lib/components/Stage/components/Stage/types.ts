@@ -1,5 +1,12 @@
 import type { AnnotationsLayerProps } from '../AnnotationLayer/types';
-import type { AoeTemplate, AoeTemplateLayerExports, AoeTemplateLayerProps } from '../AoeTemplateLayer/types';
+import type {
+  AoeTemplate,
+  AoeTemplateLayerExports,
+  AoeTemplateLayerProps,
+  SpellAimed,
+  SpellAreaTargets,
+  SpellTargeted
+} from '../AoeTemplateLayer/types';
 import type { EdgeOverlayProps } from '../EdgeOverlayLayer/types';
 import type { FogLayerProps } from '../FogLayer/types';
 import type { FogOfWarLayerProps } from '../FogOfWarLayer/types';
@@ -9,6 +16,8 @@ import type { MapLayerProps, MapLayerType } from '../MapLayer/types';
 import type { Marker, MarkerLayerProps } from '../MarkerLayer/types';
 import type { MeasurementLayerProps } from '../MeasurementLayer/types';
 import type { PostProcessingProps, SceneLayerProps } from '../Scene/types';
+import type { SpellCast, SpellPrewarmExports } from '../SpellCastLayer/types';
+import type { TokenEffect } from '../TokenEffectLayer/types';
 import type { WeatherLayerProps } from '../WeatherLayer/types';
 export type { CursorData } from '../CursorLayer/types';
 
@@ -56,6 +65,17 @@ export interface Callbacks {
   onAoeTemplateDeleted?: (id: string) => void;
   /** A shape was right-clicked (mouse) or held down (touch); `position` is in client pixels */
   onAoeTemplateMenu?: (id: string, position: { x: number; y: number }, trigger: 'contextmenu' | 'longpress') => void;
+  /** A spell set in the AoE tool's `spell` was aimed and placed */
+  onSpellAimed?: (aimed: SpellAimed) => void;
+  /** A token was picked for a spell aimed in `target` mode; the aim stays until the consumer ends it */
+  onSpellTargeted?: (targeted: SpellTargeted) => void;
+  /**
+   * An `area-targets` spell was placed or moved, or the tokens inside its area changed. Reported only when the
+   * placement or the id list differs from the last report; the consumer stores the placement and passes it back
+   */
+  onSpellAreaTargets?: (areaTargets: SpellAreaTargets) => void;
+  /** The aim was dismissed on the stage (right-click) */
+  onSpellAimCancelled?: () => void;
 }
 
 /**
@@ -71,6 +91,8 @@ export interface StageInteractionProps {
   activeTurnMarkerId?: string | null;
   /** Shows the distance from the selected token to every other visible token */
   distanceMode?: boolean;
+  /** Transient spell animations to play; the consumer prunes them after `durationMs` */
+  spellCasts?: SpellCast[];
 }
 
 export enum StageMode {
@@ -178,6 +200,8 @@ export type StageProps = {
   measurement: MeasurementLayerProps;
   /** Spell area templates. Optional so existing consumers keep working. */
   aoeTemplates?: AoeTemplateLayerProps;
+  /** Ambient effects bound to tokens (spell effects, concentration rings); drawn by a lazily loaded layer */
+  tokenEffects?: TokenEffect[];
   /**
    * Rendering quality tier. Defaults to 'high' (full quality).
    */
@@ -239,6 +263,7 @@ export interface StageExports {
     inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) => string[];
   };
   aoeTemplates: AoeTemplateLayerExports;
+  spells: SpellPrewarmExports;
   measurement: {
     getCurrentMeasurement: () => {
       startPoint: { x: number; y: number } | null;

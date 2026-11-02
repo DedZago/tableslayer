@@ -31,7 +31,7 @@
   import { debugState } from '../../helpers/debugState.svelte';
   import { getActiveEffects, hasActivePostProcessing } from '../../helpers/postProcessing';
   import { snapToGrid, getGridCellSize as getGridCellSizeHelper } from '../../helpers/grid';
-  import { createFramePacer, IDLE_FRAME_RATE } from '../../helpers/framePacing';
+  import { AMBIENT_FRAME_RATE, createFramePacer, IDLE_FRAME_RATE } from '../../helpers/framePacing';
   import { SceneLayer, SceneLayerOrder, SceneLoadingState } from './types';
   import type { AnnotationExports } from '../AnnotationLayer/types';
   import AnnotationLayer from '../AnnotationLayer/AnnotationLayer.svelte';
@@ -41,6 +41,12 @@
   import GridLayer from '../GridLayer/GridLayer.svelte';
   import AoeTemplateLayer from '../AoeTemplateLayer/AoeTemplateLayer.svelte';
   import type { AoeTemplateLayerExports } from '../AoeTemplateLayer/types';
+  import type SpellCastLayerComponentType from '../SpellCastLayer/SpellCastLayer.svelte';
+  import type { CameraShake, SpellCastLayerExports } from '../SpellCastLayer/types';
+  import type TokenEffectLayerComponentType from '../TokenEffectLayer/TokenEffectLayer.svelte';
+  import type { TokenEffectLayerExports } from '../TokenEffectLayer/types';
+  import { SPELL_FX_LIST } from '../../helpers/spellCasts';
+  import type { SpellCastFx, TokenEffectKind } from '../../helpers/spells';
   import LightLayer from '../LightLayer/LightLayer.svelte';
   import type { LightLayerExports } from '../LightLayer/types';
   import MapLayer from '../MapLayer/MapLayer.svelte';
@@ -97,6 +103,61 @@
   let annotationsLayer: AnnotationExports;
   let lightLayer: LightLayerExports;
   let aoeTemplateLayer = $state.raw<AoeTemplateLayerExports | undefined>(undefined);
+  let spellCastLayer = $state.raw<SpellCastLayerExports | undefined>(undefined);
+  let tokenEffectLayer = $state.raw<TokenEffectLayerExports | undefined>(undefined);
+
+  // The spell and token effect layers (and their shader source) load the first time something needs them
+  // and stay mounted after, so a scene that never casts a spell never fetches either
+  const stageState = getContext<{ spellCasts: readonly unknown[] }>('stage');
+  let SpellCastLayerComponent = $state.raw<typeof SpellCastLayerComponentType | null>(null);
+  let TokenEffectLayerComponent = $state.raw<typeof TokenEffectLayerComponentType | null>(null);
+  let spellCastLayerRequested = false;
+  let tokenEffectLayerRequested = false;
+  const pendingCastFxs = new Set<SpellCastFx>();
+  const pendingTokenFxs = new Set<TokenEffectKind>();
+
+  const loadSpellCastLayer = () => {
+    if (spellCastLayerRequested) return;
+    spellCastLayerRequested = true;
+    import('../SpellCastLayer/SpellCastLayer.svelte')
+      .then((module) => (SpellCastLayerComponent = module.default))
+      .catch((error) => {
+        spellCastLayerRequested = false;
+        console.error('[Scene] loading the spell cast layer failed', error);
+      });
+  };
+
+  const loadTokenEffectLayer = () => {
+    if (tokenEffectLayerRequested) return;
+    tokenEffectLayerRequested = true;
+    import('../TokenEffectLayer/TokenEffectLayer.svelte')
+      .then((module) => (TokenEffectLayerComponent = module.default))
+      .catch((error) => {
+        tokenEffectLayerRequested = false;
+        console.error('[Scene] loading the token effect layer failed', error);
+      });
+  };
+
+  $effect(() => {
+    if (stageState.spellCasts.length > 0) loadSpellCastLayer();
+  });
+
+  $effect(() => {
+    if ((props.tokenEffects?.length ?? 0) > 0) loadTokenEffectLayer();
+  });
+
+  // Prewarms asked for before a layer finished loading run as soon as it mounts
+  $effect(() => {
+    if (!spellCastLayer || pendingCastFxs.size === 0) return;
+    spellCastLayer.prewarm([...pendingCastFxs]);
+    pendingCastFxs.clear();
+  });
+
+  $effect(() => {
+    if (!tokenEffectLayer || pendingTokenFxs.size === 0) return;
+    tokenEffectLayer.prewarm([...pendingTokenFxs]);
+    pendingTokenFxs.clear();
+  });
   let mapLayer: MapLayerExports;
   let markerLayer: MarkerLayerExports;
   let measurementLayer: MeasurementLayerExports | null = $state(null);
@@ -129,6 +190,9 @@
 
   const framePacer = createFramePacer();
   setContext('framePacer', framePacer);
+  // Written by SpellCastLayer while a blast lands; applied to the camera around the render passes below
+  const cameraShake: CameraShake = { x: 0, y: 0 };
+  setContext('cameraShake', cameraShake);
   const activityEvents = ['pointerdown', 'pointermove', 'wheel', 'keydown'] as const;
   const markFrameActive = () => framePacer.markActive();
 
@@ -356,7 +420,8 @@
 
       const now = performance.now();
       if (needsResize) framePacer.markActive(now);
-      if (!framePacer.shouldRender(now, IDLE_FRAME_RATE[props.performanceTier ?? 'high'])) return;
+      const tier = props.performanceTier ?? 'high';
+      if (!framePacer.shouldRender(now, IDLE_FRAME_RATE[tier], AMBIENT_FRAME_RATE[tier])) return;
 
       const enableMetrics = debugState.enableMetrics;
       const frameStart = enableMetrics ? beginFrame() : 0;
@@ -371,6 +436,10 @@
       }
 
       renderer.clear();
+
+      const shaken = cameraShake.x !== 0 || cameraShake.y !== 0;
+      if (shaken) camera.current.position.x += cameraShake.x;
+      if (shaken) camera.current.position.y += cameraShake.y;
 
       // Render main scene with post-processing (or bypass if no effects active)
       camera.current.layers.set(SceneLayer.Main);
@@ -395,6 +464,8 @@
 
       // Reset camera back to main layer
       camera.current.layers.set(SceneLayer.Main);
+      if (shaken) camera.current.position.x -= cameraShake.x;
+      if (shaken) camera.current.position.y -= cameraShake.y;
 
       // Update metrics if enabled
       if (enableMetrics) {
@@ -679,6 +750,22 @@
       aoeTemplateLayer?.inRectangle(start, end) ?? []
   };
 
+  export const spells = {
+    prewarm: (fxs?: SpellCastFx[], tokenFxs?: TokenEffectKind[]) => {
+      const castFxs = fxs ?? SPELL_FX_LIST;
+      if (castFxs.length > 0) {
+        loadSpellCastLayer();
+        if (spellCastLayer) spellCastLayer.prewarm(castFxs);
+        else castFxs.forEach((fx) => pendingCastFxs.add(fx));
+      }
+      if (tokenFxs && tokenFxs.length > 0) {
+        loadTokenEffectLayer();
+        if (tokenEffectLayer) tokenEffectLayer.prewarm(tokenFxs);
+        else tokenFxs.forEach((fx) => pendingTokenFxs.add(fx));
+      }
+    }
+  };
+
   // Export measurement layer methods
   export const measurement = {
     getCurrentMeasurement: () => measurementLayer?.getCurrentMeasurement?.() ?? null,
@@ -816,6 +903,23 @@
         {localScale}
         sceneRotation={props.scene.rotation}
         mapRotation={isMapDefined ? props.map.rotation : 0}
+        markers={props.marker.markers}
+      />
+    {/if}
+
+    {#if SpellCastLayerComponent}
+      <SpellCastLayerComponent bind:this={spellCastLayer} grid={props.grid} display={anchoredDisplay} />
+    {/if}
+
+    {#if TokenEffectLayerComponent}
+      <TokenEffectLayerComponent
+        bind:this={tokenEffectLayer}
+        effects={props.tokenEffects ?? []}
+        markers={props.marker.markers}
+        mode={props.mode}
+        tokensVisible={props.marker.visible}
+        grid={props.grid}
+        display={anchoredDisplay}
       />
     {/if}
 

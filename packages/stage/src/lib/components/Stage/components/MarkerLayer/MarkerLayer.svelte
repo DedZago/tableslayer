@@ -38,6 +38,9 @@
     activeTurnMarkerId?: string | null;
     distanceMode?: boolean;
     markerClaimAt: number;
+    spellTargetMarkerId?: string | null;
+    spellPickedMarkerIds?: string[];
+    spellEligibleMarkerIds?: string[];
   }>('stage');
   const {
     onMarkerAdded,
@@ -671,8 +674,12 @@
         shadowOffset={props.marker.shape.shadowOffset}
         strokeColor={props.marker.shape.strokeColor}
         strokeWidth={props.marker.shape.strokeWidth}
-        isSelected={selectedMarker?.id === marker.id || currentSelection().includes(marker.id)}
+        isSelected={selectedMarker?.id === marker.id ||
+          currentSelection().includes(marker.id) ||
+          !!stage.spellPickedMarkerIds?.includes(marker.id)}
         isHovered={hoveredMarker?.id === marker.id ||
+          stage.spellTargetMarkerId === marker.id ||
+          !!stage.spellEligibleMarkerIds?.includes(marker.id) ||
           (stage.dropTargetMarkerId ?? props.marker.dropTargetId) === marker.id}
         isActiveTurn={marker.id === stage.activeTurnMarkerId}
         sceneRotation={props.scene.rotation}

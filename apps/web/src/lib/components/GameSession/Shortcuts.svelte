@@ -48,6 +48,8 @@
     { label: 'Toggle drawing', shortcut: 'D' },
     { label: 'Toggle AoE templates', shortcut: 'A' },
     { label: 'Cycle AoE shape', shortcut: 'Shift + A' },
+    { label: 'Cast a spell', shortcut: 'S' },
+    { label: 'Cancel aiming a spell', shortcut: 'Esc' },
     { label: 'Rotate AoE template 15°', shortcut: '[ / ]' },
     { label: 'Rotate AoE template 45°', shortcut: 'Shift + [ / ]' },
     { label: 'Delete AoE template', shortcut: 'Delete' },

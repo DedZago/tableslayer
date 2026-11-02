@@ -30,7 +30,8 @@
     IconPencil,
     IconPolygon,
     IconRuler,
-    IconFlame
+    IconFlame,
+    IconWand
   } from '@tabler/icons-svelte';
   import type { SelectGameSession, SelectParty } from '$lib/db/app/schema';
   import type { Thumb } from '$lib/server';
@@ -69,7 +70,8 @@
     aoeSelectionCount = 0,
     aoeSelectionEffect = undefined,
     onAoeToolChange = undefined,
-    onAoeSelectionEffectChange = undefined
+    onAoeSelectionEffectChange = undefined,
+    onCastSpell = undefined
   }: {
     handleSelectActiveControl: (control: string, opts?: { toggle?: boolean }) => void;
     activeControl: string;
@@ -91,6 +93,8 @@
     aoeSelectionCount?: number;
     aoeSelectionEffect?: AoeEffect;
     onAoeSelectionEffectChange?: (effect: AoeEffect) => void;
+    /** Opens the spell wheel at a client point */
+    onCastSpell?: (point: { x: number; y: number }) => void;
   } = $props();
 
   type SceneControl = {
@@ -273,6 +277,20 @@
   // so floating-ui measures the controls view (it only positions on open), and
   // the reopen must happen after the click event so the popover's global
   // outside-click handler doesn't see the detached list item and self-close
+  const centerOf = (element: HTMLElement) => {
+    const bounds = element.getBoundingClientRect();
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+  };
+
+  const handleSpellsClick = (event: MouseEvent) => onCastSpell?.(centerOf(event.currentTarget as HTMLElement));
+
+  // The overflow list closes with the click, so the wheel opens where the button was
+  const handleOverflowSpellsClick = (event: MouseEvent) => {
+    const point = centerOf(event.currentTarget as HTMLElement);
+    overflowListOpen = false;
+    setTimeout(() => onCastSpell?.(point), 0);
+  };
+
   const handleOverflowItemSelect = (id: string) => {
     overflowListOpen = false;
     const isPopoverTool = popoverControls.some((scene) => scene.id === id);
@@ -463,6 +481,21 @@
           />
         </div>
       {/if}
+      {#if onCastSpell}
+        <div class="sceneControls__item sceneControls__item--spells">
+          <ToolTip positioning={{ placement: 'bottom' }} openDelay={500} closeOnPointerDown disableHoverableContent>
+            {#snippet children()}
+              <button data-testid="spellsToolButton" class="sceneControls__layer" onclick={handleSpellsClick}>
+                <Icon Icon={IconWand} size="1.5rem" />
+                <span class="sceneControls__layerText">Spells</span>
+              </button>
+            {/snippet}
+            {#snippet toolTipContent()}
+              Cast a spell from a wheel, then aim it on the map (S)
+            {/snippet}
+          </ToolTip>
+        </div>
+      {/if}
       {#each popoverControls as scene}
         <div class="sceneControls__item">
           <Popover
@@ -520,6 +553,15 @@
                 {#each drawingOverflowItems as item}
                   {@render overflowItem(item.id, item.icon, item.text, item.testId)}
                 {/each}
+                {#if onCastSpell}
+                  <button
+                    class="sceneControls__layer sceneControls__layer--overflow"
+                    onclick={handleOverflowSpellsClick}
+                  >
+                    <Icon Icon={IconWand} size="1.5rem" />
+                    <span class="sceneControls__overflowLabel">Spells</span>
+                  </button>
+                {/if}
                 {#each popoverControls as scene}
                   {@render overflowItem(scene.id, scene.icon, scene.text, undefined)}
                 {/each}

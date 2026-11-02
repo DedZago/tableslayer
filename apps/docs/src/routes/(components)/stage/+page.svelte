@@ -13,6 +13,8 @@
     AoeShape,
     PointerInputManager,
     PerformanceDebugger,
+    pruneSpellCasts,
+    type SpellCast,
     StageMode
   } from '@tableslayer/stage';
   import { StageDefaultProps } from './defaults';
@@ -31,6 +33,7 @@
     MeasurementControls,
     PostProcessingControls,
     SceneControls,
+    SpellControls,
     WeatherControls
   } from './components/index';
   let stageProps: StageProps = $state(StageDefaultProps);
@@ -39,6 +42,12 @@
   let selectedMarker: Marker | undefined = $state();
   let selectedLight: Light | undefined = $state();
   let selectedAoeId: string | null = $state(null);
+  let spellCasts: SpellCast[] = $state([]);
+
+  const onSpellCast = (cast: SpellCast) => {
+    spellCasts = [...pruneSpellCasts(spellCasts, performance.now()), cast];
+    setTimeout(() => (spellCasts = [...pruneSpellCasts(spellCasts, performance.now())]), cast.durationMs + 50);
+  };
 
   const minZoom = 0.1;
   const maxZoom = 10;
@@ -352,6 +361,7 @@
   <Stage
     bind:this={stage}
     props={stageProps}
+    {spellCasts}
     callbacks={{
       onAnnotationUpdate,
       onFogUpdate,
@@ -422,6 +432,7 @@
   <MeasurementControls bind:props={stageProps} />
   <PostProcessingControls bind:props={stageProps} />
   <SceneControls bind:props={stageProps} {stage} />
+  <SpellControls bind:props={stageProps} {stage} onCast={onSpellCast} />
   <WeatherControls bind:props={stageProps} />
 
   <Folder title="Debug" expanded={false}>

@@ -18,6 +18,8 @@
   import { invalidateAll } from '$app/navigation';
   import { importGameSession } from '$lib/utils';
   import { devError } from '$lib/utils/debug';
+  import { DEFAULT_RULESET, type Ruleset } from '@tableslayer/stage';
+  import RulesetSelect from './RulesetSelect.svelte';
 
   let {
     partyId
@@ -27,6 +29,7 @@
   let formIsOpen = $state(false);
   let importIsOpen = $state(false);
   let gameSessionName = $state('');
+  let ruleset = $state<Ruleset>(DEFAULT_RULESET);
   let importSessionName = $state('Imported Game Session');
   let selectedFile = $state<File | null>(null);
   let createGameSessionError = $state<FormMutationError | undefined>(undefined);
@@ -40,7 +43,7 @@
       mutation: () =>
         createGameSession.mutateAsync({
           partyId,
-          gameSessionData: { name: gameSessionName }
+          gameSessionData: { name: gameSessionName, ruleset }
         }),
       formLoadingState: () => {},
       onError: (err) => {
@@ -168,6 +171,8 @@
           <Input {...inputProps} bind:value={gameSessionName} autocomplete="off" data-testid="sessionName" />
         {/snippet}
       </FormControl>
+      <Spacer />
+      <RulesetSelect value={ruleset} onChange={(next) => (ruleset = next)} />
       <Spacer />
       <Button type="submit" data-testid="createSessionSubmit">Create</Button>
       <Button type="button" variant="danger" onclick={() => (formIsOpen = false)}>Cancel</Button>

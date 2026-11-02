@@ -8,7 +8,7 @@ import {
 } from '$lib/realtime';
 import { devError, devLog } from '$lib/utils/debug';
 import { generateLargeImageUrl } from '$lib/utils/generateR2Url';
-import type { StageExports } from '@tableslayer/stage';
+import { DEFAULT_RULESET, type Ruleset, type StageExports } from '@tableslayer/stage';
 
 export interface SessionRoute {
   id: string;
@@ -24,6 +24,8 @@ export interface PlaySessionOptions {
   initialActiveSceneId?: string | null;
   initialIsPaused: boolean;
   initialHandout?: HandoutDescriptor | null;
+  /** The active game session's ruleset from the page load, used until the doc carries one */
+  loadedRuleset: () => Ruleset | undefined;
   bucketUrl?: string;
   /** Scene → session routing (from SSR) for cross-session scene switches. */
   routes: () => SessionRoute[];
@@ -116,6 +118,11 @@ export class PlaySession {
 
   get presence() {
     return this.client?.presence ?? null;
+  }
+
+  /** The live ruleset from the doc, else the one loaded with the page */
+  get ruleset(): Ruleset {
+    return this.client?.ruleset ?? this.#options.loadedRuleset() ?? DEFAULT_RULESET;
   }
 
   get activeSceneId(): string | null {

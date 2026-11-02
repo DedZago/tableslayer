@@ -11,6 +11,7 @@ import MarkerControls from './MarkerControls.svelte';
 import MeasurementControls from './MeasurementControls.svelte';
 import PostProcessingControls from './PostProcessingControls.svelte';
 import SceneControls from './SceneControls.svelte';
+import SpellControls from './SpellControls.svelte';
 import WeatherControls from './WeatherControls.svelte';
 
 export {
@@ -27,5 +28,6 @@ export {
   MeasurementControls,
   PostProcessingControls,
   SceneControls,
+  SpellControls,
   WeatherControls
 };

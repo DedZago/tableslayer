@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVE_WINDOW_MS, createFramePacer } from './framePacing';
+import {
+  ACTIVE_WINDOW_MS,
+  AMBIENT_FRAME_RATE,
+  AMBIENT_WINDOW_MS,
+  createFramePacer,
+  IDLE_FRAME_RATE
+} from './framePacing';
 
 const simulate = (frameIntervalMs: number, frames: number, idleFps: number | null, activeAt: number[] = []) => {
   const pacer = createFramePacer();
@@ -48,5 +54,43 @@ describe('createFramePacer', () => {
     pacer.markActive(0, 0);
     expect(pacer.shouldRender(0, 30)).toBe(true);
     expect(pacer.shouldRender(16.667, 30)).toBe(false);
+  });
+});
+
+describe('ambient pacing', () => {
+  const frames = (idleFps: number | null, ambientFps: number | null, ambientEvery: boolean, count = 120) => {
+    const pacer = createFramePacer();
+    const rendered: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const now = i * 16.667;
+      if (ambientEvery) pacer.markAmbient(now);
+      if (pacer.shouldRender(now, idleFps, ambientFps)) rendered.push(i);
+    }
+    return rendered;
+  };
+
+  it('renders an ambient loop at the ambient rate instead of uncapped', () => {
+    const rendered = frames(20, 30, true);
+    expect(gaps(rendered).every((gap) => gap === 2)).toBe(true);
+    expect(rendered.length).toBeLessThan(70);
+  });
+
+  it('falls back to the idle rate once nothing loops', () => {
+    const pacer = createFramePacer();
+    pacer.markAmbient(0);
+    expect(pacer.shouldRender(AMBIENT_WINDOW_MS + 100, 20, 60)).toBe(true);
+    expect(pacer.shouldRender(AMBIENT_WINDOW_MS + 100 + 16.667, 20, 60)).toBe(false);
+  });
+
+  it('lets activity override the ambient cap', () => {
+    const pacer = createFramePacer();
+    pacer.markAmbient(0);
+    pacer.markActive(0);
+    expect([0, 16.667, 33.333].map((now) => pacer.shouldRender(now, 20, 24))).toEqual([true, true, true]);
+  });
+
+  it('keeps the ambient rate within the tier limits', () => {
+    expect(AMBIENT_FRAME_RATE).toEqual({ high: 60, medium: 30, low: 24 });
+    expect(AMBIENT_FRAME_RATE.low).toBeGreaterThan(IDLE_FRAME_RATE.low ?? 0);
   });
 });

@@ -211,76 +211,71 @@ float getEdgeDistortion(vec2 uv, vec2 texSize) {
 }
 
 #if EFFECT_TYPE == 1
-// Helper: get fire color from intensity
-vec3 getFireColor(float t) {
-  vec3 black = vec3(0.1, 0.0, 0.0);
-  vec3 darkRed = vec3(0.5, 0.05, 0.0);
-  vec3 red = vec3(0.9, 0.15, 0.0);
-  vec3 orange = vec3(1.0, 0.4, 0.05);
-  vec3 yellow = vec3(1.1, 0.85, 0.2);
-  vec3 white = vec3(1.4, 1.2, 0.9);
-
-  if(t < 0.15) return mix(black, darkRed, t / 0.15);
-  if(t < 0.3) return mix(darkRed, red, (t - 0.15) / 0.15);
-  if(t < 0.5) return mix(red, orange, (t - 0.3) / 0.2);
-  if(t < 0.75) return mix(orange, yellow, (t - 0.5) / 0.25);
-  return mix(yellow, white, (t - 0.75) / 0.25);
+float hash12(vec2 p) {
+  vec3 q = fract(p.xyx * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
 }
 
-// Fire effect - multi-layered flames (top-down view)
+vec2 hash22(vec2 p) {
+  vec3 q = fract(p.xyx * vec3(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.xx + q.yz) * q.zy);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
+    mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+vec3 getFireColor(float h) {
+  vec3 col = mix(vec3(0.3, 0.02, 0.0), vec3(0.95, 0.2, 0.0), smoothstep(0.0, 0.4, h));
+  col = mix(col, vec3(1.0, 0.58, 0.06), smoothstep(0.4, 0.78, h));
+  return mix(col, vec3(1.25, 0.95, 0.35), smoothstep(0.8, 1.0, h));
+}
+
+// Fire effect - top-down flames: one warp, two drifting noise layers, soft embers
 vec4 fireEffect(vec2 uv, vec2 texSize, float time) {
   float mask = getVolumeMask(uv, texSize, time, 3.0, 0.25, 1.5);
   if(mask < 0.001) return vec4(0.0);
 
-  float edgeDist = getEdgeDistortion(uv, texSize);
-  vec2 noiseUV = uv * texSize * 0.001;
-  float warpScale = 1.0 + edgeDist * 2.0 * uIntensity;
+  float cell = max(uCellSize, 1.0);
+  vec2 c = uv * texSize / cell;
+  float t = time * 0.9;
 
-  // === LAYER 1: Deep/base fire (large scale, slow) ===
-  float base1 = domainWarp(noiseUV * 0.8, time * 0.15);
-  float base2 = domainWarp(noiseUV * 1.0 + 50.0, time * 0.2 + 10.0);
-  float baseLayer = (base1 + base2) * 0.5;
-  baseLayer = baseLayer * 0.5 + 0.5;
-  float baseIntensity = baseLayer * mask * uIntensity * 0.7;
+  float f;
+  vec2 pw = c;
+  if(uPerformanceTier == 2) {
+    f = vnoise(pw * 1.8 + vec2(0.0, -t * 0.8));
+  } else {
+    vec2 warp = vec2(vnoise(c * 1.1 + vec2(0.0, t * 0.35)), vnoise(c * 1.1 + vec2(7.3, 3.1) - vec2(t * 0.3, 0.0)));
+    pw = c + (warp - 0.5) * 0.9;
+    f = vnoise(pw * 1.4 + vec2(0.0, -t * 0.8)) * 0.65 + vnoise(pw * 2.8 + vec2(t * 0.4, -t * 1.5) + 9.0) * 0.35;
+  }
+  f = clamp(0.5 + (f - 0.5) * 1.4, 0.0, 1.0);
 
-  // === LAYER 2: Mid fire (medium scale, medium speed) ===
-  float mid1 = domainWarp(noiseUV * 1.5 + 100.0, time * 0.3) * warpScale;
-  float mid2 = domainWarp(noiseUV * 2.0 + 150.0, time * 0.35 + 5.0) * warpScale;
-  float midLayer = (mid1 + mid2) * 0.5;
-  midLayer = midLayer * 0.5 + 0.5;
-  // Offset the mid layer mask slightly for depth
-  float midMask = getVolumeMask(uv, texSize, time * 1.1, 2.5, 0.3, 1.2);
-  float midIntensity = midLayer * midMask * uIntensity * 0.85;
+  float depth = smoothstep(0.1, 0.9, mask);
+  float heat = (f * (0.62 + 0.3 * depth) + 0.1 * depth - 0.08) * uIntensity;
+  float edge = (1.0 - depth) * mask;
+  float tongue = edge * smoothstep(0.5, 0.8, f) * uBorder;
 
-  // === LAYER 3: Hot spots/flickers (small scale, fast) ===
-  float hot1 = domainWarp(noiseUV * 3.0 + 200.0, time * 0.5);
-  float hot2 = fbm3(noiseUV * 4.0 + time * 0.6 + 250.0);
-  float hotLayer = (hot1 + hot2) * 0.5;
-  hotLayer = hotLayer * 0.5 + 0.5;
-  hotLayer = pow(hotLayer, 0.7); // Boost hot spots
-  // Tighter mask for hot spots
-  float hotMask = getVolumeMask(uv, texSize, time * 1.3, 2.0, 0.2, 1.8);
-  float hotIntensity = hotLayer * hotMask * uIntensity;
+  float ember = 0.0;
+  if(uPerformanceTier < 2) {
+    vec2 emberGrid = c * 3.2 + vec2(0.0, -t * 0.6);
+    vec2 emberCell = floor(emberGrid);
+    float emberDist = length(fract(emberGrid) - (0.2 + 0.6 * hash22(emberCell)));
+    ember = step(0.88, hash12(emberCell)) * (1.0 - smoothstep(0.02, 0.1, emberDist));
+  }
 
-  // === LAYER 4: Edge turbulence ===
-  float edgeTurb = fbm5(noiseUV * 5.0 + time * 0.4) * edgeDist;
-
-  // Composite layers with screen-like blending
-  // Each layer contributes color independently
-  vec3 baseColor = getFireColor(baseIntensity) * baseIntensity;
-  vec3 midColor = getFireColor(midIntensity) * midIntensity;
-  vec3 hotColor = getFireColor(hotIntensity * 1.2) * hotIntensity; // Hotter = brighter colors
-
-  // Screen blend: result = 1 - (1-a)(1-b)(1-c)
-  vec3 color = baseColor + midColor + hotColor;
-  color += vec3(1.0, 0.5, 0.2) * edgeTurb * uBorder * uIntensity;
-
-  // Composite alpha from all layers
-  float alpha = max(max(baseIntensity, midIntensity), hotIntensity);
-  alpha = smoothstep(0.0, 0.2, alpha);
-  alpha *= mask * uOpacity;
-
-  return vec4(color, alpha);
+  vec3 color = getFireColor(clamp(heat + tongue * 0.3, 0.0, 1.0)) + vec3(1.2, 0.7, 0.2) * ember;
+  float alpha = (0.45 + 0.55 * smoothstep(0.08, 0.26, heat) + tongue * 0.5 + ember * 0.8) * mask * uOpacity;
+  return vec4(color, clamp(alpha, 0.0, 1.0));
 }
 #endif
 

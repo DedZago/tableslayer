@@ -272,11 +272,12 @@
       mutation: () => createNewScene.mutateAsync({ partyId: party.id, sceneData: settings }),
       formLoadingState: (loading) => (formIsLoading = loading),
       onSuccess: () => {
+        const markerIds = new Map(snapshot.markers.map((marker) => [marker.id, uuidv4()]));
         client!.write.transaction(() => {
           client!.write.createScene(settings, {
             markers: snapshot.markers.map((marker) => ({
               ...marker,
-              id: uuidv4(),
+              id: markerIds.get(marker.id)!,
               sceneId: newId,
               inCombat: false,
               initiative: null,
@@ -292,7 +293,12 @@
             fogMask: client!.fogMask(sceneId)
           });
           for (const template of snapshot.aoeTemplates) {
-            client!.write.upsertAoeTemplate(newId, { ...template, id: uuidv4(), sceneId: newId });
+            client!.write.upsertAoeTemplate(newId, {
+              ...template,
+              id: uuidv4(),
+              sceneId: newId,
+              anchorMarkerId: (template.anchorMarkerId && markerIds.get(template.anchorMarkerId)) || null
+            });
           }
         });
         devLog('scene', `Duplicated scene ${sceneId} -> ${newId}`);

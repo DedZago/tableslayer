@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { uint8ToBase64 } from './binary';
-import { getAnnotationMask, getFogMask, getSceneSnapshot, hydrateGameSessionDoc } from './docSchema';
+import { getAnnotationMask, getDocRuleset, getFogMask, getSceneSnapshot, hydrateGameSessionDoc } from './docSchema';
 import { hydrationDataFromWire, sceneWireFromDoc, type SessionSnapshotWire } from './wire';
 
 const settings = {
@@ -93,7 +93,8 @@ const wire: SessionSnapshotWire = {
           size: 1,
           note: { blocks: [] },
           pinnedTooltip: false,
-          conditions: []
+          conditions: [],
+          concentration: { spellId: 'bless', startedAt: 100, templateIds: ['t1'], markerIds: [] }
         }
       ],
       lights: [],
@@ -113,6 +114,8 @@ const wire: SessionSnapshotWire = {
           visibility: 0,
           label: 'Burning Hands',
           anchorMarkerId: null,
+          spellId: 'burning-hands',
+          expiresAt: 1700000060,
           createdAt: 1700000000
         }
       ],
@@ -156,6 +159,23 @@ describe('wire round trip', () => {
       ...wire.scenes[0],
       parts: ['settings', 'markers', 'lights', 'aoeTemplates', 'annotations', 'fogMask']
     });
+  });
+
+  it('carries spell template fields and the ruleset through the doc', () => {
+    const doc = new Y.Doc();
+    hydrateGameSessionDoc(doc, hydrationDataFromWire({ ...wire, ruleset: 'dnd5e-2014' }), 'server-hydration');
+
+    expect(getDocRuleset(doc)).toBe('dnd5e-2014');
+    expect(getSceneSnapshot(doc, 's1')?.aoeTemplates[0]).toMatchObject({
+      spellId: 'burning-hands',
+      expiresAt: 1700000060
+    });
+  });
+
+  it('leaves the ruleset unset for snapshots that do not carry one', () => {
+    const doc = new Y.Doc();
+    hydrateGameSessionDoc(doc, hydrationDataFromWire(wire), 'server-hydration');
+    expect(getDocRuleset(doc)).toBeNull();
   });
 
   it('includes only dirty parts in the persist payload', () => {

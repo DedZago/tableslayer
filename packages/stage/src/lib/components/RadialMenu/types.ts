@@ -39,6 +39,8 @@ export interface RadialMenuProps {
   /** Closes the menu after this long without input */
   autoCloseMs?: number;
   onItemSelect?: (itemId: string) => void;
+  /** A submenu ring was opened; lets the app warm up what its options will need */
+  onSubmenuOpen?: (itemId: string) => void;
   onClose?: () => void;
   onReposition?: (position: { x: number; y: number }) => void;
 }

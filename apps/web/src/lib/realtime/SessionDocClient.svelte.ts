@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/public';
+import { isRuleset, type Ruleset } from '@tableslayer/stage';
 import YPartyKitProvider from 'y-partykit/provider';
 import * as Y from 'yjs';
 import {
@@ -7,6 +8,7 @@ import {
   createPartyWriter,
   createSessionWriter,
   getAnnotationMask,
+  getDocRuleset,
   getFogMask,
   getPartyState,
   getScenesMap,
@@ -28,6 +30,8 @@ export interface SessionDocClientOptions {
   partyId: string;
   gameSessionId: string;
   userId: string;
+  /** The editor announces itself so the TV can leave shared cleanup to it */
+  isEditor?: boolean;
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
@@ -78,6 +82,8 @@ export class SessionDocClient {
   lastRemoteActivityAt = 0;
   canUndo = $state(false);
   canRedo = $state(false);
+  /** The session's ruleset as mirrored into the doc; null until a room that carries it hydrates */
+  ruleset = $state<Ruleset | null>(null);
 
   #sceneRevs = $state<Record<string, number>>({});
   #listRev = $state(0);
@@ -131,7 +137,9 @@ export class SessionDocClient {
       }
     });
 
-    this.presence = new PresenceChannel(this.#gameSessionProvider.awareness, options.userId);
+    this.presence = new PresenceChannel(this.#gameSessionProvider.awareness, options.userId, {
+      isEditor: options.isEditor
+    });
 
     this.#gameSessionProvider.on('status', (event: { status: ConnectionState }) => {
       this.status.gameSession = event.status;
@@ -164,7 +172,10 @@ export class SessionDocClient {
       this.#applyChanges(changes);
     });
     // Hydration arrives as a meta update; re-check readiness when it lands.
-    this.doc.getMap('meta').observe(() => this.#checkReady());
+    this.doc.getMap('meta').observe(() => {
+      this.#readRuleset();
+      this.#checkReady();
+    });
     this.partyDoc.getMap('meta').observe(() => this.#checkReady());
     this.partyDoc.getMap('state').observe((_event, transaction) => {
       this.#partyRev++;
@@ -216,6 +227,11 @@ export class SessionDocClient {
     const at = Date.now();
     this.lastRemoteActivityAt = at;
     this.#remoteActivityListeners.forEach((listener) => listener(at));
+  }
+
+  #readRuleset() {
+    const stored = getDocRuleset(this.doc);
+    this.ruleset = isRuleset(stored) ? stored : null;
   }
 
   #updateSynced() {

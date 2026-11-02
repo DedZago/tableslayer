@@ -26,6 +26,8 @@
   import { IconChevronDown, IconCheck } from '@tabler/icons-svelte';
   import { invalidateAll } from '$app/navigation';
   import { exportGameSession, isVideoFile } from '$lib/utils';
+  import { RULESET_LABELS, type Ruleset } from '@tableslayer/stage';
+  import RulesetSelect from './RulesetSelect.svelte';
 
   let {
     party,
@@ -79,6 +81,25 @@
       toastMessages: {
         success: { title: `Game session renamed to ${gameSessionName}` },
         error: { title: 'Error renaming game session', body: (error) => error.message }
+      }
+    });
+  };
+
+  const handleRulesetChange = async (ruleset: Ruleset) => {
+    await handleMutation({
+      mutation: () =>
+        renameGameSession.mutateAsync({
+          partyId: party.id,
+          gameSessionId: session.id,
+          gameSessionData: { ruleset }
+        }),
+      formLoadingState: (loading) => (formIsLoading = loading),
+      onSuccess: () => {
+        invalidateAll();
+      },
+      toastMessages: {
+        success: { title: `Ruleset changed to ${RULESET_LABELS[ruleset]}` },
+        error: { title: 'Error changing ruleset', body: (error) => error.message }
       }
     });
   };
@@ -173,6 +194,12 @@
                   Renaming your game session will change the URL and break all links.
                 </Text>
               </form>
+              <Spacer />
+              <RulesetSelect value={session.ruleset} onChange={handleRulesetChange} disabled={formIsLoading} />
+              <Spacer size="0.5rem" />
+              <Text size="0.875rem" color="var(--fgMuted)">
+                Sets which spell rules, such as areas and sizes, apply to this game session
+              </Text>
               <Spacer />
               <Hr />
               <Spacer />

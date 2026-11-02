@@ -1,4 +1,5 @@
-import { AoeShape, type AoeTemplate } from '../components/AoeTemplateLayer/types';
+import { AoeShape, type AoeTemplate, type SpellAimSettings } from '../components/AoeTemplateLayer/types';
+import { INSTANT_FADE_MS, resolveSpellAnyRuleset } from './spells';
 
 export interface TemplatePoint {
   x: number;
@@ -15,6 +16,7 @@ export interface TemplateBounds {
 export const TEMPLATE_FEATHER_FT = 2.5;
 export const TEMPLATE_SNAP_FT = 5;
 export const TEMPLATE_MIN_SIZE_FT = 5;
+export const EXPIRY_FADE_MS = 5000;
 const ANGLE_SNAP_DEG = 45;
 const SQUARE_ANGLE_SNAP_DEG = 90;
 const OUTLINE_SEGMENTS = 48;
@@ -244,7 +246,7 @@ export const rotateTemplateAngle = (shape: AoeShape, angleDeg: number, deltaDeg:
 
 export const formatTemplateLabel = (template: AoeTemplate, includeDimensions = true): string => {
   const label = template.label?.trim();
-  if (!includeDimensions) return label ?? '';
+  if (!includeDimensions || template.spellId) return label ?? '';
   const dimensions =
     template.shape === AoeShape.Line
       ? `${template.size} × ${template.width} ft line`
@@ -261,3 +263,123 @@ export const templateSeed = (id: string): number => {
   }
   return (hash >>> 0) / 4294967296;
 };
+
+export interface AnchorMarker {
+  id: string;
+  position: TemplatePoint;
+}
+
+/** The marker an anchored template follows, when it is on the scene */
+const findAnchorMarker = (template: Pick<AoeTemplate, 'anchorMarkerId'>, markers: readonly AnchorMarker[]) =>
+  template.anchorMarkerId ? markers.find((marker) => marker.id === template.anchorMarkerId) : undefined;
+
+export const isTemplateAnchored = (template: Pick<AoeTemplate, 'anchorMarkerId'>, markers: readonly AnchorMarker[]) =>
+  findAnchorMarker(template, markers) !== undefined;
+
+/** The template at its anchor marker's live position; without the marker it keeps its stored position */
+export const withAnchoredPosition = <T extends Pick<AoeTemplate, 'anchorMarkerId' | 'position'>>(
+  template: T,
+  markers: readonly AnchorMarker[]
+): T => {
+  const marker = findAnchorMarker(template, markers);
+  if (!marker || (marker.position.x === template.position.x && marker.position.y === template.position.y)) {
+    return template;
+  }
+  return { ...template, position: { x: marker.position.x, y: marker.position.y } };
+};
+
+/** Stored positions to write once the moved markers have settled, for templates anchored to them */
+export const anchoredTemplateMoves = (
+  templates: ReadonlyArray<Pick<AoeTemplate, 'id' | 'anchorMarkerId' | 'position'>>,
+  markers: readonly AnchorMarker[],
+  movedMarkerIds: readonly string[]
+): Array<{ id: string; position: TemplatePoint }> =>
+  templates.flatMap((template) => {
+    if (!template.anchorMarkerId || !movedMarkerIds.includes(template.anchorMarkerId)) return [];
+    const anchored = withAnchoredPosition(template, markers);
+    return anchored === template ? [] : [{ id: template.id, position: anchored.position }];
+  });
+
+/** How long a template fades before it expires: an instant spell's own fade, else the default */
+export const templateFadeMs = (template: Pick<AoeTemplate, 'spellId'>): number => {
+  const spell = template.spellId ? resolveSpellAnyRuleset(template.spellId) : null;
+  return spell && !spell.resolved.lingers ? INSTANT_FADE_MS : EXPIRY_FADE_MS;
+};
+
+/** 1 until the last `fadeMs`, then fading linearly to 0 at `expiresAt` (epoch ms) */
+export const templateExpiryFade = (
+  expiresAt: number | null | undefined,
+  nowMs: number,
+  fadeMs = EXPIRY_FADE_MS
+): number => (expiresAt == null ? 1 : clamp01((expiresAt - nowMs) / fadeMs));
+
+export const isTemplateExpired = (expiresAt: number | null | undefined, nowMs: number): boolean =>
+  expiresAt != null && nowMs >= expiresAt;
+
+export interface SpellAimPlacement {
+  position: TemplatePoint;
+  angle: number;
+}
+
+export interface SpellAimPointer {
+  /** Layer-local px, already snapped to the grid when the tool snaps */
+  pointer: TemplatePoint;
+  /** Direction aim without a fixed origin: where the first press landed */
+  start?: TemplatePoint | null;
+  ftPerPx: number;
+  cellPx: number;
+  snapAngle: boolean;
+}
+
+/**
+ * Where an aimed spell's template sits for a pointer position. A point aim centres cubes on the pointer;
+ * a direction aim starts at the fixed origin (pushed out to the caster's edge) or at the first press,
+ * and the pointer only sets the angle.
+ */
+export const spellAimPlacement = (
+  spell: Pick<SpellAimSettings, 'aim' | 'area' | 'origin' | 'originRadiusCells'>,
+  { pointer, start, ftPerPx, cellPx, snapAngle }: SpellAimPointer
+): SpellAimPlacement => {
+  if (spell.aim === 'point') {
+    const centeringPx = spell.area.shape === AoeShape.Square ? spell.area.size / 2 / ftPerPx : 0;
+    return { position: { x: pointer.x - centeringPx, y: pointer.y }, angle: 0 };
+  }
+  const base = spell.origin ?? start ?? pointer;
+  const angle = angleFromCursor(base, pointer, spell.area.shape, snapAngle);
+  if (!spell.origin) return { position: { ...base }, angle };
+  const insetPx = (spell.originRadiusCells ?? 0) * cellPx;
+  const radians = toRadians(angle);
+  return { position: { x: base.x + Math.cos(radians) * insetPx, y: base.y + Math.sin(radians) * insetPx }, angle };
+};
+
+/** The pointer position a point aim was placed from (cubes are centred on it), so a drag can keep the grab offset */
+export const spellAimPointer = (
+  spell: Pick<SpellAimSettings, 'aim' | 'area'>,
+  placement: SpellAimPlacement,
+  ftPerPx: number
+): TemplatePoint => {
+  const centeringPx = spell.aim === 'point' && spell.area.shape === AoeShape.Square ? spell.area.size / 2 / ftPerPx : 0;
+  return { x: placement.position.x + centeringPx, y: placement.position.y };
+};
+
+/** The draft template shown while aiming: the preset's shape, size and effect at the placement */
+export const spellAimDraft = (
+  spell: SpellAimSettings,
+  placement: SpellAimPlacement,
+  base: Pick<AoeTemplate, 'id' | 'opacity' | 'visibility'>
+): AoeTemplate => ({
+  ...base,
+  shape: spell.area.shape,
+  size: spell.area.size,
+  width: spell.area.width ?? TEMPLATE_MIN_SIZE_FT,
+  effect: spell.effect,
+  color: spell.color,
+  label: spell.label ?? null,
+  spellId: spell.spellId,
+  position: placement.position,
+  angle: placement.angle
+});
+
+/** Radius in layer px of the dashed range ring around the caster; 0 when the spell has no range to show */
+export const spellRangeRadiusPx = (spell: Pick<SpellAimSettings, 'rangeFt' | 'caster'>, ftPerPx: number): number =>
+  spell.caster && spell.rangeFt ? spell.rangeFt / ftPerPx : 0;

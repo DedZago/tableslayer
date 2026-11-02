@@ -4,7 +4,7 @@
 // server without dragging in drizzle/zod. Field names must match the DB columns 1:1 —
 // the server persister copies them straight into upserts.
 
-import type { AoeTemplate, MarkerCondition } from '@tableslayer/stage';
+import type { AoeTemplate, MarkerConcentration, MarkerCondition, Ruleset } from '@tableslayer/stage';
 import type { StatBlock } from '../utils/statBlock/types';
 
 export interface SceneSettings {
@@ -102,6 +102,8 @@ export interface MarkerRow {
   note: unknown;
   pinnedTooltip: boolean;
   conditions?: MarkerCondition[] | null;
+  /** The spell this token's caster concentrates on and the rows that end with it; optional so older rooms parse */
+  concentration?: MarkerConcentration | null;
   statBlock?: StatBlock | null;
   hitPoints?: number | null;
   tempHitPoints?: number | null;
@@ -162,6 +164,10 @@ export interface AoeTemplateRow {
   anchorMarkerId: string | null;
   /** Rows sharing a group move together; optional until every doc carries it */
   groupId?: string | null;
+  /** Catalog id of the spell that created the template; optional until every doc carries it */
+  spellId?: string | null;
+  /** Unix seconds; the template fades out and is swept at this time. Null/absent = stays until removed */
+  expiresAt?: number | null;
   /** Unix seconds, like the DB column; used for stable ordering */
   createdAt: number;
 }
@@ -202,6 +208,7 @@ export interface PartyState {
 
 /** Everything needed to build a session doc from the database. */
 export interface GameSessionHydrationData {
+  ruleset?: Ruleset;
   scenes: Array<{
     settings: SceneSettings;
     markers: MarkerRow[];

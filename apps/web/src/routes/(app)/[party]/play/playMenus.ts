@@ -10,6 +10,7 @@ import {
 } from '$lib/utils/assetGroups';
 import { CONDITION_CATEGORY_ICONS, conditionIcon } from '$lib/utils/conditionIcons';
 import { conditionPickerState } from '$lib/utils/markerConditionPicker';
+import { spellMenuItem, type SpellMenuState } from '$lib/utils/spellMenus';
 import {
   IconArrowBackUp,
   IconArrowForwardUp,
@@ -31,6 +32,7 @@ import {
   IconPencil,
   IconPin,
   IconPinnedOff,
+  IconPlayerStop,
   IconPlus,
   IconRectangleVertical,
   IconRuler,
@@ -86,6 +88,10 @@ export const MENU_ID = {
   groupWith: 'group-with',
   distanceFrom: 'distance-from',
   pin: 'pin',
+  endConcentration: 'end-concentration',
+  spellEffects: 'spell-effects',
+  removeSpellEffect: 'remove-spell-effect:',
+  dismissSpell: 'dismiss-spell',
   aoeEffect: 'aoe-effect:',
   aoeOpacity: 'aoe-opacity:',
   aoeDelete: 'aoe-delete'
@@ -94,24 +100,39 @@ export const MENU_ID = {
 const AOE_DAMAGE_EFFECTS = [
   AoeEffect.Fire,
   AoeEffect.Lightning,
+  AoeEffect.Thunder,
   AoeEffect.Frost,
   AoeEffect.Acid,
   AoeEffect.Radiant,
   AoeEffect.Necrotic,
-  AoeEffect.Force,
-  AoeEffect.PoisonGas
+  AoeEffect.Force
 ];
 const AOE_TERRAIN_EFFECTS = [
   AoeEffect.None,
   AoeEffect.Thorns,
   AoeEffect.Mud,
-  AoeEffect.Darkness,
-  AoeEffect.FogCloud,
   AoeEffect.Web,
   AoeEffect.Grease,
   AoeEffect.Water,
-  AoeEffect.SleetStorm,
-  AoeEffect.InsectSwarm
+  AoeEffect.Entangle,
+  AoeEffect.SpikeGrowth
+];
+const AOE_OBSCURING_EFFECTS = [
+  AoeEffect.PoisonGas,
+  AoeEffect.Darkness,
+  AoeEffect.FogCloud,
+  AoeEffect.Silence,
+  AoeEffect.HungerOfHadar,
+  AoeEffect.InsectSwarm,
+  AoeEffect.SleetStorm
+];
+const AOE_MAGIC_EFFECTS = [
+  AoeEffect.HypnoticPattern,
+  AoeEffect.FaerieFire,
+  AoeEffect.Sleep,
+  AoeEffect.SpiritGuardians,
+  AoeEffect.Moonbeam,
+  AoeEffect.CloudOfDaggers
 ];
 
 const AOE_SHAPES = [
@@ -324,6 +345,7 @@ export type GeneralMenuState = {
   selectionCount: number;
   /** Player drawings in the scene, which the eraser and Clear drawings work on */
   playerDrawingCount: number;
+  spells: SpellMenuState;
 };
 
 const EFFECT_CATEGORY_ICONS: Record<AnnotationEffectCategory, IconComponent> = {
@@ -450,6 +472,7 @@ export const generalMenu = (state: GeneralMenuState): RadialMenuItemProps[] => {
         icon
       }))
     },
+    spellMenuItem(state.spells),
     drawItem(state.playerDrawingCount),
     {
       id: MENU_ID.select,
@@ -489,6 +512,14 @@ export type TokenMenuState = {
   customSuggestions: MarkerCondition[];
   groupItems: RadialMenuItemProps[];
   selectionCount: number;
+  /** The pressed token is the caster of a spell cast from here, when it is the only one */
+  spells: SpellMenuState;
+  /** Name of the spell the single pressed token is concentrating on, when it is */
+  concentratingOn?: string | null;
+  /** Effects of other spells bound to the single pressed token, each removable */
+  spellEffects?: ReadonlyArray<{ templateId: string; spellName: string }>;
+  /** Name of the spell that conjured the single pressed token, when it is a summon */
+  summonedBy?: string | null;
 };
 
 export const tokenMenu = (state: TokenMenuState): RadialMenuItemProps[] => {
@@ -496,6 +527,46 @@ export const tokenMenu = (state: TokenMenuState): RadialMenuItemProps[] => {
   if (state.markers.length === 1) {
     const [marker] = state.markers;
     items.push(
+      spellMenuItem({ ...state.spells, hasCaster: true }),
+      ...(state.concentratingOn
+        ? [
+            {
+              id: MENU_ID.endConcentration,
+              label: 'End concentration',
+              hint: `Stop concentrating on ${state.concentratingOn}`,
+              icon: IconPlayerStop,
+              danger: true
+            }
+          ]
+        : []),
+      ...(state.spellEffects?.length
+        ? [
+            {
+              id: MENU_ID.spellEffects,
+              label: 'Spell effects',
+              hint: `Remove a spell from ${marker.title || 'this token'}`,
+              icon: IconSparkles,
+              submenu: state.spellEffects.map(({ templateId, spellName }) => ({
+                id: `${MENU_ID.removeSpellEffect}${templateId}`,
+                label: spellName,
+                hint: `Remove ${spellName} from ${marker.title || 'this token'}`,
+                icon: IconTrash,
+                danger: true
+              }))
+            }
+          ]
+        : []),
+      ...(state.summonedBy
+        ? [
+            {
+              id: MENU_ID.dismissSpell,
+              label: `Dismiss ${state.summonedBy}`,
+              hint: `Remove ${marker.title || 'this token'} from the map`,
+              icon: IconTrash,
+              danger: true
+            }
+          ]
+        : []),
       {
         id: MENU_ID.distanceFrom,
         label: 'Distance',
@@ -517,6 +588,8 @@ export const tokenMenu = (state: TokenMenuState): RadialMenuItemProps[] => {
 
 export type AoeMenuState = {
   count: number;
+  /** The spell a single selected area belongs to: deleting it ends the spell */
+  spellName?: string | null;
   /** Undefined when the selected shapes differ */
   effect: AoeEffect | undefined;
   opacity: number | undefined;
@@ -551,9 +624,23 @@ export const aoeMenu = (state: AoeMenuState): RadialMenuItemProps[] => {
         {
           id: 'aoe-effect-terrain',
           label: 'Terrain',
-          hint: 'Darkness, fog, web, mud…',
+          hint: 'Web, mud, thorns, vines…',
           icon: IconMountain,
           submenu: AOE_TERRAIN_EFFECTS.map((effect) => aoeEffectItem(effect, state.effect))
+        },
+        {
+          id: 'aoe-effect-obscuring',
+          label: 'Obscuring',
+          hint: 'Darkness, fog, gas, silence…',
+          icon: IconCloud,
+          submenu: AOE_OBSCURING_EFFECTS.map((effect) => aoeEffectItem(effect, state.effect))
+        },
+        {
+          id: 'aoe-effect-magic',
+          label: 'Magic',
+          hint: 'Patterns, sleep, moonlight…',
+          icon: IconSparkles,
+          submenu: AOE_MAGIC_EFFECTS.map((effect) => aoeEffectItem(effect, state.effect))
         }
       ]
     },
@@ -572,6 +659,14 @@ export const aoeMenu = (state: AoeMenuState): RadialMenuItemProps[] => {
       }))
     },
     ...state.groupItems,
-    { id: MENU_ID.aoeDelete, label: 'Delete', hint: `Remove ${shapes}`, icon: IconTrash, danger: true }
+    state.spellName
+      ? {
+          id: MENU_ID.aoeDelete,
+          label: `End ${state.spellName}`,
+          hint: `End ${state.spellName} and remove its area`,
+          icon: IconTrash,
+          danger: true
+        }
+      : { id: MENU_ID.aoeDelete, label: 'Delete', hint: `Remove ${shapes}`, icon: IconTrash, danger: true }
   ];
 };

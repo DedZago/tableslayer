@@ -1,5 +1,12 @@
 import type { StagePerformanceSetting } from '$lib/stores/stagePerformance.svelte';
-import type { HoveredMarker } from '@tableslayer/stage';
+import {
+  pruneSpellCasts,
+  receiveSpellCast,
+  SPELL_CAST_LINK_GRACE_MS,
+  type BroadcastSpellCast,
+  type HoveredMarker,
+  type SpellCast
+} from '@tableslayer/stage';
 import type YPartyKitProvider from 'y-partykit/provider';
 
 type Awareness = YPartyKitProvider['awareness'];
@@ -64,16 +71,30 @@ export class PresenceChannel {
   hoveredMarker = $state<HoveredMarker | null>(null);
   pinnedMarkers = $state<string[]>([]);
   stagePerformance = $state<StagePerformanceSetting | null>(null);
+  /** Another awake editor is connected; the TV leaves shared cleanup (expired templates) to it */
+  editorPresent = $state(false);
+  /** Spell animations playing on this screen; `startedAt` is the local clock, never a remote one */
+  activeCasts = $state<SpellCast[]>([]);
 
   #awareness: Awareness;
   #userId: string;
+  #isEditor: boolean;
   #heartbeat: ReturnType<typeof setInterval> | null = null;
+  #castSceneId: string | null = null;
+  #seenCastIds = new Map<number, string>();
+  #castTimers = new Set<ReturnType<typeof setTimeout>>();
 
-  constructor(awareness: Awareness, userId: string) {
+  constructor(awareness: Awareness, userId: string, { isEditor = false }: { isEditor?: boolean } = {}) {
     this.#awareness = awareness;
     this.#userId = userId;
+    this.#isEditor = isEditor;
     this.#awareness.on('change', this.#readStates);
+    this.#announceEditor();
     this.#startHeartbeat();
+  }
+
+  #announceEditor() {
+    if (this.#isEditor) this.#awareness.setLocalStateField('editor', true);
   }
 
   #startHeartbeat() {
@@ -88,19 +109,21 @@ export class PresenceChannel {
 
   /**
    * Pause before the provider disconnects: stop the heartbeat and clear every
-   * ephemeral field so a stale cursor cannot reappear on peers when the provider
+   * ephemeral field (including the editor flag: a sleeping editor sweeps nothing) so a stale cursor cannot reappear on peers when the provider
    * re-sends local state on reconnect. Keeps `stagePerformance` (the playfield
    * mirrors it) and never sets a null state — y-protocols makes
    * setLocalStateField a no-op on null, which would silently break cursors after wake.
    */
   suspend() {
     this.#stopHeartbeat();
+    this.#clearCasts();
     const stagePerformance = this.#awareness.getLocalState()?.stagePerformance;
     this.#awareness.setLocalState(stagePerformance ? { stagePerformance } : {});
   }
 
   resume() {
     this.#startHeartbeat();
+    this.#announceEditor();
   }
 
   #readStates = () => {
@@ -109,8 +132,10 @@ export class PresenceChannel {
     let hoveredMarker: HoveredMarker | null = null;
     let pinnedMarkers: string[] = [];
     let stagePerformance: StagePerformanceSetting | null = null;
+    let editorPresent = false;
 
     this.#awareness.getStates().forEach((state, clientId) => {
+      if (state.editor && clientId !== this.#awareness.clientID) editorPresent = true;
       if (state.cursor && clientId !== this.#awareness.clientID) {
         cursors[`${state.cursor.userId}_${clientId}`] = { ...state.cursor, clientId };
       }
@@ -128,11 +153,13 @@ export class PresenceChannel {
       }
     });
 
+    this.#readCasts();
     this.cursors = cursors;
     this.measurements = measurements;
     this.hoveredMarker = hoveredMarker;
     this.pinnedMarkers = pinnedMarkers;
     this.stagePerformance = stagePerformance;
+    this.editorPresent = editorPresent;
   };
 
   #refresh() {
@@ -182,6 +209,75 @@ export class PresenceChannel {
     });
   }
 
+  /** The scene this screen shows; casts from other scenes are ignored */
+  setCastScene(sceneId: string | null) {
+    this.#castSceneId = sceneId;
+  }
+
+  /**
+   * Plays a cast here and on every other client showing the same scene. The awareness field is
+   * cleared after the cast so a reconnecting peer cannot replay it; nothing is persisted.
+   */
+  castSpell(cast: Omit<SpellCast, 'startedAt'> & { sceneId: string }) {
+    const broadcast: BroadcastSpellCast = cast;
+    this.#awareness.setLocalStateField('spellCast', broadcast);
+    this.#appendCast(broadcast);
+    const timer = setTimeout(() => {
+      this.#castTimers.delete(timer);
+      if (this.#awareness.getLocalState()?.spellCast?.id === cast.id) {
+        this.#awareness.setLocalStateField('spellCast', null);
+      }
+    }, cast.durationMs);
+    this.#castTimers.add(timer);
+  }
+
+  #appendCast(broadcast: BroadcastSpellCast) {
+    const next = receiveSpellCast(this.activeCasts, new Map(), 0, broadcast, this.#castSceneId, performance.now());
+    if (next === this.activeCasts) return;
+    this.activeCasts = [...next];
+    this.#schedulePrune(broadcast.durationMs);
+  }
+
+  #readCasts() {
+    const localId = this.#awareness.clientID;
+    this.#awareness.getStates().forEach((state, clientId) => {
+      if (clientId === localId) return;
+      const next = receiveSpellCast(
+        this.activeCasts,
+        this.#seenCastIds,
+        clientId,
+        state.spellCast as BroadcastSpellCast | null | undefined,
+        this.#castSceneId,
+        performance.now()
+      );
+      if (next === this.activeCasts) return;
+      this.activeCasts = [...next];
+      this.#schedulePrune(this.activeCasts[this.activeCasts.length - 1].durationMs);
+    });
+    this.#seenCastIds.forEach((_id, clientId) => {
+      if (!this.#awareness.getStates().has(clientId)) this.#seenCastIds.delete(clientId);
+    });
+  }
+
+  #schedulePrune(afterMs: number) {
+    const timer = setTimeout(
+      () => {
+        this.#castTimers.delete(timer);
+        const alive = pruneSpellCasts(this.activeCasts, performance.now());
+        if (alive !== this.activeCasts) this.activeCasts = [...alive];
+      },
+      afterMs + SPELL_CAST_LINK_GRACE_MS + 50
+    );
+    this.#castTimers.add(timer);
+  }
+
+  #clearCasts() {
+    this.#castTimers.forEach(clearTimeout);
+    this.#castTimers.clear();
+    this.#seenCastIds.clear();
+    this.activeCasts = [];
+  }
+
   updateHoveredMarker(marker: HoveredMarker | null) {
     this.#awareness.setLocalStateField('hoveredMarker', marker);
   }
@@ -201,6 +297,7 @@ export class PresenceChannel {
 
   destroy() {
     this.#stopHeartbeat();
+    this.#clearCasts();
     this.#awareness.off('change', this.#readStates);
   }
 }

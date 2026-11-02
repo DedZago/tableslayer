@@ -24,7 +24,9 @@ const sceneWireSchema = z.object({
   markers: z.array(insertMarkerSchema),
   lights: z.array(insertLightSchema),
   // Wire timestamps are Unix seconds (the doc form); the server converts them back to Dates
-  aoeTemplates: z.array(insertAoeTemplateSchema.extend({ createdAt: z.number().int() })).default([]),
+  aoeTemplates: z
+    .array(insertAoeTemplateSchema.extend({ createdAt: z.number().int(), expiresAt: z.number().int().nullish() }))
+    .default([]),
   annotations: z.array(insertAnnotationSchema),
   fogMask: z.string().nullable().optional(),
   parts: z.array(z.enum(['settings', 'markers', 'lights', 'aoeTemplates', 'annotations', 'fogMask']))

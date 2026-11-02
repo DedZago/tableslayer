@@ -19,7 +19,18 @@ export const AOE_EFFECT_ORDER: AoeEffect[] = [
   AoeEffect.Water,
   AoeEffect.SleetStorm,
   AoeEffect.InsectSwarm,
-  AoeEffect.Acid
+  AoeEffect.Acid,
+  AoeEffect.Thunder,
+  AoeEffect.Silence,
+  AoeEffect.HypnoticPattern,
+  AoeEffect.FaerieFire,
+  AoeEffect.Sleep,
+  AoeEffect.SpiritGuardians,
+  AoeEffect.Moonbeam,
+  AoeEffect.CloudOfDaggers,
+  AoeEffect.HungerOfHadar,
+  AoeEffect.Entangle,
+  AoeEffect.SpikeGrowth
 ];
 
 // Static CSS previews for the effect picker. Live WebGL previews would each cost a GL context.
@@ -41,5 +52,17 @@ export const AOE_EFFECT_SWATCHES: Record<AoeEffect, string> = {
   [AoeEffect.Water]: 'linear-gradient(135deg, #0a4a57, #1ea3a8 60%, #9fe8e6)',
   [AoeEffect.SleetStorm]: 'linear-gradient(135deg, #6f7a85, #c6d3dd 60%, #ffffff)',
   [AoeEffect.InsectSwarm]: 'linear-gradient(135deg, #2a1d10, #6b4a22 60%, #9b7a45)',
-  [AoeEffect.Acid]: 'linear-gradient(135deg, #3d4a00, #b6dc1e 60%, #f2ff7a)'
+  [AoeEffect.Acid]: 'linear-gradient(135deg, #3d4a00, #b6dc1e 60%, #f2ff7a)',
+  [AoeEffect.Thunder]: 'repeating-radial-gradient(circle at 50% 50%, #5b6a99 0 3px, #dfe6ff 3px 5px, #8d9bc7 5px 9px)',
+  [AoeEffect.Silence]: 'linear-gradient(135deg, #2a3040, #5d6b88 60%, #aab6cc)',
+  [AoeEffect.HypnoticPattern]: 'conic-gradient(from 0deg, #ff5ec8, #7a5cff, #3fe0d0, #ffe45e, #ff5ec8)',
+  [AoeEffect.FaerieFire]:
+    'radial-gradient(circle at 30% 35%, #ffffff 0 3px, transparent 4px), radial-gradient(circle at 70% 65%, #f0abfc 0 3px, transparent 4px), linear-gradient(135deg, #0f3d2a, #43e08a 70%, #b9ffd9)',
+  [AoeEffect.Sleep]: 'linear-gradient(135deg, #1a1f55, #5b6ad0 60%, #c4cbff)',
+  [AoeEffect.SpiritGuardians]: 'conic-gradient(from 90deg, #9fd0ff, #ffffff, #fde68a, #9fd0ff)',
+  [AoeEffect.Moonbeam]: 'radial-gradient(circle, #ffffff, #c7d2fe 45%, #3a3f6b)',
+  [AoeEffect.CloudOfDaggers]: 'repeating-linear-gradient(60deg, #3b4350 0 4px, #e6ecf3 4px 6px, #7b8794 6px 10px)',
+  [AoeEffect.HungerOfHadar]: 'radial-gradient(circle, #000000 30%, #231744 62%, #7dd3fc)',
+  [AoeEffect.Entangle]: 'repeating-linear-gradient(135deg, #17300e 0 5px, #4d9a3a 5px 8px, #2b5a1e 8px 12px)',
+  [AoeEffect.SpikeGrowth]: 'repeating-linear-gradient(45deg, #3a2d1c 0 4px, #d8c88a 4px 6px, #6e5a34 6px 10px)'
 };

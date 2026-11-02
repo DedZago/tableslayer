@@ -12,6 +12,7 @@ import {
 } from '$lib/db/app/schema';
 import { aoeTemplateRowFromDb, aoeTemplateRowToDb } from '$lib/realtime/fromDb';
 import type { PartyStateWire, PersistSessionWire, SceneWire, SessionSnapshotWire } from '$lib/realtime/wire';
+import type { Ruleset } from '@tableslayer/stage';
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import { pruneUnavailableAssetLinks } from '../assets/assets';
 
@@ -38,6 +39,11 @@ const sceneRowToWire = (
 };
 
 export const buildSessionSnapshot = async (gameSessionId: string): Promise<SessionSnapshotWire> => {
+  const gameSession = await db
+    .select({ ruleset: gameSessionTable.ruleset })
+    .from(gameSessionTable)
+    .where(eq(gameSessionTable.id, gameSessionId))
+    .get();
   const scenes = await db.select().from(sceneTable).where(eq(sceneTable.gameSessionId, gameSessionId)).all();
   const sceneIds = scenes.map((scene) => scene.id);
 
@@ -53,6 +59,7 @@ export const buildSessionSnapshot = async (gameSessionId: string): Promise<Sessi
 
   return {
     gameSessionId,
+    ruleset: gameSession?.ruleset,
     scenes: scenes.map((scene) =>
       sceneRowToWire(
         scene,
@@ -139,10 +146,9 @@ export const applyPartyStatePersist = async (partyId: string, state: PartyStateW
     .where(eq(partyTable.id, partyId));
 };
 
-// After writing realtime-owned state to the DB directly (import, admin tools),
-// tell the live room to rebuild from the database. Best-effort: if the room
-// isn't running, the next connection hydrates from the DB anyway.
-const requestRoomResync = async (party: 'party' | 'game_session', roomId: string) => {
+// Best-effort POST to a live PartyKit room; if the room isn't running, the next connection
+// hydrates from the DB anyway.
+const postToRoom = async (party: 'party' | 'game_session', roomId: string, body: Record<string, unknown>) => {
   const host = process.env.PUBLIC_PARTYKIT_HOST || 'localhost:1999';
   const protocol = host.startsWith('localhost') || host.startsWith('127.') ? 'http' : 'https';
   const baseUrl = process.env.PARTYKIT_INTERNAL_URL || `${protocol}://${host}`;
@@ -151,15 +157,22 @@ const requestRoomResync = async (party: 'party' | 'game_session', roomId: string
     await fetch(`${baseUrl}/parties/${party}/${roomId}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-internal-token': token },
-      body: JSON.stringify({ type: 'resync' }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(3000)
     });
   } catch (error) {
-    console.warn(`room resync failed for ${party}/${roomId}`, error);
+    console.warn(`room request ${String(body.type)} failed for ${party}/${roomId}`, error);
   }
 };
 
+// After writing realtime-owned state to the DB directly (import, admin tools),
+// tell the live room to rebuild from the database.
+const requestRoomResync = (party: 'party' | 'game_session', roomId: string) =>
+  postToRoom(party, roomId, { type: 'resync' });
+
 export const requestPartyRoomResync = (partyId: string) => requestRoomResync('party', partyId);
 export const requestGameSessionRoomResync = (gameSessionId: string) => requestRoomResync('game_session', gameSessionId);
+export const requestGameSessionRulesetSync = (gameSessionId: string, ruleset: Ruleset) =>
+  postToRoom('game_session', gameSessionId, { type: 'setRuleset', ruleset });
 
 export * from './activity';

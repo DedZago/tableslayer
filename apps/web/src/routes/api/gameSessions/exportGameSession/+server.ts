@@ -96,6 +96,7 @@ export const POST = async ({ request, locals }: RequestEvent) => {
       },
       gameSession: {
         name: gameSession.name,
+        ruleset: gameSession.ruleset,
         scenes: scenesWithMarkers
       }
     };

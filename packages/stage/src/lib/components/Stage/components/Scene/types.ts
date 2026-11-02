@@ -28,7 +28,10 @@ export enum SceneLayerOrder {
   EffectAnnotation = 35, // Effect annotations render under fog of war
   AoeTemplate = 35.5, // Spell area fills render above painted effects and below tokens
   Light = 36, // Lights render under markers and fog of war
+  SpellCast = 36.5, // Transient cast animations render above lights and below markers
+  TokenEffectUnder = 36.8, // Glows, orbits and hazes sit just under the token
   Marker = 37, // Markers render above effect annotations but below fog of war
+  TokenEffectOver = 37.3, // Chains, sigils, charms, rifts, wards and the concentration seal wrap over the token but under badges and rings
   FogOfWar = 40,
   Grid = 50,
   EdgeOverlay = 70,
@@ -63,6 +66,7 @@ export interface SceneLayerProps {
 import type { AoeTemplateLayerExports } from '../AoeTemplateLayer/types';
 import type { Light } from '../LightLayer/types';
 import type { Marker } from '../MarkerLayer/types';
+import type { SpellPrewarmExports } from '../SpellCastLayer/types';
 
 export interface SceneExports {
   fill: () => void;
@@ -70,6 +74,7 @@ export interface SceneExports {
   generateThumbnail: () => Promise<Blob>;
   getMarkerScreenPosition: (marker: Marker) => { x: number; y: number } | null;
   aoeTemplates?: AoeTemplateLayerExports;
+  spells?: SpellPrewarmExports;
 
   annotations: {
     clear: (layerId: string) => void;

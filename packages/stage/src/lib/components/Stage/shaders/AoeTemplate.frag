@@ -8,6 +8,7 @@ uniform float uTime;
 uniform float uSeed;
 uniform float uSpeed;
 uniform float uOpacity;
+uniform float uFade;
 uniform float uSize;
 uniform float uWidth;
 uniform float uFeather;
@@ -102,19 +103,24 @@ float sdShape(vec2 p) {
   return sdBox(p - vec2(uSize * 0.5, 0.0), vec2(uSize * 0.5, uWidth * 0.5));
 }
 
+#if EFFECT_TYPE == 1 || EFFECT_TYPE == 20 || EFFECT_TYPE == 23 || EFFECT_TYPE == 24 || EFFECT_TYPE == 26
+// Visual centre of the shape in feet, and its inradius there, so radial effects sit inside every shape
+vec2 shapeCenter() {
+  if (uShape == 0) return vec2(0.0);
+  if (uShape == 2) return vec2(uSize * 0.6667, 0.0);
+  return vec2(uSize * 0.5, 0.0);
+}
+
+float shapeRadius() {
+  return max(-sdShape(shapeCenter()), 1.0);
+}
+#endif
+
 #if EFFECT_TYPE == 1
 vec3 fireRamp(float h) {
-  vec3 black = vec3(0.1, 0.0, 0.0);
-  vec3 darkRed = vec3(0.5, 0.05, 0.0);
-  vec3 red = vec3(0.9, 0.15, 0.0);
-  vec3 orange = vec3(1.0, 0.4, 0.05);
-  vec3 yellow = vec3(1.1, 0.85, 0.2);
-  vec3 white = vec3(1.4, 1.2, 0.9);
-  if (h < 0.15) return mix(black, darkRed, h / 0.15);
-  if (h < 0.3) return mix(darkRed, red, (h - 0.15) / 0.15);
-  if (h < 0.5) return mix(red, orange, (h - 0.3) / 0.2);
-  if (h < 0.75) return mix(orange, yellow, (h - 0.5) / 0.25);
-  return mix(yellow, white, (h - 0.75) / 0.25);
+  vec3 col = mix(vec3(0.3, 0.02, 0.0), vec3(0.95, 0.2, 0.0), smoothstep(0.0, 0.4, h));
+  col = mix(col, vec3(1.0, 0.58, 0.06), smoothstep(0.4, 0.78, h));
+  return mix(col, vec3(1.25, 0.95, 0.35), smoothstep(0.8, 1.0, h));
 }
 #endif
 
@@ -123,11 +129,38 @@ vec4 effect(vec2 p, vec2 c, float d, float depth, float inside, float t) {
   return vec4(uColor, 0.35 * inside);
 
 #elif EFFECT_TYPE == 1
-  float n = fbm(c * 1.5 + vec2(0.0, -t * 0.8) + fbm(c * 3.0 + vec2(t)) * 0.6);
-  float h = n * (0.6 + 0.4 * depth) + 0.15 * sin(t * 9.0 + hash12(floor(c * 4.0)) * 6.0);
-  vec3 col = fireRamp(clamp(h, 0.0, 1.0));
-  float a = inside * smoothstep(0.15, 0.35, h) + exp(-max(d, 0.0) * 0.6) * 0.4;
-  return vec4(col, clamp(a, 0.0, 1.0));
+  // Top-down flames: noise zooms outward from the shape centre in two cross-faded phases, warped once, with a soft ember lattice
+  vec2 ctr = shapeCenter() / 5.0;
+  float phase = t * 0.2;
+  float pA = fract(phase);
+  float pB = fract(phase + 0.5);
+  float wA = 1.0 - abs(2.0 * pA - 1.0);
+  vec2 pw = c;
+  float f;
+  if (uPerformanceTier == 2) {
+    f = mix(vnoise(ctr + (pw - ctr) * 1.8 * exp(-pB * 1.2)), vnoise(ctr + (pw - ctr) * 1.8 * exp(-pA * 1.2)), wA);
+  } else {
+    vec2 warp = vec2(vnoise(c * 1.1 + vec2(0.0, t * 0.35)), vnoise(c * 1.1 + vec2(7.3, 3.1) - vec2(t * 0.3, 0.0)));
+    pw = c + (warp - 0.5) * 0.9;
+    vec2 zoomA = ctr + (pw - ctr) * exp(-pA * 1.2);
+    vec2 zoomB = ctr + (pw - ctr) * exp(-pB * 1.2);
+    float coarse = mix(vnoise(zoomB * 2.2), vnoise(zoomA * 2.2), wA);
+    float fine = mix(vnoise(zoomB * 4.6 + 9.0), vnoise(zoomA * 4.6 + 9.0), wA);
+    f = coarse * 0.65 + fine * 0.35;
+  }
+  f = clamp(0.5 + (f - 0.5) * 1.4, 0.0, 1.0);
+  float h = f * (0.62 + 0.3 * depth) + 0.1 * depth - 0.08;
+  float body = inside * (0.45 + 0.55 * smoothstep(0.08, 0.26, h));
+  float tongue = (1.0 - inside) * (1.0 - smoothstep(0.0, 2.5, max(d, 0.0))) * smoothstep(0.5, 0.8, f);
+  float ember = 0.0;
+  if (uPerformanceTier < 2) {
+    vec2 emberGrid = c * 3.2 + vec2(0.0, -t * 0.6);
+    vec2 emberCell = floor(emberGrid);
+    float emberDist = length(fract(emberGrid) - (0.2 + 0.6 * hash22(emberCell)));
+    ember = step(0.88, hash12(emberCell)) * (1.0 - smoothstep(0.02, 0.1, emberDist));
+  }
+  vec3 col = fireRamp(clamp(h + tongue * 0.3, 0.0, 1.0)) + vec3(1.2, 0.7, 0.2) * ember;
+  return vec4(col, clamp(body + tongue * 0.7 + ember * 0.8, 0.0, 1.0));
 
 #elif EFFECT_TYPE == 2
   vec2 v = voronoi(c * 1.2, floor(t * 12.0));
@@ -258,6 +291,135 @@ vec4 effect(vec2 p, vec2 c, float d, float depth, float inside, float t) {
   vec3 col = vec3(0.25, 0.16, 0.06) + vec3(0.1) * swarm;
   return vec4(col, clamp(inside * (0.45 + haze) + swarm * inside * 0.6, 0.0, 1.0));
 
+#elif EFFECT_TYPE == 18
+  float phase = -d * 0.12 + t * 0.7;
+  float front = pow(1.0 - abs(fract(phase) * 2.0 - 1.0), 6.0);
+  float dust = vnoise(c * 2.0 - vec2(t * 0.4, 0.0));
+  vec3 col = mix(uColor * 0.6, vec3(1.3, 1.35, 1.55), front) + dust * 0.1;
+  return vec4(col, inside * (0.22 + 0.55 * front + 0.2 * dust));
+
+#elif EFFECT_TYPE == 19
+  vec2 cell = floor(c * 0.6);
+  vec2 local = fract(c * 0.6) - 0.5;
+  float h = hash12(cell);
+  float life = fract(t * 0.12 + h);
+  float echo = abs(length(local - (hash22(cell) - 0.5) * 0.3) - life * 0.45);
+  float ripple = (1.0 - smoothstep(0.0, 0.025, echo)) * (1.0 - life);
+  float hush = vnoise(c * 0.7 + vec2(t * 0.03));
+  vec3 col = vec3(0.3, 0.35, 0.45) * (0.7 + 0.5 * hush) + vec3(0.35, 0.4, 0.5) * ripple;
+  return vec4(col, inside * (0.4 + 0.3 * ripple));
+
+#elif EFFECT_TYPE == 20
+  vec2 q = p - shapeCenter();
+  float r = length(q) / shapeRadius();
+  float s = atan(q.y, q.x) * 0.4774648 + r * 1.2 - t * 0.35;
+  float arm = 0.5 + 0.5 * sin(6.2831853 * s);
+  vec3 hue = 0.5 + 0.5 * cos(6.2831853 * (s * 0.5 + r * 0.3 + vec3(0.0, 0.33, 0.67)));
+  float glow = 0.35 + 0.65 * smoothstep(0.2, 0.9, arm);
+  return vec4(hue * (0.5 + 0.7 * glow), inside * (0.3 + 0.45 * glow));
+
+#elif EFFECT_TYPE == 21
+  vec2 grid = c * 1.6;
+  vec2 cell = floor(grid);
+  float h = hash12(cell);
+  vec2 center = 0.5 + 0.3 * sin(t * 0.5 + 6.2831853 * hash22(cell));
+  float dist = length(fract(grid) - center);
+  float pulse = 0.55 + 0.45 * sin(t * 2.0 + h * 6.2831853);
+  float mote = exp(-dist * dist * 90.0) * pulse;
+  vec3 tint = 0.5 + 0.5 * cos(6.2831853 * (h + vec3(0.0, 0.33, 0.67)));
+  float halo = exp(-max(-d, 0.0) * 0.35) * (0.5 + 0.5 * sin(t * 1.3 - d * 0.4));
+  vec3 col = uColor * (0.35 + 0.5 * halo) + tint * mote * 1.6;
+  return vec4(col, clamp(inside * (0.18 + 0.4 * halo) + mote * inside, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 22
+  float haze = vnoise(c * 0.9 + vec2(t * 0.06, -t * 0.04));
+  vec2 riseCoord = c * 3.0 + vec2(sin(c.y * 2.0 + t * 0.4) * 0.3, -t * 0.25);
+  vec2 riseCell = floor(riseCoord);
+  float riseDist = length(fract(riseCoord) - (0.3 + 0.4 * hash22(riseCell)));
+  float mote = step(0.55, hash12(riseCell)) * (1.0 - smoothstep(0.04, 0.12, riseDist));
+  float breath = 0.85 + 0.15 * sin(t * 0.8);
+  vec3 col = mix(vec3(0.12, 0.14, 0.4), vec3(0.4, 0.45, 0.95), haze) * breath + vec3(0.7, 0.75, 1.3) * mote;
+  return vec4(col, inside * (0.45 + 0.2 * haze) + mote * inside * 0.5);
+
+#elif EFFECT_TYPE == 23
+  vec2 q = p - shapeCenter();
+  float radius = shapeRadius();
+  float r = length(q) / radius;
+  float a = atan(q.y, q.x);
+  float lane = 0.6 + 0.08 * sin(a * 3.0 + t);
+  float laneOffset = (r - lane) / 0.14;
+  float band = exp(-laneOffset * laneOffset);
+  float ph = fract(a * 0.9549297 - t * 0.5);
+  float comet = pow(ph, 5.0) * (1.0 - smoothstep(0.96, 1.0, ph));
+  float turn = t * 0.3 - r * 1.2;
+  vec2 swirlP = mat2(cos(turn), -sin(turn), sin(turn), cos(turn)) * (q / radius) * 3.0;
+  float swirl = vnoise(swirlP + 5.0);
+  vec3 col = vec3(0.8, 0.92, 1.3) * (0.4 + 1.2 * comet * band) + uColor * 0.3 * swirl;
+  return vec4(col, clamp(inside * (0.2 + 0.2 * swirl) + comet * band * inside, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 24
+  vec2 q = p - shapeCenter();
+  float radius = shapeRadius();
+  float r = length(q) / radius;
+  float core = exp(-r * r * 2.5);
+  float a = atan(q.y, q.x);
+  float shafts = pow(0.5 + 0.5 * sin(a * 8.0 + t * 0.4 + vnoise(c) * 3.0), 5.0) * (1.0 - r * 0.5);
+  float ring = (1.0 - smoothstep(0.0, 0.08, abs(fract(r * 1.5 - t * 0.15) - 0.5) - 0.42)) * (1.0 - r);
+  float motes = step(0.985, hash12(floor(c * 9.0 + vec2(0.0, t * 0.8)))) * core;
+  vec3 col = vec3(0.75, 0.82, 1.2) * (0.3 + core * 1.3 + shafts * 0.5) + vec3(motes * 1.5) + vec3(0.5, 0.6, 1.0) * ring * 0.3;
+  return vec4(col, clamp(inside * (0.25 + 0.5 * core + 0.25 * shafts + 0.15 * ring) + motes, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 25
+  vec2 grid = c * 2.6 + vec2(sin(t * 0.3 + c.y), cos(t * 0.27 + c.x)) * 0.2;
+  vec2 cell = floor(grid);
+  float h = hash12(cell);
+  vec2 local = fract(grid) - 0.5 - (hash22(cell) - 0.5) * 0.24;
+  float ang = t * (1.2 + h) + h * 6.2831853;
+  vec2 blade = vec2(cos(ang) * local.x + sin(ang) * local.y, -sin(ang) * local.x + cos(ang) * local.y);
+  float dagger = 1.0 - smoothstep(0.0, 0.03, sdBox(blade, vec2(0.2 * (1.0 - 0.6 * smoothstep(0.0, 0.2, blade.x)), 0.03)));
+  float glint = pow(max(sin(ang * 2.0), 0.0), 16.0) * dagger;
+  vec3 col = vec3(0.55, 0.62, 0.72) * (0.6 + 0.5 * h) + vec3(1.4, 1.45, 1.5) * glint;
+  return vec4(col, clamp(inside * (0.14 + 0.85 * dagger), 0.0, 1.0));
+
+#elif EFFECT_TYPE == 26
+  vec2 q = p - shapeCenter();
+  float radius = shapeRadius();
+  float r = length(q) / radius;
+  float a = atan(q.y, q.x) + 2.5 / (r + 0.35) + t * 0.25;
+  vec2 starCoord = vec2(a * 5.0, r * 7.0 + t * 0.5);
+  vec2 starCell = floor(starCoord);
+  float starDist = length(fract(starCoord) - (0.25 + 0.5 * hash22(starCell)));
+  float twinkle = 0.5 + 0.5 * sin(t * 2.5 + hash12(starCell) * 40.0);
+  float star = step(0.82, hash12(starCell + 3.0)) * (1.0 - smoothstep(0.03, 0.14, starDist)) * twinkle;
+  float rim = (1.0 - smoothstep(0.0, 4.5, abs(d + 1.5))) * vnoise(c * 3.0 + vec2(t * 0.25));
+  vec3 col = vec3(0.02, 0.0, 0.05) + vec3(0.7, 0.9, 1.4) * star + vec3(0.35, 0.6, 1.0) * rim * 0.8;
+  return vec4(col, clamp(0.9 * inside + rim * 0.5, 0.0, 1.0));
+
+#elif EFFECT_TYPE == 27
+  vec2 w = c + vec2(sin(c.y * 1.7 + t * 0.4), cos(c.x * 1.3 - t * 0.35)) * 0.45;
+  float lineA = 1.0 - smoothstep(0.0, 0.22, abs(sin((w.x + w.y * 0.5) * 3.2)));
+  float lineB = 1.0 - smoothstep(0.0, 0.22, abs(sin((w.y - w.x * 0.6) * 2.7 + 1.3)));
+  float vines = max(lineA, lineB * 0.85);
+  float leaf = step(0.93, hash12(floor(c * 6.0))) * inside;
+  vec3 ground = mix(vec3(0.06, 0.12, 0.04), vec3(0.1, 0.18, 0.06), vnoise(c * 1.5));
+  vec3 vine = mix(vec3(0.2, 0.42, 0.1), vec3(0.45, 0.72, 0.22), lineA * lineB + 0.3 * sin(t + w.x));
+  return vec4(mix(ground, vine, vines) + vec3(0.1, 0.25, 0.05) * leaf, inside * 0.82);
+
+#elif EFFECT_TYPE == 28
+  vec2 grid = c * 2.2;
+  grid.x += 0.5 * mod(floor(grid.y), 2.0);
+  vec2 cell = floor(grid);
+  vec2 local = fract(grid) - 0.5;
+  float h = hash12(cell);
+  float grow = 0.85 + 0.15 * sin(t * 1.1 + h * 6.2831853);
+  float ang = atan(local.y, local.x);
+  float len = (0.06 + 0.4 * pow(abs(cos(ang * 3.0)), 14.0)) * grow;
+  float spikes = 1.0 - smoothstep(0.0, 0.03, length(local) - len);
+  float lit = 0.5 + 0.5 * sin(ang * 3.0 + 1.0);
+  vec3 ground = mix(vec3(0.16, 0.12, 0.08), vec3(0.24, 0.2, 0.12), vnoise(c * 1.6));
+  vec3 shard = mix(vec3(0.35, 0.28, 0.18), vec3(0.85, 0.78, 0.55), lit * (length(local) / max(len, 0.05)));
+  return vec4(mix(ground, shard, spikes), inside * 0.85);
+
 #endif
   return vec4(uColor, 0.0);
 }
@@ -286,5 +448,5 @@ void main() {
   float rim = 1.0 - smoothstep(0.0, aa * 1.5, abs(d) - 0.12);
   col.rgb = mix(col.rgb, uColor, rim * 0.5);
   col.a = max(col.a, rim * 0.7 * inside + rim * 0.4);
-  gl_FragColor = vec4(col.rgb, clamp(col.a, 0.0, 1.0) * uOpacity);
+  gl_FragColor = vec4(col.rgb, clamp(col.a, 0.0, 1.0) * uOpacity * uFade);
 }

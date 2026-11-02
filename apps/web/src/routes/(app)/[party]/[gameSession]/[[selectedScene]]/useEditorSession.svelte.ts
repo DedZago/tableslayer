@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
 import { SessionDocClient, upgradeSceneCoordinates, type SceneChange } from '$lib/realtime';
 import { devError, devLog } from '$lib/utils/debug';
-import type { StageExports } from '@tableslayer/stage';
+import { DEFAULT_RULESET, type Ruleset, type StageExports } from '@tableslayer/stage';
 
 const THUMBNAIL_IDLE_MS = 10000;
 
@@ -11,6 +11,8 @@ export interface EditorSessionOptions {
   userId: string;
   partykitHost: string;
   selectedSceneId: () => string | undefined;
+  /** The ruleset from the page load, used until (and unless) the doc carries one */
+  loadedRuleset: () => Ruleset | undefined;
   getStage: () => StageExports | undefined;
   /** Uploads a generated thumbnail and returns its versioned location. */
   uploadThumbnail: (blob: Blob, sceneId: string, currentUrl: string | null) => Promise<{ location: string } | null>;
@@ -38,7 +40,8 @@ export class EditorSession {
       partykitHost: options.partykitHost,
       partyId: options.partyId,
       gameSessionId: options.gameSessionId,
-      userId: options.userId
+      userId: options.userId,
+      isEditor: true
     });
     this.#unsubChanges = this.client.onChanges((changes) => this.#handleChanges(changes));
   }
@@ -49,6 +52,11 @@ export class EditorSession {
 
   get ready(): boolean {
     return this.client?.ready ?? false;
+  }
+
+  /** The live ruleset from the doc, else the one loaded with the page */
+  get ruleset(): Ruleset {
+    return this.client?.ruleset ?? this.#options.loadedRuleset() ?? DEFAULT_RULESET;
   }
 
   /**

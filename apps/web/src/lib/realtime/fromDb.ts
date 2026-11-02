@@ -11,13 +11,18 @@ export const sceneRowToSettings = (scene: SelectScene): SceneSettings => {
 
 export const markerRowFromDb = (marker: SelectMarker): MarkerRow => marker;
 export const lightRowFromDb = (light: SelectLight): LightRow => light;
+const toUnixSeconds = (date: Date) => Math.floor(date.getTime() / 1000);
+
 export const aoeTemplateRowFromDb = (template: SelectAoeTemplate): AoeTemplateRow => ({
   ...template,
-  createdAt: Math.floor(template.createdAt.getTime() / 1000)
+  expiresAt: template.expiresAt ? toUnixSeconds(template.expiresAt) : null,
+  createdAt: toUnixSeconds(template.createdAt)
 });
 export const aoeTemplateRowToDb = (template: AoeTemplateRow): SelectAoeTemplate => ({
   ...template,
   groupId: template.groupId ?? null,
+  spellId: template.spellId ?? null,
+  expiresAt: template.expiresAt ? new Date(template.expiresAt * 1000) : null,
   createdAt: new Date(template.createdAt * 1000)
 });
 export const annotationRowFromDb = (annotation: SelectAnnotation): AnnotationRow => {

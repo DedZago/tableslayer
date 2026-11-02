@@ -3,6 +3,7 @@ import { base64ToUint8 } from '$lib/realtime/binary';
 import type { AoeTemplateRow } from '$lib/realtime/types';
 import type { Thumb } from '$lib/server';
 import { generateGradientColors } from '$lib/utils';
+import { liveConcentration } from '$lib/utils/concentration';
 import {
   DEFAULT_MAP,
   generateLargeImageUrl,
@@ -10,6 +11,7 @@ import {
   generateSquareThumbnailUrl,
   isDefaultMap
 } from '$lib/utils/generateR2Url';
+import { buildTokenEffects, concentrationColor } from '$lib/utils/spellCasting';
 import {
   AnnotationEffect,
   type AnnotationLayerData,
@@ -22,6 +24,7 @@ import {
   getDefaultEffectProps,
   GridMode,
   GridType,
+  isEffectOnlyPreset,
   type Light,
   LightPulse,
   LightStyle,
@@ -31,6 +34,7 @@ import {
   MeasurementType,
   parseFogRooms,
   RainPreset,
+  resolveSpellAnyRuleset,
   SceneRotation,
   sortConditions,
   StageMode,
@@ -39,6 +43,18 @@ import {
 } from '@tableslayer/stage';
 
 const BLOODIED_CONDITION: MarkerCondition = { id: 'bloodied' };
+
+// Rows of spells that only decorate a token draw through the TokenEffectLayer, never as an AoE shape. A row with
+// no token to follow is an area saved before the spell became an effect-only one, and still draws as an area
+const isEffectOnlyTemplate = (template: { spellId?: string | null; anchorMarkerId?: string | null }) => {
+  const resolved = template.spellId ? resolveSpellAnyRuleset(template.spellId)?.resolved : null;
+  return !!template.anchorMarkerId && !!resolved && isEffectOnlyPreset(resolved);
+};
+
+const concentratingFor = (concentration: unknown, existing: Parameters<typeof liveConcentration>[1]) => {
+  const live = liveConcentration(concentration as Parameters<typeof liveConcentration>[0], existing);
+  return live ? { concentrating: { color: concentrationColor(live.spellId) } } : {};
+};
 
 const DEFAULT_AOE_TOOL: AoeToolSettings = {
   shape: AoeShape.Circle,
@@ -51,10 +67,12 @@ const DEFAULT_AOE_TOOL: AoeToolSettings = {
   visibility: StageMode.Player
 };
 
-// Visibility and angle snapping start fresh each session: shapes are player-visible and rotate smoothly
+// Visibility and angle snapping start fresh each session: shapes are player-visible and rotate smoothly.
+// An aimed spell is never remembered
 export const withoutSessionAoeFields = ({
   visibility: _visibility,
   snapAngle: _snapAngle,
+  spell: _spell,
   ...saved
 }: Partial<AoeToolSettings> = {}) => saved;
 
@@ -129,6 +147,11 @@ export const buildSceneProps = (
       ? generateLargeImageUrl(activeScene.mapLocation, bucketUrl)
       : generateLargeImageUrl(DEFAULT_MAP, bucketUrl);
 
+  const existingRows = {
+    templateIds: new Set(activeSceneAoeTemplates.map((template) => template.id)),
+    markerIds: new Set((activeSceneMarkers ?? []).map((marker) => marker.id))
+  };
+
   let markers: Marker[] = [];
   if (activeSceneMarkers && Array.isArray(activeSceneMarkers)) {
     markers = activeSceneMarkers
@@ -147,7 +170,8 @@ export const buildSceneProps = (
         visibility: marker.visibility,
         note: marker.note || null,
         pinnedTooltip: marker.pinnedTooltip ?? false,
-        conditions: withAutoConditions(conditionsForMode(marker.conditions, mode), marker)
+        conditions: withAutoConditions(conditionsForMode(marker.conditions, mode), marker),
+        ...concentratingFor(marker.concentration, existingRows)
       }));
   }
 
@@ -188,21 +212,31 @@ export const buildSceneProps = (
   }
 
   // DM-only templates never reach player clients
-  const aoeTemplates: AoeTemplate[] = activeSceneAoeTemplates
-    .filter((template) => mode === 'editor' || template.visibility === StageMode.Player)
-    .map((template) => ({
-      id: template.id,
-      shape: template.shape as AoeShape,
-      position: toStagePosition(template.positionX, template.positionY),
-      angle: toStageAngle(template.angle),
-      size: template.size,
-      width: template.width,
-      effect: template.effect as AoeEffect,
-      color: template.color,
-      opacity: template.opacity,
-      visibility: template.visibility as StageMode,
-      label: template.label
-    }));
+  const visibleTemplates = activeSceneAoeTemplates.filter(
+    (template) => mode === 'editor' || template.visibility === StageMode.Player
+  );
+  const aoeTemplates: AoeTemplate[] = visibleTemplates.map((template) => ({
+    id: template.id,
+    shape: template.shape as AoeShape,
+    position: toStagePosition(template.positionX, template.positionY),
+    angle: toStageAngle(template.angle),
+    size: template.size,
+    width: template.width,
+    effect: template.effect as AoeEffect,
+    color: template.color,
+    opacity: template.opacity,
+    visibility: template.visibility as StageMode,
+    label: template.label,
+    spellId: template.spellId ?? null,
+    anchorMarkerId: template.anchorMarkerId,
+    expiresAt: template.expiresAt ? template.expiresAt * 1000 : null,
+    ...(isEffectOnlyTemplate(template) && { effectOnly: true })
+  }));
+  const tokenEffects = buildTokenEffects(
+    visibleTemplates,
+    (activeSceneMarkers ?? []).filter((marker) => mode === 'editor' || marker.visibility !== 1),
+    existingRows
+  );
 
   return {
     mode: mode === 'client' ? StageMode.Player : StageMode.DM,
@@ -356,6 +390,7 @@ export const buildSceneProps = (
       showLabels: true,
       tool: { ...DEFAULT_AOE_TOOL }
     },
+    tokenEffects,
     measurement: {
       type: MeasurementType.Line,
       opacity: 1,

@@ -1,6 +1,6 @@
 import type { HandoutDescriptor } from '$lib/realtime/types';
 import type { StatBlock } from '$lib/utils/statBlock/types';
-import type { MarkerCondition } from '@tableslayer/stage';
+import type { MarkerConcentration, MarkerCondition } from '@tableslayer/stage';
 import { sql } from 'drizzle-orm';
 import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { createInsertSchema, createSelectSchema, createUpdateSchema } from 'drizzle-zod';
@@ -331,6 +331,9 @@ export const updatePartyInviteSchema = createUpdateSchema(partyInviteTable);
 // GAME SESSION
 // GAME SESSION
 
+// Mirrors RULESETS in @tableslayer/stage (kept literal so drizzle-kit never loads the stage bundle)
+export const VALID_RULESETS = ['dnd5e-2014', 'dnd5e-2024'] as const;
+
 export const gameSessionTable = sqliteTable(
   'game_session',
   {
@@ -346,7 +349,8 @@ export const gameSessionTable = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .$defaultFn(() => new Date()),
-    lastUpdated: integer('last_updated', { mode: 'timestamp' }).$defaultFn(() => new Date())
+    lastUpdated: integer('last_updated', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+    ruleset: text('ruleset', { enum: VALID_RULESETS }).notNull().default('dnd5e-2024')
   },
   (table) => [
     uniqueIndex('unique_party_name').on(table.partyId, table.slug),
@@ -511,6 +515,8 @@ export const markerTable = sqliteTable(
       .$type<MarkerCondition[]>()
       .notNull()
       .default(sql`'[]'`),
+    // What the token's caster is concentrating on: the spell and the rows that end with it
+    concentration: text('concentration', { mode: 'json' }).$type<MarkerConcentration>(),
     statBlock: text('stat_block', { mode: 'json' }).$type<StatBlock>(),
     hitPoints: integer('hit_points'),
     tempHitPoints: integer('temp_hit_points'),
@@ -701,8 +707,10 @@ export const aoeTemplateTable = sqliteTable(
     opacity: real('opacity').notNull().default(0.6),
     visibility: integer('visibility').notNull().default(1), // StageMode enum (0=DM, 1=Player)
     label: text('label'),
-    anchorMarkerId: text('anchor_marker_id'), // Reserved for token-anchored emanations
+    anchorMarkerId: text('anchor_marker_id'), // Marker the template follows (auras like Spirit Guardians)
     groupId: text('group_id'), // Moves together with the rest of its group
+    spellId: text('spell_id'), // Catalog id of the spell that created the template
+    expiresAt: integer('expires_at', { mode: 'timestamp' }), // Unix seconds; null = stays until removed
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .$defaultFn(() => new Date())

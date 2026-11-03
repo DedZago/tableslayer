@@ -85,14 +85,17 @@ export class EditorSpells {
     return ids.length === 1 ? this.#casterRow(ids[0]) : undefined;
   }
 
-  get items(): RadialMenuItemProps[] {
-    const state: SpellMenuState = {
+  get menuState(): SpellMenuState {
+    return {
       ruleset: this.#options.session.ruleset,
       recent: this.recentSpells,
       hasCaster: !!this.#selectedCaster(),
       noCasterHint: EDITOR_NO_CASTER_HINT
     };
-    return spellMenuItem(state).submenu ?? [];
+  }
+
+  get items(): RadialMenuItemProps[] {
+    return spellMenuItem(this.menuState).submenu ?? [];
   }
 
   get menuTitle(): string {

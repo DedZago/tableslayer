@@ -44,11 +44,10 @@
     startCombat,
     type CombatAction
   } from '$lib/components/Combat';
-  import AoeTemplateContextPanel from '$lib/components/GameSession/AoeTemplateContextPanel.svelte';
   import AoeTemplateManager from '$lib/components/GameSession/AoeTemplateManager.svelte';
   import SidePanelTabs, { type SidePanelTab } from '$lib/components/GameSession/SidePanelTabs.svelte';
+  import ConditionPicker from '$lib/components/GameSession/ConditionPicker.svelte';
   import SpellAimBar from '$lib/components/GameSession/SpellAimBar.svelte';
-  import TokenContextPanel from '$lib/components/GameSession/TokenContextPanel.svelte';
   import type { StatBlockRoll } from '$lib/components/StatBlock';
   import { HandoutLivePill, HandoutPanel, type HandoutPreview } from '$lib/components/Handouts';
   import type { AssetListItem } from '$lib/queries/assets';
@@ -128,6 +127,9 @@
     GridMode,
     MapLayerType,
     MarkerVisibility,
+    MeasurementType,
+    resolveCondition,
+    resolveSpell,
     PerformanceDebugger,
     PointerInputManager,
     RadialMenu,
@@ -165,6 +167,11 @@
     spellRowsOwnedBy
   } from '$lib/utils/spellCasting';
   import { EditorSpells } from './useEditorSpells.svelte';
+  import { editorGeneralMenu, gmAoeMenu, GM_MENU_ID, gmTokenMenu } from './editorMenus';
+  import TvConditionForm from '../../play/TvConditionForm.svelte';
+  import { groupItems, menuMembers } from '../../play/playMenus';
+  import { parseSpellItemId } from '$lib/utils/spellMenus';
+  import { MENU_ID } from '../../play/playMenus';
 
   let { data } = $props();
   const { gameSession, party, user, isStripeEnabled, checklistState } = $derived(data);
@@ -1226,6 +1233,25 @@
   // Stage callbacks: every shared edit writes the doc; nothing here saves to the DB
   // ---------------------------------------------------------------------------
 
+  // Debounced mask commits and throttled property writes (fog rooms) must
+  // land on the undo stack before we pop it, or ctrl-z right after an
+  // edit reverts the wrong step. An open group drag is closed first so its step is complete
+  const undoOrRedo = (isRedo: boolean) => {
+    const client = session.client;
+    if (!client) return;
+    flushQueuedPropertyUpdates();
+    finishGroupDrag();
+    Promise.all([flushPendingAnnotationCommits(), flushPendingFogCommit()]).then(() => {
+      if (isRedo) {
+        if (client.canRedo) client.redo();
+        else addToast({ data: { title: 'Nothing to redo', type: 'info' } });
+      } else {
+        if (client.canUndo) client.undo();
+        else addToast({ data: { title: 'Nothing to undo', type: 'info' } });
+      }
+    });
+  };
+
   const handleSceneFit = () => {
     stageProps.scene.autoFit = true;
     stage.scene.fit();
@@ -1472,6 +1498,57 @@
     if (spells.aim && aimEnded) untrack(() => spells.cancelAim());
   });
 
+  // Right-click on empty map opens the TV's ring; tokens, shapes and fog rooms keep their own right-click
+  let generalMenu = $state<{ x: number; y: number } | null>(null);
+  const generalMenuItems = $derived(
+    editorGeneralMenu({
+      canUndo: session.client?.canUndo ?? false,
+      canRedo: session.client?.canRedo ?? false,
+      spells: spells.menuState
+    })
+  );
+
+  const onStageContextMenu = (event: MouseEvent) => {
+    event.preventDefault();
+    const point = { x: event.clientX, y: event.clientY };
+    // Layer handlers queue their own zero-delay timers first, so by the time this one runs the claim is known
+    setTimeout(() => {
+      if (performance.now() - contextClaimedAt < 100 || performance.now() - markerContextMenuOpenedAt < 100) return;
+      if (aoeMenu || tokenPanel || spells.aim) return;
+      generalMenu = point;
+    }, 0);
+  };
+
+  const setMeasurement = (patch: Partial<StageProps['measurement']>) => {
+    queuePropertyUpdate(stageProps, ['activeLayer'], MapLayerType.Measurement, 'control');
+    queuePropertyUpdate(stageProps, ['annotations', 'activeLayer'], null, 'control');
+    Object.entries(patch).forEach(([key, value]) =>
+      queuePropertyUpdate(stageProps, ['measurement', key], value, 'control')
+    );
+    trackChecklistItemLocal('measurement');
+  };
+
+  const selectGeneralMenuItem = (itemId: string) => {
+    if (parseSpellItemId(itemId)) {
+      spells.select(itemId);
+      return;
+    }
+    const valueOf = (prefix: string) => itemId.slice(prefix.length);
+    if (itemId.startsWith(MENU_ID.measureCone)) {
+      setMeasurement({ type: MeasurementType.Cone, coneAngle: Number(valueOf(MENU_ID.measureCone)) });
+    } else if (itemId.startsWith(MENU_ID.measureBeam)) {
+      setMeasurement({ type: MeasurementType.Beam, beamWidth: Number(valueOf(MENU_ID.measureBeam)) });
+    } else if (itemId.startsWith(MENU_ID.aoeShape)) {
+      queuePropertyUpdate(stageProps, ['activeLayer'], MapLayerType.AoeTemplate, 'control');
+      changeAoeTool({ shape: valueOf(MENU_ID.aoeShape) as AoeShape });
+    } else if (itemId === MENU_ID.measureLine) setMeasurement({ type: MeasurementType.Line });
+    else if (itemId === MENU_ID.measureCircle) setMeasurement({ type: MeasurementType.Circle });
+    else if (itemId === MENU_ID.measureSquare) setMeasurement({ type: MeasurementType.Square });
+    else if (itemId === MENU_ID.undo) undoOrRedo(false);
+    else if (itemId === MENU_ID.redo) undoOrRedo(true);
+    else if (itemId === MENU_ID.fit) handleSceneFit();
+  };
+
   let lastPointer: { x: number; y: number } | null = null;
 
   const openSpellsAtCursor = () => {
@@ -1523,7 +1600,7 @@
   const clearConditions = (targetIds: string[]) =>
     writeMarkerConditions((write) => write.clearMarkerConditions(selectedSceneId, targetIds));
 
-  const conditionPickerFor = (targetIds: string[]): ComponentProps<typeof TokenContextPanel>['conditions'] => {
+  const conditionPickerFor = (targetIds: string[]): ComponentProps<typeof ConditionPicker> => {
     // Stored rows, not stageProps: stage markers carry the derived Bloodied, which is never written
     const rows = targetIds.flatMap((id) => markerRowFor(id) ?? []);
     return {
@@ -1535,6 +1612,8 @@
       onClear: () => clearConditions(targetIds)
     };
   };
+
+  const tokenMenuRows = $derived(selectedMarkerIds.flatMap((id) => markerRowFor(id) ?? []));
 
   const writeHitPoints = (markerId: string, fields: { hitPoints?: number | null; tempHitPoints?: number | null }) =>
     session.client?.write.setMarkerFields(selectedSceneId, markerId, fields);
@@ -1925,6 +2004,7 @@
     // A token under the same right-click opens its own panel instead
     setTimeout(() => {
       if (performance.now() - markerContextMenuOpenedAt < 100) return;
+      contextClaimedAt = performance.now();
       const selected = stageProps.aoeTemplates?.selectedIds ?? [];
       const ids = selected.includes(id) ? selected : [id];
       if (!selected.includes(id)) selectAoeTemplates(ids);
@@ -2034,6 +2114,119 @@
           }
         });
     }
+  };
+
+  // GM rings --------------------------------------------------------------------
+  // Right-click on a token or area opens the GM's ring: the player's options plus the GM-only ones (see editorMenus.ts)
+
+  const withoutGroupWith = (items: ReturnType<typeof groupItems>) =>
+    items.filter((item) => item.id !== MENU_ID.groupWith);
+  const isGroupItem = (itemId: string) =>
+    itemId === MENU_ID.group || itemId === MENU_ID.ungroup || itemId === MENU_ID.leaveGroup;
+
+  const commonValue = <T,>(values: T[]): T | undefined =>
+    values.length > 0 && values.every((value) => value === values[0]) ? values[0] : undefined;
+
+  const tokenMenuItems = $derived.by(() => {
+    if (!tokenPanel || tokenMenuRows.length === 0) return [];
+    const members = selectedMarkerIds.map((id) => ({ collection: 'markers' as const, id }));
+    return gmTokenMenu({
+      markers: tokenMenuRows,
+      customSuggestions: customConditionSuggestions,
+      groupItems: withoutGroupWith(groupItems(groupRows(), members)),
+      selectionCount: selectedMarkerIds.length,
+      spells: { ...spells.menuState, hasCaster: true },
+      concentratingOn: tokenPanelConcentratingOn,
+      spellEffects: tokenPanelSpellRows?.effects ?? [],
+      summonedBy: tokenPanelSpellRows?.summonedBy ?? null,
+      visibility: commonValue(tokenMenuRows.map((row) => row.visibility)),
+      combat: { running: combatRunning, inCombat: targetsInCombat },
+      canShowHandout: canPresentHandouts,
+      canSaveToLibrary: canEditAssets
+    });
+  });
+
+  let conditionForm = $state<{ x: number; y: number; markerIds: string[] } | null>(null);
+
+  const addCustomCondition = (label: string, color: string) => {
+    const markerIds = conditionForm?.markerIds ?? [];
+    const name = label.trim().slice(0, 24);
+    conditionForm = null;
+    if (!name || markerIds.length === 0) return;
+    toggleConditionOn(markerIds, { id: `custom:${uuidv4()}`, label: name, color });
+  };
+
+  const selectTokenMenuItem = (itemId: string) => {
+    const ids = [...selectedMarkerIds];
+    const valueOf = (prefix: string) => itemId.slice(prefix.length);
+    if (parseSpellItemId(itemId)) {
+      spells.select(itemId);
+    } else if (itemId.startsWith(MENU_ID.condition)) {
+      const id = valueOf(MENU_ID.condition);
+      const known = [...customConditionSuggestions, ...tokenMenuRows.flatMap((row) => row.conditions ?? [])];
+      const condition = resolveCondition({ id }).category === 'custom' ? known.find((c) => c.id === id) : { id };
+      if (condition) toggleConditionOn(ids, condition);
+    } else if (itemId.startsWith(MENU_ID.exhaustionLevel)) {
+      const value = Number(valueOf(MENU_ID.exhaustionLevel));
+      writeMarkerConditions((write) => write.setMarkerConditionValue(selectedSceneId, ids, 'exhaustion', value));
+    } else if (itemId.startsWith(GM_MENU_ID.hideCondition)) {
+      toggleConditionDmOnly(ids, valueOf(GM_MENU_ID.hideCondition));
+    } else if (itemId.startsWith(GM_MENU_ID.visibility)) {
+      const visibility = Number(valueOf(GM_MENU_ID.visibility)) as MarkerVisibility;
+      ids.forEach((id) => setMarkerVisibility(id, visibility));
+    } else if (itemId.startsWith(GM_MENU_ID.combat)) {
+      handleTokenCombatAction(valueOf(GM_MENU_ID.combat) as 'start' | 'add' | 'remove');
+    } else if (itemId.startsWith(MENU_ID.removeSpellEffect)) {
+      removeAoeTemplate(valueOf(MENU_ID.removeSpellEffect));
+    } else if (isGroupItem(itemId)) {
+      toggleGroup();
+    } else if (itemId === MENU_ID.newCondition && tokenPanel) {
+      conditionForm = { x: tokenPanel.x, y: tokenPanel.y, markerIds: ids };
+    } else if (itemId === GM_MENU_ID.clearConditions) {
+      clearConditions(ids);
+    } else if (itemId === MENU_ID.endConcentration) {
+      endTokenPanelConcentration();
+    } else if (itemId === GM_MENU_ID.deleteTokens || itemId === MENU_ID.dismissSpell) {
+      deleteTokenPanelTargets();
+    } else if (itemId === GM_MENU_ID.handout) {
+      previewTokenHandout(ids[0]);
+    } else if (itemId === GM_MENU_ID.saveToLibrary) {
+      saveTokenToLibrary(ids[0]);
+    } else if (itemId === MENU_ID.pin) {
+      const marker = tokenMenuRows[0];
+      if (marker) onPinToggle(marker.id, !marker.pinnedTooltip);
+    } else if (itemId === MENU_ID.distanceFrom) {
+      selectedMarkerId = ids[0];
+      distanceMode = true;
+    } else if (itemId === MENU_ID.clearSelection) {
+      setSelection([]);
+    }
+  };
+
+  const aoeMenuItems = $derived.by(() => {
+    if (!aoeMenu || aoeMenuTemplates.length === 0) return [];
+    const first = aoeMenuTemplates[0];
+    const members = aoeMenuTemplates.map(({ id }) => ({ collection: 'aoeTemplates' as const, id }));
+    return gmAoeMenu({
+      count: aoeMenuTemplates.length,
+      spellName:
+        aoeMenuTemplates.length === 1 && first.spellId ? resolveSpell(first.spellId, session.ruleset)?.name : null,
+      effect: commonValue(aoeMenuTemplates.map((t) => t.effect)),
+      opacity: commonValue(aoeMenuTemplates.map((t) => t.opacity)),
+      visibility: commonValue(aoeMenuTemplates.map((t) => t.visibility)),
+      groupItems: withoutGroupWith(groupItems(groupRows(), members))
+    });
+  });
+
+  const selectAoeMenuItem = (itemId: string) => {
+    const valueOf = (prefix: string) => itemId.slice(prefix.length);
+    if (itemId.startsWith(MENU_ID.aoeEffect)) changeAoeMenuEffect(Number(valueOf(MENU_ID.aoeEffect)) as AoeEffect);
+    else if (itemId.startsWith(MENU_ID.aoeOpacity))
+      changeAoeMenuField({ opacity: Number(valueOf(MENU_ID.aoeOpacity)) });
+    else if (itemId.startsWith(GM_MENU_ID.aoeVisibility)) {
+      changeAoeMenuField({ visibility: Number(valueOf(GM_MENU_ID.aoeVisibility)) as StageMode });
+    } else if (isGroupItem(itemId)) toggleGroup();
+    else if (itemId === MENU_ID.aoeDelete) removeAoeTemplates([...(aoeMenu?.ids ?? [])]);
   };
 
   const annotationColors = [
@@ -2219,10 +2412,13 @@
   // room fires both this and onMarkerContextMenu (same event, synchronous).
   // Defer one tick and let the marker's menu win.
   let markerContextMenuOpenedAt = 0;
+  // Set when a room, token or shape took a right-click, so the general ring stays closed
+  let contextClaimedAt = 0;
 
   const onFogRoomToggle = (roomId: string) => {
     setTimeout(() => {
       if (performance.now() - markerContextMenuOpenedAt < 100) return;
+      contextClaimedAt = performance.now();
       const rooms = stageProps.fogOfWar.rooms.map((room) =>
         room.id === roomId ? { ...room, enabled: !room.enabled } : room
       );
@@ -2486,22 +2682,8 @@
       if (key === 'z' || key === 'y') {
         event.preventDefault();
         if (!session.client) return;
-        const client = session.client;
         const isRedo = key === 'y' || event.shiftKey;
-        // Debounced mask commits and throttled property writes (fog rooms) must
-        // land on the undo stack before we pop it, or ctrl-z right after an
-        // edit reverts the wrong step. An open group drag is closed first so its step is complete
-        flushQueuedPropertyUpdates();
-        finishGroupDrag();
-        Promise.all([flushPendingAnnotationCommits(), flushPendingFogCommit()]).then(() => {
-          if (isRedo) {
-            if (client.canRedo) client.redo();
-            else addToast({ data: { title: 'Nothing to redo', type: 'info' } });
-          } else {
-            if (client.canUndo) client.undo();
-            else addToast({ data: { title: 'Nothing to undo', type: 'info' } });
-          }
-        });
+        undoOrRedo(isRedo);
         return;
       }
     }
@@ -2677,7 +2859,7 @@
         isCursorInScene = false;
       });
       stageElement.addEventListener('wheel', onWheel, { passive: false });
-      stageElement.addEventListener('contextmenu', (e) => e.preventDefault(), false);
+      stageElement.addEventListener('contextmenu', onStageContextMenu, false);
     }
 
     return () => {
@@ -2888,54 +3070,6 @@
               : null}
           />
           <PerformanceDebugger />
-          {#if aoeMenu && aoeMenuTemplates.length > 0}
-            {@const first = aoeMenuTemplates[0]}
-            <AoeTemplateContextPanel
-              targetCount={aoeMenuTemplates.length}
-              position={{ x: aoeMenu.x, y: aoeMenu.y }}
-              currentEffect={aoeMenuTemplates.every((t) => t.effect === first.effect) ? first.effect : undefined}
-              opacity={aoeMenuTemplates.every((t) => t.opacity === first.opacity) ? first.opacity : undefined}
-              visibility={aoeMenuTemplates.every((t) => t.visibility === first.visibility)
-                ? first.visibility
-                : undefined}
-              onEffectChange={changeAoeMenuEffect}
-              onOpacityChange={(opacity) => changeAoeMenuField({ opacity })}
-              onVisibilityChange={(visibility) => changeAoeMenuField({ visibility })}
-              onDelete={() => removeAoeTemplates([...(aoeMenu?.ids ?? [])])}
-              onClose={() => (aoeMenu = null)}
-            />
-          {/if}
-          {#if tokenPanel && tokenPanelMarker}
-            <TokenContextPanel
-              name={tokenPanelMarker.title || tokenPanelMarker.label || 'Token'}
-              targetCount={selectedMarkerIds.length}
-              position={{ x: tokenPanel.x, y: tokenPanel.y }}
-              conditions={conditionPickerFor(selectedMarkerIds)}
-              visibility={selectedMarkerIds.length === 1 ? tokenPanelMarker.visibility : undefined}
-              onVisibilityChange={(visibility) =>
-                selectedMarkerIds.forEach((id) => setMarkerVisibility(id, visibility))}
-              pinned={pinnedMarkerIds.includes(tokenPanelMarker.id)}
-              onPinToggle={tokenPanelMarker.visibility === MarkerVisibility.DM
-                ? undefined
-                : (pinned) => onPinToggle(tokenPanelMarker.id, pinned)}
-              onShowAsHandout={canPresentHandouts && selectedMarkerIds.length === 1
-                ? () => previewTokenHandout(tokenPanelMarker.id)
-                : undefined}
-              onSaveToLibrary={canEditAssets && selectedMarkerIds.length === 1
-                ? () => saveTokenToLibrary(tokenPanelMarker.id)
-                : undefined}
-              combatState={combatRunning ? 'running' : 'none'}
-              {targetsInCombat}
-              onCombatAction={handleTokenCombatAction}
-              onEndConcentration={tokenPanelConcentratingOn ? endTokenPanelConcentration : undefined}
-              concentratingOn={tokenPanelConcentratingOn}
-              spellEffects={tokenPanelSpellRows?.effects ?? []}
-              onRemoveSpellEffect={removeAoeTemplate}
-              summonedBy={tokenPanelSpellRows?.summonedBy ?? null}
-              onDelete={deleteTokenPanelTargets}
-              onClose={() => (tokenPanel = null)}
-            />
-          {/if}
         </div>
         <SceneControls
           {stageProps}
@@ -2972,6 +3106,53 @@
           onClose={() => spells.close()}
           onReposition={(point) => spells.open(point)}
         />
+        <RadialMenu
+          visible={generalMenu !== null}
+          position={generalMenu ?? { x: 0, y: 0 }}
+          items={generalMenuItems}
+          title={spells.menuTitle === 'Cast spell' ? 'Map tools' : 'Map tools · token selected'}
+          backIcon={IconArrowBackUp}
+          closeIcon={IconX}
+          autoCloseMs={20000}
+          onItemSelect={selectGeneralMenuItem}
+          onSubmenuOpen={spells.onSubmenuOpen}
+          onClose={() => (generalMenu = null)}
+          onReposition={(point) => (generalMenu = point)}
+        />
+        <RadialMenu
+          visible={tokenPanel !== null && tokenMenuItems.length > 0}
+          position={{ x: tokenPanel?.x ?? 0, y: tokenPanel?.y ?? 0 }}
+          items={tokenMenuItems}
+          title={selectedMarkerIds.length === 1
+            ? tokenPanelMarker?.title || tokenPanelMarker?.label || 'Token'
+            : `${selectedMarkerIds.length} tokens`}
+          backIcon={IconArrowBackUp}
+          closeIcon={IconX}
+          autoCloseMs={20000}
+          onItemSelect={selectTokenMenuItem}
+          onSubmenuOpen={spells.onSubmenuOpen}
+          onClose={() => (tokenPanel = null)}
+          onReposition={(point) => (tokenPanel = tokenPanel && { ...tokenPanel, ...point })}
+        />
+        <RadialMenu
+          visible={aoeMenu !== null && aoeMenuItems.length > 0}
+          position={{ x: aoeMenu?.x ?? 0, y: aoeMenu?.y ?? 0 }}
+          items={aoeMenuItems}
+          title={aoeMenuTemplates.length === 1 ? 'Area' : `${aoeMenuTemplates.length} areas`}
+          backIcon={IconArrowBackUp}
+          closeIcon={IconX}
+          autoCloseMs={20000}
+          onItemSelect={selectAoeMenuItem}
+          onClose={() => (aoeMenu = null)}
+          onReposition={(point) => (aoeMenu = aoeMenu && { ...aoeMenu, ...point })}
+        />
+        {#if conditionForm}
+          <TvConditionForm
+            position={conditionForm}
+            onAdd={addCustomCondition}
+            onCancel={() => (conditionForm = null)}
+          />
+        {/if}
         {#if spells.targetPrompt}
           <SpellAimBar
             prompt={spells.targetPrompt}

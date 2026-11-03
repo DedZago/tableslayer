@@ -161,8 +161,13 @@ export type MenuTarget =
 export const playerConditionRows = (rows: MarkerRow[]): MarkerRow[] =>
   rows.map((row) => ({ ...row, conditions: (row.conditions ?? []).filter((condition) => !condition.dmOnly) }));
 
-export const conditionsItem = (rows: MarkerRow[], customSuggestions: MarkerCondition[]): RadialMenuItemProps => {
-  const state = conditionPickerState(playerConditionRows(rows));
+/** The GM sees every condition, including the ones hidden from players */
+export const conditionsItem = (
+  rows: MarkerRow[],
+  customSuggestions: MarkerCondition[],
+  { gm = false }: { gm?: boolean } = {}
+): RadialMenuItemProps => {
+  const state = conditionPickerState(gm ? rows : playerConditionRows(rows));
   const activeById = new Map(state.active.map((condition) => [condition.id, condition]));
   const isOn = (id: string) => activeById.has(id) || state.automatic.has(id);
   const tokens = rows.length === 1 ? 'this token' : `these ${rows.length} tokens`;
@@ -416,43 +421,58 @@ const clearSelectionItem = (count: number): RadialMenuItemProps => ({
   icon: IconDeselect
 });
 
+export const measureItem: RadialMenuItemProps = {
+  id: 'measure',
+  label: 'Measure',
+  hint: 'Drag to measure a distance or an area',
+  icon: IconRuler,
+  submenu: [
+    { id: MENU_ID.measureLine, label: 'Line', hint: 'Straight distance between two points', icon: IconLine },
+    { id: MENU_ID.measureCircle, label: 'Circle', hint: 'Radius around a point', icon: IconCircle },
+    { id: MENU_ID.measureSquare, label: 'Square', hint: 'Square or cube area', icon: IconSquare },
+    {
+      id: 'measure-cone',
+      label: 'Cone',
+      hint: 'Pick the cone angle',
+      icon: IconCone2,
+      submenu: [30, 60, 90].map((angle) => ({
+        id: `${MENU_ID.measureCone}${angle}`,
+        label: `${angle}°`,
+        hint: `Cone ${angle}° wide`,
+        icon: IconCone2
+      }))
+    },
+    {
+      id: 'measure-beam',
+      label: 'Beam',
+      hint: 'Pick the beam width',
+      icon: IconRectangleVertical,
+      submenu: [5, 10, 15, 20].map((width) => ({
+        id: `${MENU_ID.measureBeam}${width}`,
+        label: `${width} ft`,
+        hint: `Beam ${width} ft wide`,
+        icon: IconRectangleVertical
+      }))
+    }
+  ]
+};
+
+export const aoeShapesItem: RadialMenuItemProps = {
+  id: 'aoe',
+  label: 'AoE',
+  hint: 'Place a spell area, then drag on the map',
+  icon: IconCone2,
+  submenu: AOE_SHAPES.map(({ shape, label, hint, icon }) => ({
+    id: `${MENU_ID.aoeShape}${shape}`,
+    label,
+    hint,
+    icon
+  }))
+};
+
 export const generalMenu = (state: GeneralMenuState): RadialMenuItemProps[] => {
   const items: RadialMenuItemProps[] = [
-    {
-      id: 'measure',
-      label: 'Measure',
-      hint: 'Drag to measure a distance or an area',
-      icon: IconRuler,
-      submenu: [
-        { id: MENU_ID.measureLine, label: 'Line', hint: 'Straight distance between two points', icon: IconLine },
-        { id: MENU_ID.measureCircle, label: 'Circle', hint: 'Radius around a point', icon: IconCircle },
-        { id: MENU_ID.measureSquare, label: 'Square', hint: 'Square or cube area', icon: IconSquare },
-        {
-          id: 'measure-cone',
-          label: 'Cone',
-          hint: 'Pick the cone angle',
-          icon: IconCone2,
-          submenu: [30, 60, 90].map((angle) => ({
-            id: `${MENU_ID.measureCone}${angle}`,
-            label: `${angle}°`,
-            hint: `Cone ${angle}° wide`,
-            icon: IconCone2
-          }))
-        },
-        {
-          id: 'measure-beam',
-          label: 'Beam',
-          hint: 'Pick the beam width',
-          icon: IconRectangleVertical,
-          submenu: [5, 10, 15, 20].map((width) => ({
-            id: `${MENU_ID.measureBeam}${width}`,
-            label: `${width} ft`,
-            hint: `Beam ${width} ft wide`,
-            icon: IconRectangleVertical
-          }))
-        }
-      ]
-    },
+    measureItem,
     {
       id: MENU_ID.distance,
       label: state.distanceMode ? 'Stop distances' : 'Distance',
@@ -460,18 +480,7 @@ export const generalMenu = (state: GeneralMenuState): RadialMenuItemProps[] => {
       icon: IconRuler2,
       active: state.distanceMode
     },
-    {
-      id: 'aoe',
-      label: 'AoE',
-      hint: 'Place a spell area, then drag on the map',
-      icon: IconCone2,
-      submenu: AOE_SHAPES.map(({ shape, label, hint, icon }) => ({
-        id: `${MENU_ID.aoeShape}${shape}`,
-        label,
-        hint,
-        icon
-      }))
-    },
+    aoeShapesItem,
     spellMenuItem(state.spells),
     drawItem(state.playerDrawingCount),
     {
@@ -508,6 +517,8 @@ export const generalMenu = (state: GeneralMenuState): RadialMenuItemProps[] => {
 };
 
 export type TokenMenuState = {
+  /** Builds the GM's ring: every condition shows, including the ones hidden from players */
+  gm?: boolean;
   markers: MarkerRow[];
   customSuggestions: MarkerCondition[];
   groupItems: RadialMenuItemProps[];
@@ -523,7 +534,7 @@ export type TokenMenuState = {
 };
 
 export const tokenMenu = (state: TokenMenuState): RadialMenuItemProps[] => {
-  const items = [conditionsItem(state.markers, state.customSuggestions), ...state.groupItems];
+  const items = [conditionsItem(state.markers, state.customSuggestions, { gm: state.gm }), ...state.groupItems];
   if (state.markers.length === 1) {
     const [marker] = state.markers;
     items.push(

@@ -83,7 +83,7 @@
 </script>
 
 <script lang="ts">
-  import { T } from '@threlte/core';
+  import { T, useTask } from '@threlte/core';
   import { untrack } from 'svelte';
   import type { AoeTemplate } from './types';
   import { resolveSpellAnyRuleset } from '../../helpers/spells';
@@ -93,6 +93,7 @@
     getTemplateHandlePoints,
     getTemplateLocalBounds,
     getTemplateOutline,
+    templateCardAnchor,
     templateLocalToLayer
   } from '../../helpers/aoeTemplates';
 
@@ -109,6 +110,10 @@
     isSelected: boolean;
     isDraft: boolean;
     showLabel: boolean;
+    /** A placed spell waiting for its casting click: the outline pulses and `cue` ("Click to cast") sits beside it */
+    cue?: string | null;
+    /** Part of a focused concentration: the outline is drawn at full strength */
+    isHighlighted?: boolean;
   }
 
   const {
@@ -121,10 +126,13 @@
     mapRotation,
     isSelected,
     isDraft,
-    showLabel
+    showLabel,
+    cue = null,
+    isHighlighted = false
   }: Props = $props();
 
   const LABEL_SCALE = 0.75;
+  const PULSE_SPEED = 4;
 
   const ftPerPx = $derived(1 / ftToPx);
   const handles = $derived(getTemplateHandlePoints(template, ftPerPx));
@@ -142,15 +150,24 @@
       ftPerPx
     );
   });
-  const showDimensions = $derived(isDraft);
+  // Instant spells never get a card; a lasting one shows it only while selected
   const card = $derived.by((): LabelCard | null => {
-    const spell = isSelected && !isDraft && template.spellId ? resolveSpellAnyRuleset(template.spellId) : null;
+    const showsCard = isSelected && !isDraft && !!template.spellId && template.expiresAt == null;
+    const spell = showsCard && template.spellId ? resolveSpellAnyRuleset(template.spellId) : null;
     return spell ? { title: spell.name, description: spell.description, accent: template.color } : null;
   });
-  const labelText = $derived(showLabel || showDimensions ? formatTemplateLabel(template, showDimensions) : '');
+  const labelText = $derived(cue ?? (showLabel || isDraft ? formatTemplateLabel(template, isDraft) : ''));
   const labelKey = $derived(card ? `${card.title}\n${card.description}\n${card.accent}` : labelText);
+  // Cards and cue tags sit outside the area, above it on screen; a plain label stays at its centre
+  const isBeside = $derived(!!card || !!cue);
   const labelScale = $derived(LABEL_SCALE / (sceneZoom * localScale));
-  const labelRotation = $derived(((sceneRotation - mapRotation) * Math.PI) / 180);
+  const labelRotationDeg = $derived(sceneRotation - mapRotation);
+  const labelRotation = $derived((labelRotationDeg * Math.PI) / 180);
+  const besidePoint = $derived(
+    isBeside
+      ? templateCardAnchor(template, ftPerPx, labelRotationDeg, handleRadius * 2, isSelected ? handleRadius : 0)
+      : null
+  );
   const dashSize = $derived(handleRadius * 0.6);
 
   // Closed polyline; dash distances are computed here because only LineDashedMaterial reads them
@@ -185,6 +202,23 @@
   });
 
   const outlineColor = $derived(template.color);
+  const outlineOpacity = $derived(isHighlighted ? 1 : isSelected ? 0.9 : 0.6);
+  let outlineMaterial = $state.raw<THREE.LineBasicMaterial | undefined>(undefined);
+  let pulseTime = 0;
+
+  // The waiting outline breathes; the layer keeps the stage at its ambient rate meanwhile
+  useTask(
+    (delta) => {
+      if (!outlineMaterial) return;
+      pulseTime += delta;
+      outlineMaterial.opacity = 0.55 + 0.45 * Math.sin(pulseTime * PULSE_SPEED);
+    },
+    { running: () => !!cue }
+  );
+
+  $effect(() => {
+    if (!cue && outlineMaterial) outlineMaterial.opacity = outlineOpacity;
+  });
 </script>
 
 <T.Line geometry={outlineGeometry} renderOrder={SceneLayerOrder.Measurement} layers={[SceneLayer.Overlay]}>
@@ -198,7 +232,13 @@
       gapSize={dashSize}
     />
   {:else}
-    <T.LineBasicMaterial attach="material" color={outlineColor} transparent opacity={isSelected ? 0.9 : 0.6} />
+    <T.LineBasicMaterial
+      bind:ref={outlineMaterial}
+      attach="material"
+      color={outlineColor}
+      transparent
+      opacity={outlineOpacity}
+    />
   {/if}
 </T.Line>
 
@@ -224,15 +264,14 @@
 {/if}
 
 {#if labelKey && label}
-  <T.Group
-    position={[labelPoint.x, labelPoint.y, 0]}
-    rotation={[0, 0, labelRotation]}
-    scale={[labelScale, labelScale, 1]}
-  >
+  {@const point = besidePoint ?? labelPoint}
+  <T.Group position={[point.x, point.y, 0]} rotation={[0, 0, labelRotation]} scale={[labelScale, labelScale, 1]}>
+    <!-- Beside the area the group sits at the card's bottom edge; visual only, never hit-tested -->
     <T.Mesh
       geometry={sharedLabelGeometry}
+      position={[0, besidePoint ? label.height / 2 : 0, 0]}
       scale={[label.width, label.height, 1]}
-      renderOrder={SceneLayerOrder.Measurement}
+      renderOrder={SceneLayerOrder.AoeLabel}
       layers={[SceneLayer.Overlay]}
     >
       <T.MeshBasicMaterial attach="material" map={label.texture} transparent depthWrite={false} />

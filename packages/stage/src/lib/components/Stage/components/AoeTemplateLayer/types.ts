@@ -119,6 +119,9 @@ export interface SpellTargeted {
   markerId: string;
 }
 
+/** A spell area placed and waiting for the click inside it that casts; null when it went back to following the pointer */
+export type SpellAimPlaced = SpellAimed | null;
+
 export interface SpellAimed {
   spellId: string;
   /** Where the template starts (its origin), layer-local px */
@@ -162,6 +165,8 @@ export interface AoeTemplateLayerProps {
 export interface AoeTemplateLayerExports {
   cancelDraft(): void;
   hasDraft(): boolean;
+  /** Sends a placed, not yet cast, spell area back to following the pointer; false when none was placed */
+  unplaceSpellAim(): boolean;
   /** Topmost visible template at a point in marker-space (layer-local px) */
   hitTest(point: { x: number; y: number }): string | null;
   /** Visible templates touched by a rectangle in marker-space */

@@ -7,8 +7,8 @@ import {
   isEffectOnlyPreset,
   MarkerShape,
   MarkerVisibility,
-  resolveSpell,
   resolveSpellAnyRuleset,
+  resolveSpellAtSlot,
   resolveSummonSize,
   type MarkerConcentration,
   type ResolvedSpell,
@@ -195,11 +195,14 @@ export const spellAimProgress = (spell: ResolvedSpell, aim: SpellAimPicks): Spel
   picked: spellPickedMarkerIds(spell, aim)
 });
 
-/** What to do next while aiming; a mouse clicks where a finger taps and drags */
+/**
+ * What to do next while aiming; a mouse clicks where a finger taps and drags. `placed`: an area spell's first
+ * click placed it, and a click inside it casts
+ */
 export const spellAimPrompt = (
   spellName: string,
   aim: SpellAimSettings,
-  { mouse = false, picked = 0, inside = 0 } = {}
+  { mouse = false, picked = 0, inside = 0, placed = false } = {}
 ) => {
   if (aim.mode === 'target') {
     if (picked === 0) return `${mouse ? 'Click' : 'Tap'} targets for ${spellName}`;
@@ -210,7 +213,8 @@ export const spellAimPrompt = (
   }
   if (aim.mode === 'area-targets' && aim.aim === 'point')
     return `${mouse ? 'Click' : 'Tap'} where to place ${spellName}`;
-  if (aim.aim === 'point') return `${mouse ? 'Click' : 'Tap'} where to cast ${spellName}`;
+  if (placed) return `${mouse ? 'Click' : 'Tap'} inside ${spellName} to cast · drag to move`;
+  if (aim.aim === 'point') return `${mouse ? 'Click' : 'Tap'} where to place ${spellName}`;
   if (!mouse) return `Drag to aim ${spellName}`;
   return aim.origin ? `Click to aim ${spellName}` : `Click to start ${spellName}, then click to aim it`;
 };
@@ -220,12 +224,13 @@ const footprintRadiusFt = (token: Pick<TargetMarker, 'size'>) => (token.size * F
 
 /** The cast of a targeted or area-pick spell on the tokens picked: an area pick plays at its placed area */
 export const targetCastRequest = (
-  aim: Pick<SpellCastRequest, 'spellId' | 'variantId'> & SpellAimPicks,
+  aim: Pick<SpellCastRequest, 'spellId' | 'variantId' | 'slotLevel'> & SpellAimPicks,
   caster: CasterMarker | undefined,
   targets: TargetMarker[]
 ): SpellCastRequest => ({
   spellId: aim.spellId,
   variantId: aim.variantId,
+  slotLevel: aim.slotLevel,
   placement: aim.placement ?? selfPlacement(targets[0]),
   caster,
   targets,
@@ -606,6 +611,8 @@ export interface CastSpellContext {
 export interface SpellCastRequest {
   spellId: string;
   variantId?: string;
+  /** The slot it is cast with; an area that grows with the slot uses that size. Omitted: the spell's own level */
+  slotLevel?: number;
   placement: SpellPlacement;
   caster?: CasterMarker;
   /** The tokens a targeted spell is bound to, each getting its own effect; without any it binds to the caster */
@@ -701,7 +708,7 @@ const writeSpellResults = (
  * Returns the recent-spells entry for the cast, or null when the spell is unknown for the ruleset.
  */
 export const castSpell = (context: CastSpellContext, request: SpellCastRequest): RecentSpell | null => {
-  const spell = resolveSpell(request.spellId, context.ruleset);
+  const spell = resolveSpellAtSlot(request.spellId, context.ruleset, request.slotLevel);
   if (!spell) return null;
   const { setTimer = setTimeout, snapToGrid } = context;
   const isSummon = !!spell.resolved.summon;
@@ -726,5 +733,10 @@ export const castSpell = (context: CastSpellContext, request: SpellCastRequest):
     setTimer(writeResults, spell.resolved.cast.durationMs * SUMMON_IMPACT_FRACTION);
   else writeResults();
 
-  return { spellId: spell.id, ...(request.variantId && { variantId: request.variantId }) };
+  const upcast = request.slotLevel !== undefined && request.slotLevel > spell.resolved.level;
+  return {
+    spellId: spell.id,
+    ...(request.variantId && { variantId: request.variantId }),
+    ...(upcast && { slotLevel: request.slotLevel })
+  };
 };

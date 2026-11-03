@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Canvas, T } from '@threlte/core';
   import * as THREE from 'three';
-  import { StageMode, type Callbacks, type StageInteractionProps, type StageProps } from './types';
+  import { StageMode, type Callbacks, type SpellHighlight, type StageInteractionProps, type StageProps } from './types';
   import { GridMode } from '../GridLayer/types';
   import Scene from '../Scene/Scene.svelte';
   import { type SceneExports, SceneLayerOrder } from '../Scene/types';
@@ -27,6 +27,8 @@
    * are anti-aliased in their textures/shaders, and the post-processing path
    * renders through non-MSAA targets anyway, so MSAA only costs bandwidth.
    */
+  const NO_SPELL_HIGHLIGHT: SpellHighlight = { templateIds: [], markerIds: [] };
+
   const createRenderer = (canvas: HTMLCanvasElement) => {
     const renderer = new THREE.WebGLRenderer({
       canvas,
@@ -89,6 +91,7 @@
     activeTurnMarkerId = null,
     distanceMode = false,
     spellCasts = undefined,
+    spellHighlight = undefined,
     onPinToggle,
     onMarkerVisibilityToggle
   }: Props = $props();
@@ -132,6 +135,7 @@
     activeTurnMarkerId: null as string | null,
     distanceMode: false,
     spellCasts: [] as SpellCast[],
+    spellHighlight: NO_SPELL_HIGHLIGHT as SpellHighlight,
     // Written by the AoE layer while a targeted spell is aimed: the token the pointer is over and can reach
     spellTargetMarkerId: null as string | null,
     spellPickedMarkerIds: [] as string[],
@@ -161,6 +165,7 @@
     stageContext.activeTurnMarkerId = activeTurnMarkerId;
     stageContext.distanceMode = distanceMode;
     stageContext.spellCasts = spellCasts ?? [];
+    stageContext.spellHighlight = spellHighlight ?? NO_SPELL_HIGHLIGHT;
     stageContext.performanceTier = props.performanceTier ?? 'high';
     stageContext.mainPassUsesComposer = hasActivePostProcessing(props.postProcessing, props.performanceTier);
   });
@@ -224,6 +229,7 @@
   export const aoeTemplates = {
     cancelDraft: () => sceneRef?.aoeTemplates?.cancelDraft(),
     hasDraft: () => sceneRef?.aoeTemplates?.hasDraft() ?? false,
+    unplaceSpellAim: () => sceneRef?.aoeTemplates?.unplaceSpellAim() ?? false,
     hitTest: (point: { x: number; y: number }) => sceneRef?.aoeTemplates?.hitTest(point) ?? null,
     inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>
       sceneRef?.aoeTemplates?.inRectangle(start, end) ?? []

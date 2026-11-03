@@ -17,6 +17,7 @@ export {
   type AoeTemplateLayerProps,
   type AoeToolSettings,
   type SpellAimArea,
+  type SpellAimPlaced,
   type SpellAimSettings,
   type SpellAimed,
   type SpellAreaTargets,
@@ -104,6 +105,7 @@ export {
   spellAimDraft,
   spellAimPlacement,
   spellRangeRadiusPx,
+  templateCardAnchor,
   templateExpiryFade,
   templateFadeMs,
   templateIntersectsRect,
@@ -181,7 +183,9 @@ export {
   isEffectOnlyPreset,
   resolveSpell,
   resolveSpellAnyRuleset,
+  resolveSpellAtSlot,
   resolveSummonSize,
+  spellAreaAtSlot,
   spellFxKinds,
   spellsInCategory,
   type MarkerConcentration,
@@ -195,6 +199,7 @@ export {
   type SpellPreset,
   type SpellSummon,
   type SpellSummonVariant,
+  type SpellUpcast,
   type TokenEffectKind,
   type TokenFx
 } from './helpers/spells';

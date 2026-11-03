@@ -762,3 +762,137 @@ Web (`apps/web`):
 - Tokens deleted mid-pick are skipped; a hidden token is never eligible on the TV.
 - The caster inside a save spell's area starts picked (rules); the GM unticks it.
 - Out-of-range placement is refused like any aimed area.
+
+# Phase 8 — quiet labels, two-click casting, concentration focus, level ring
+
+Requested 2026-11-03. Decisions agreed with the user:
+
+| Topic               | Decision                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Spell area text     | Instant spells (blasts, anything with `expiresAt`) never show text. Lasting spells show the card only when the area is clicked/selected. Text never covers handles |
+| Area casting        | First click places (fixes) the area; drag moves it; a click **inside** casts, a click outside moves/re-aims it there. No confirm menu. Clearly signalled           |
+| Concentration focus | Clicking a concentrating token highlights everything its concentration owns: areas, target token effects, summons, its own seal                                    |
+| TV trigger          | Tap a concentrating token to focus it; tap it again or tap empty map to clear. Editor: follows the token selection                                                 |
+| Spell lists         | **Level filter only**, no per-character list and no DB change                                                                                                      |
+| Level ring          | Cast spell → Cantrips, 1st, 2nd… Picking a slot shows every spell of level ≤ that slot, cast at that slot (upcast)                                                 |
+| Upcast sizes        | Spells whose area grows with the slot (e.g. Fog cloud) use the slot's size; target counts stay free as today                                                       |
+
+## 1. Spell area text
+
+- `formatTemplateLabel`: a template with a `spellId` returns `''` unless it is the draft (the always-on name label is
+  gone for spell areas). Hand-drawn templates keep today's behaviour (`showLabels`, dimensions while drafting).
+- `AoeTemplateHandles` card: only when `isSelected && !isDraft && template.spellId && template.expiresAt == null`
+  (lasting spells). Instant spell areas show no card even when selected.
+- Card placement: no longer at the area centre. Put it just **outside** the area, beyond its top edge in screen
+  space (take `sceneRotation - mapRotation` into account so "up" is up on screen), with a gap of at least
+  2 × `handleRadius`. Compute it from the template outline in screen-aligned space so it never overlaps the origin or
+  end handle discs; if a handle would sit under it (e.g. a cone pointing up), push the card past the handle.
+- Render order: the card draws **below** the handles (handles get the higher order inside `Measurement`, or the card a
+  lower one; keep `SceneLayerOrder` sorted). The card is visual only and must never take part in hit-testing.
+- Tests: `formatTemplateLabel` for spell vs hand-drawn templates; a pure helper for the card anchor (e.g.
+  `templateCardAnchor(template, ftPerPx, screenRotation, gapPx)` in `helpers/aoeTemplates.ts`) tested with a cone
+  pointing up and a rotated scene.
+
+## 2. Two-click area casting
+
+Applies to every spell that completes through `onSpellAimed` (blasts and placed zones, point or direction aim).
+Not to targeted spells (already tap + Cast), not to area-picked spells (already placed + Cast), not to self-cast
+spells that cast at once.
+
+- Stage-internal state in `AoeTemplateLayer`: `spellAim.placed: SpellPlacement | null`. Reuse the press/drag logic
+  written for area-picked spells (`pressPlacedArea`, `dragPlacedArea`, `releasePlacedArea`, the drag threshold).
+  - Not placed: unchanged aiming (follows the pointer, direction spells fix their start first). The click/tap that
+    used to commit now **places** instead.
+  - Placed, press + drag past the threshold: moves it (point aim keeps the grab offset and snaps; direction aim
+    re-aims about the origin). Range limits apply exactly as when placing.
+  - Placed, press + release without a drag **inside** the area (`templateSdf` < 0 in template-local feet):
+    `onSpellAimed({ spellId, position, angle })` → the cast happens, as today.
+  - Placed, press + release **outside**: point aim moves the area there, direction aim re-aims toward it. Still
+    placed.
+  - Esc / right-click / hub tap when placed: go back to free aiming (un-place). Again: cancel as today.
+- New callback `onSpellAimPlaced?(placement: { spellId; position; angle } | null)` so the consumer knows the state.
+  Consumers keep the last placement; Enter (already bound in `SpellAimBar`) casts with it.
+- "Click again" cue, all three:
+  1. The placed area draws with its full effect (non-draft opacity) and a **pulsing outline** (handles outline
+     opacity animates; ambient pacing, never `markActive` per frame).
+  2. A small tag next to the area (same canvas label style, placed with the card anchor helper): "Click to cast" on
+     mouse, "Tap to cast" on touch.
+  3. `SpellAimBar` prompt: "Place Fireball" → "Click inside Fireball to cast · drag to move" ("Tap" on the TV).
+     No Cast button is required, but Enter works.
+- Tests: the press/release decisions as a pure helper (inside → cast, outside → move, drag → move) in
+  `helpers/spellTargets.ts` or a new `helpers/spellAim.ts`.
+
+## 3. Concentration focus highlight
+
+- Pure helper in `apps/web/src/lib/utils/concentration.ts` (tested):
+  `concentrationHighlight(snapshot, casterIds) → { templateIds: string[]; markerIds: string[] }`. For each caster
+  with an **active** concentration: its listed template ids that still exist (areas and effect-only rows), its listed
+  summon marker ids, and the caster id itself (seal). Empty when nothing is active.
+- Stage: new **interaction prop** `spellHighlight?: { templateIds: string[]; markerIds: string[] }`, copied into the
+  `'stage'` context like `selectedMarkerIds` (never in the `props` root).
+  - AoE areas in `templateIds`: a `uHighlight` uniform (0..1, eased in/out over ~200 ms) that lifts fill opacity
+    and brightness and adds a soft pulsing rim near the edge, plus a full-opacity outline. Uniform only, never a new
+    define, so no program links.
+  - Token effects whose `id` is in `templateIds`, and the concentration seal of casters in `markerIds`: a
+    per-instance `highlight` attribute → brighter, slightly larger (~1.1×), slow pulse. One attribute, no new
+    program.
+  - Summon markers in `markerIds`: outlined like the spell drop-target highlight in `MarkerLayer`.
+  - The pulse is ambient (tier `AMBIENT_FRAME_RATE`); no cost when `spellHighlight` is empty.
+- Editor: `spellHighlight = concentrationHighlight(snapshot, selectedMarkerIds)` (works with several selected).
+- TV (`usePlayTools`): new `focusedMarkerId`. A plain tap on a token (no select/distance mode, no spell aim, not a
+  drag, not a long-press) focuses it if it is concentrating, otherwise clears the focus. Tapping it again or tapping
+  empty map clears it. Cleared when the token is gone or its concentration ends (derived, so no stale highlight).
+  Local only, never synced. Check how the TV reports taps on empty map (`onMarkerSelected(null)` or a map tap
+  callback) and use that.
+- Tests: `concentrationHighlight` (inactive concentration, deleted rows, several casters); TV focus toggling as a pure
+  state helper if it needs more than a couple of lines.
+
+## 4. Level ring (spell slots)
+
+- `spellMenus.ts`: "Cast spell" → `Recent` (as today) + `Cantrips` + one item per slot level `1st`…`Nth`, where N
+  is the highest level of any spell in the current ruleset's catalog. Labels in sentence case ("Cantrips",
+  "1st level"). Keep the top ring ≤ 8 items: if levels ever exceed it, group the higher ones ("6th–9th level").
+- Picking slot S lists every non-cantrip spell with `level ≤ S`. If they fit in one ring (≤ 8), show them directly;
+  otherwise show the existing category rings (and the "Targeted" group), filtered to the non-empty ones, each
+  listing only spells with `level ≤ S`. Sort by level, then name. Cantrips work the same with `level === 0`.
+- The slot travels with the pick: `spellItemId` / `parseSpellItemId` carry `slotLevel` (old ids without it parse
+  to the spell's base level). `RecentSpell` gains optional `slotLevel`; Recent casts at the stored slot.
+- Hub text: name only (phase 6 rule), plus "at 3rd level" when S is above the spell's level.
+- Upcast area: `SpellPreset.upcast?: { sizePerSlot?: number; widthPerSlot?: number }` (feet added per slot above
+  the spell's level), resolved by a pure `spellAreaAtSlot(preset, slotLevel)` in `helpers/spells.ts` (tested).
+  Fog cloud: +20 ft radius per slot above 1st (both rulesets). The implementer checks every catalog spell against
+  the 2014 and 2024 Player's Handbooks for an area that grows with the slot (e.g. 2024 Cloud of daggers), adds it
+  through the ruleset override where it differs, and lists what changed in the final report.
+- `castSpell`, `buildSpellAim` (draft and range use the upcast area), `buildSpellTemplate` and the presence cast all
+  take `slotLevel`. The template row already stores the final size, so no DB or row change.
+- `spellFxToPrewarm` follows the new ring ids (a slot ring or a category-at-slot ring links its spells' FX).
+- Shared by the TV and the editor (both use `spellMenuItem`).
+
+## Files (expected)
+
+Stage: `AoeTemplateLayer/AoeTemplateLayer.svelte`, `AoeTemplateHandles.svelte`, `AoeTemplateMesh.svelte`,
+`AoeTemplateMaterial.ts`, `shaders/AoeTemplate.frag` (highlight uniform), `TokenEffectLayer/*` +
+`shaders/TokenEffect.*` (highlight attribute), `MarkerLayer` (summon outline), `helpers/aoeTemplates.ts`,
+`helpers/spells.ts`, `helpers/spellTargets.ts` (or new `helpers/spellAim.ts`), `Stage.svelte` / `Stage/types.ts`
+(interaction prop + callback), `Scene/types.ts` if orders change (+ tests). Web: `utils/spellMenus.ts`,
+`utils/spellCasting.ts`, `utils/concentration.ts`, `utils/recentSpells.ts`, `GameSession/SpellAimBar.svelte`,
+`play/usePlayTools.svelte.ts`, `play/+page@.svelte`, `play/playMenus.ts`, editor `+page.svelte` /
+`useEditorSpells.svelte.ts` (+ tests). Docs playground: `spellHighlight` toggle (new stage prop rule). Skills/docs
+(SK-1): `stage-rendering` SKILL.md, `docs/tv-radial-menu-architecture.md`. No DB change, no `packages/ui` change.
+
+## Testing
+
+- Unit: label rules, card anchor, two-click decisions, `concentrationHighlight`, level ring contents per slot
+  (≤ 8 per ring, upcast hub text, old item ids), `spellAreaAtSlot`, Recent with slot.
+- Gates: `pnpm run check`, `pnpm run format-check`, stage + web test suites.
+- Manual (user): Thunderwave/Fireball show no text; Moonbeam card only when clicked and not over handles; place
+  Fireball, drag it, click outside, click inside to cast; Enter casts; Esc un-places; tap a Bless caster on the TV
+  and see the three targets and seal pop, tap empty map to clear; Fog cloud at 3rd level is 60 ft radius.
+
+## Edge cases
+
+- Caster deleted while an area is placed: aiming cancels (existing rule).
+- A placed area dragged out of range: refused like placing, it stays at the last valid spot.
+- A spell area that is selected and focused at the same time: both apply (card + highlight).
+- Focused token starts a drag on the TV: the focus stays; a drag is not a tap.
+- Old Recent entries without `slotLevel` cast at base level; old spell areas render unchanged.

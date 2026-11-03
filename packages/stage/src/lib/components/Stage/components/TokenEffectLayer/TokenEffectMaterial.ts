@@ -5,6 +5,7 @@ import type { TokenEffectKind } from '../../helpers/spells';
 import {
   effectStartOnClock,
   MAX_TOKEN_EFFECTS_PER_KIND,
+  TOKEN_EFFECT_HIGHLIGHT_SCALE,
   TOKEN_FX_INDEX,
   type PlacedTokenEffect
 } from '../../helpers/tokenEffects';
@@ -131,6 +132,10 @@ export const createTokenEffectMesh = (material: THREE.ShaderMaterial): TokenEffe
     'aPx',
     new THREE.InstancedBufferAttribute(new Float32Array(MAX_TOKEN_EFFECTS_PER_KIND), 1).setUsage(THREE.DynamicDrawUsage)
   );
+  geometry.setAttribute(
+    'aHighlight',
+    new THREE.InstancedBufferAttribute(new Float32Array(MAX_TOKEN_EFFECTS_PER_KIND), 1).setUsage(THREE.DynamicDrawUsage)
+  );
   const mesh = new THREE.InstancedMesh(geometry, material, MAX_TOKEN_EFFECTS_PER_KIND);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.frustumCulled = false;
@@ -157,12 +162,13 @@ export const writeTokenEffectInstances = (
   const tint = geometry.getAttribute('aTint') as THREE.InstancedBufferAttribute;
   const info = geometry.getAttribute('aInfo') as THREE.InstancedBufferAttribute;
   const px = geometry.getAttribute('aPx') as THREE.InstancedBufferAttribute;
+  const highlight = geometry.getAttribute('aHighlight') as THREE.InstancedBufferAttribute;
   const count = Math.min(placed.length, MAX_TOKEN_EFFECTS_PER_KIND);
 
   for (let i = 0; i < count; i++) {
-    const { effect, x, y, tokenPx, extent, orbitRadii } = placed[i];
+    const { effect, x, y, tokenPx, extent, orbitRadii, highlighted } = placed[i];
     const [r, g, b] = toGlColor(effect.color);
-    const side = extent * tokenPx * 2;
+    const side = extent * tokenPx * 2 * (highlighted ? TOKEN_EFFECT_HIGHLIGHT_SCALE : 1);
     mesh.setMatrixAt(i, scratchMatrix.makeScale(side, side, 1).setPosition(x, y, 0));
     tint.setXYZW(i, r, g, b, templateSeed(effect.id));
     info.setXYZW(
@@ -173,6 +179,7 @@ export const writeTokenEffectInstances = (
       orbitRadii
     );
     px.setX(i, tokenPx);
+    highlight.setX(i, highlighted ? 1 : 0);
   }
   mesh.count = count;
   mesh.visible = count > 0;
@@ -180,6 +187,7 @@ export const writeTokenEffectInstances = (
   tint.needsUpdate = true;
   info.needsUpdate = true;
   px.needsUpdate = true;
+  highlight.needsUpdate = true;
 };
 
 // three.js only checks the link status on a program's first use; forcing it here fills in

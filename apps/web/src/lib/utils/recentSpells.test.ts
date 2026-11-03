@@ -33,6 +33,14 @@ describe('withRecentSpell', () => {
     expect(recent).toHaveLength(2);
   });
 
+  it('replaces a spell cast again at another slot, keeping the newest slot', () => {
+    const recent = withRecentSpell([{ spellId: 'fog-cloud' }, { spellId: 'web' }], {
+      spellId: 'fog-cloud',
+      slotLevel: 3
+    });
+    expect(recent).toEqual([{ spellId: 'fog-cloud', slotLevel: 3 }, { spellId: 'web' }]);
+  });
+
   it('keeps at most eight', () => {
     const many = Array.from({ length: RECENT_SPELLS_MAX }, (_, index) => ({ spellId: `s${index}` }));
     const recent = withRecentSpell(many, { spellId: 'new' });
@@ -52,6 +60,13 @@ describe('recent spells storage', () => {
   it('drops malformed entries and survives corrupt data', () => {
     stubStorage({ [RECENT_SPELLS_KEY]: JSON.stringify([{ spellId: 'web' }, 4, { spellId: 7 }, null]) });
     expect(readRecentSpells()).toEqual([{ spellId: 'web' }]);
+    stubStorage({
+      [RECENT_SPELLS_KEY]: JSON.stringify([
+        { spellId: 'fog-cloud', slotLevel: 3 },
+        { spellId: 'web', slotLevel: '3' }
+      ])
+    });
+    expect(readRecentSpells()).toEqual([{ spellId: 'fog-cloud', slotLevel: 3 }]);
     stubStorage({ [RECENT_SPELLS_KEY]: '{not json' });
     expect(readRecentSpells()).toEqual([]);
   });

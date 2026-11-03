@@ -142,7 +142,26 @@ export interface PlacedTokenEffect {
   extent: number;
   /** Orbit or glow radius in token radii (0 when the kind has none) */
   orbitRadii: number;
+  /** Part of a focused concentration: drawn brighter, a little larger, with a slow pulse */
+  highlighted: boolean;
 }
+
+/** A focused concentration: effects by id, and the casters whose seal is lit */
+export interface TokenEffectHighlight {
+  templateIds: ReadonlySet<string>;
+  markerIds: ReadonlySet<string>;
+}
+
+/** How much larger a highlighted effect is drawn */
+export const TOKEN_EFFECT_HIGHLIGHT_SCALE = 1.1;
+
+/** Whether the focus lights an effect: an effect by its id, a concentration seal by its caster */
+export const isTokenEffectHighlighted = (
+  effect: Pick<TokenEffect, 'id' | 'fx' | 'markerId'>,
+  highlight: TokenEffectHighlight | undefined
+) =>
+  !!highlight &&
+  (highlight.templateIds.has(effect.id) || (effect.fx === 'concentration' && highlight.markerIds.has(effect.markerId)));
 
 export interface TokenEffectPlacement {
   cellPx: number;
@@ -151,6 +170,7 @@ export interface TokenEffectPlacement {
   mode: StageMode;
   /** The marker layer is off: no tokens are drawn, so nothing is bound to them */
   tokensVisible: boolean;
+  highlight?: TokenEffectHighlight;
 }
 
 /**
@@ -160,7 +180,7 @@ export interface TokenEffectPlacement {
 export const placeTokenEffects = (
   effects: readonly TokenEffect[],
   markers: readonly PlacedMarker[],
-  { cellPx, ftToPx, mode, tokensVisible }: TokenEffectPlacement
+  { cellPx, ftToPx, mode, tokensVisible, highlight }: TokenEffectPlacement
 ): PlacedTokenEffect[] => {
   if (!tokensVisible || effects.length === 0) return [];
   const byId = new Map(markers.map((marker) => [marker.id, marker]));
@@ -182,7 +202,8 @@ export const placeTokenEffects = (
         y: marker.position.y,
         tokenPx,
         extent: tokenFxExtent(effect.fx, orbitRadii),
-        orbitRadii
+        orbitRadii,
+        highlighted: isTokenEffectHighlighted(effect, highlight)
       }
     ];
   });
@@ -203,8 +224,8 @@ export const groupPlacedByKind = (placed: readonly PlacedTokenEffect[]): Map<Tok
 export const placedEffectsSignature = (placed: readonly PlacedTokenEffect[]): string =>
   placed
     .map(
-      ({ effect, x, y, tokenPx, extent, orbitRadii }) =>
-        `${effect.id}|${x}|${y}|${tokenPx}|${extent}|${orbitRadii}|${effect.color}|${effect.variant ?? 0}|${effect.startedAt}`
+      ({ effect, x, y, tokenPx, extent, orbitRadii, highlighted }) =>
+        `${effect.id}|${x}|${y}|${tokenPx}|${extent}|${orbitRadii}|${effect.color}|${effect.variant ?? 0}|${effect.startedAt}|${highlighted ? 1 : 0}`
     )
     .join(';');
 

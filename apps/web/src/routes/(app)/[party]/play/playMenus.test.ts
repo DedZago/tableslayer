@@ -80,10 +80,11 @@ describe('generalMenu', () => {
       selectionCount: 0,
       spells
     });
-    const auras = find(find(items, SPELL_MENU_ROOT_ID)!.submenu, 'spell-category:aura')!;
-    expect(find(auras.submenu, 'spell:spirit-guardians')?.disabled).toBeUndefined();
+    const auras = (root: RadialMenuItemProps) =>
+      find(find(root.submenu, 'spell-slot:3')!.submenu, 'spell-category:aura@3')!.submenu;
+    expect(find(auras(find(items, SPELL_MENU_ROOT_ID)!), 'spell:spirit-guardians')?.disabled).toBeUndefined();
     const general = find(generalMenu(idle), SPELL_MENU_ROOT_ID)!;
-    expect(find(find(general.submenu, 'spell-category:aura')!.submenu, 'spell:spirit-guardians')).toMatchObject({
+    expect(find(auras(general), 'spell:spirit-guardians')).toMatchObject({
       disabled: true,
       hint: 'Pick a token'
     });

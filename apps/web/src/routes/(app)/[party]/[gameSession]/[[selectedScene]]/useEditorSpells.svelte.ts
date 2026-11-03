@@ -25,10 +25,11 @@ import {
 } from '$lib/utils/spellMenus';
 import {
   MapLayerType,
-  resolveSpell,
+  resolveSpellAtSlot,
   StageMode,
   type RadialMenuItemProps,
   type SpellAimed,
+  type SpellAimPlaced,
   type SpellAreaTargets,
   type SpellTargeted,
   type StageExports,
@@ -63,6 +64,7 @@ export class EditorSpells {
     | ({
         spellId: string;
         variantId?: string;
+        slotLevel?: number;
         casterId?: string;
         previousLayer: MapLayerType;
       } & SpellAimPicks)
@@ -78,6 +80,12 @@ export class EditorSpells {
 
   #casterRow(markerId: string | undefined): CasterMarker | undefined {
     return markerId ? this.#options.getMarkerRow(markerId) : undefined;
+  }
+
+  /** The aimed spell as its slot casts it (an upcast area is larger) */
+  #aimedSpell() {
+    const aim = this.aim;
+    return aim ? resolveSpellAtSlot(aim.spellId, this.#options.session.ruleset, aim.slotLevel) : null;
   }
 
   #selectedCaster(): CasterMarker | undefined {
@@ -128,7 +136,7 @@ export class EditorSpells {
   select(itemId: string) {
     const picked = parseSpellItemId(itemId);
     if (!picked) return;
-    const spell = resolveSpell(picked.spellId, this.#options.session.ruleset);
+    const spell = resolveSpellAtSlot(picked.spellId, this.#options.session.ruleset, picked.slotLevel);
     if (!spell) return;
     const caster = this.#selectedCaster();
     if (spellNeedsCaster(spell) && !caster) {
@@ -145,13 +153,12 @@ export class EditorSpells {
     this.aim = { ...picked, casterId: caster?.id, previousLayer: stageProps.activeLayer, ...NO_AIM_PICKS };
     stageProps.aoeTemplates.tool = { ...stageProps.aoeTemplates.tool, spell: aim };
     this.#options.setActiveLayer(MapLayerType.AoeTemplate);
-    if (!isPickedAim(aim)) this.#options.notify(`${spellAimPrompt(spell.name, aim, { mouse: true })}. Esc cancels`);
   }
 
   /** The aim as the stage gets it, with the placed area and the picks so far */
   #syncAim() {
     const aim = this.aim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const spell = this.#aimedSpell();
     const templates = this.#options.getStageProps().aoeTemplates;
     if (!aim || !spell || !templates) return;
     const settings = buildSpellAim(spell, aim.variantId, this.#casterRow(aim.casterId), spellAimProgress(spell, aim));
@@ -161,17 +168,34 @@ export class EditorSpells {
   /** The tokens the spell would be cast on, as the cast bar counts them */
   get pickedCount(): number {
     const aim = this.aim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const spell = this.#aimedSpell();
     return aim && spell ? spellPickedMarkerIds(spell, aim).length : 0;
   }
 
-  /** Target and area-pick aim: what the cast bar says ("Click targets for Bless", "Slow: 2 of 4 creatures · drag to move") */
-  get targetPrompt(): string | null {
-    const aim = this.aim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+  /** An area spell placed by its first click, waiting for the click inside it that casts */
+  get isPlaced(): boolean {
     const settings = this.#options.getStageProps().aoeTemplates?.tool.spell;
-    if (!aim || !spell || !settings || !isPickedAim(settings)) return null;
-    return spellAimPrompt(spell.name, settings, { mouse: true, picked: this.pickedCount, inside: aim.inside.length });
+    return !!this.aim?.placement && !!settings && !isPickedAim(settings);
+  }
+
+  /** What the cast bar says ("Click where to place Fireball", "Click targets for Bless", "Slow: 2 of 4 creatures · drag to move") */
+  get aimPrompt(): string | null {
+    const aim = this.aim;
+    const spell = this.#aimedSpell();
+    const settings = this.#options.getStageProps().aoeTemplates?.tool.spell;
+    if (!aim || !spell || !settings) return null;
+    return spellAimPrompt(spell.name, settings, {
+      mouse: true,
+      picked: this.pickedCount,
+      inside: aim.inside.length,
+      placed: this.isPlaced
+    });
+  }
+
+  /** Escape: a placed area goes back to following the pointer first, then the aim is cancelled */
+  escape() {
+    if (this.isPlaced && this.#options.getStage()?.aoeTemplates.unplaceSpellAim()) return;
+    this.cancelAim();
   }
 
   /** Drops the aim and puts the tool layer back; a no-op when nothing is aimed */
@@ -195,9 +219,17 @@ export class EditorSpells {
     this.#cast({
       spellId,
       variantId: aim.variantId,
+      slotLevel: aim.slotLevel,
       placement: { position, angle },
       caster: this.#casterRow(aim.casterId)
     });
+  };
+
+  /** Stage callback: an area spell was placed, moved, or un-placed; Enter casts the last placement */
+  onSpellAimPlaced = (placed: SpellAimPlaced) => {
+    const aim = this.aim;
+    if (!aim || (placed && aim.spellId !== placed.spellId)) return;
+    this.aim = { ...aim, placement: placed && { position: placed.position, angle: placed.angle } };
   };
 
   /** Stage callback: a token was clicked while a targeted spell is aimed; it toggles in or out of the picks */
@@ -216,11 +248,18 @@ export class EditorSpells {
     this.#syncAim();
   };
 
-  /** Casts the targeted spell once on every picked token that still exists; Enter or the cast bar's button */
-  confirmTargets() {
+  /**
+   * Enter or the cast bar's button: a placed area spell casts where it sits; a targeted spell casts once on every
+   * picked token that still exists
+   */
+  confirmAim() {
     const aim = this.aim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const spell = this.#aimedSpell();
     if (!aim || !spell) return;
+    if (this.isPlaced && aim.placement) {
+      this.onSpellAimed({ spellId: aim.spellId, ...aim.placement });
+      return;
+    }
     const targets = spellPickedMarkerIds(spell, aim).flatMap((id) => this.#options.getMarkerRow(id) ?? []);
     if (targets.length === 0) return;
     this.cancelAim();

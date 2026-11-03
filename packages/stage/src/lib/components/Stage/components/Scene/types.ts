@@ -36,6 +36,7 @@ export enum SceneLayerOrder {
   Grid = 50,
   EdgeOverlay = 70,
   Annotation = 80, // Color annotations render over fog of war
+  AoeLabel = 89.5, // Spell cards and "Click to cast" tags sit beside an area, under its outline and handles
   Measurement = 90,
   TvViewport = 95, // DM-only TV viewport rectangle; dims everything outside the playfield
   Cursor = 100

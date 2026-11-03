@@ -171,6 +171,7 @@
   import TvConditionForm from '../../play/TvConditionForm.svelte';
   import { groupItems, menuMembers } from '../../play/playMenus';
   import { parseSpellItemId } from '$lib/utils/spellMenus';
+  import { concentrationHighlight } from '$lib/utils/concentration';
   import { MENU_ID } from '../../play/playMenus';
 
   let { data } = $props();
@@ -1488,6 +1489,11 @@
     notify: (title) => addToast({ data: { title, type: 'info' } })
   });
 
+  // Selecting a concentrating token lights up everything its concentration holds
+  const spellHighlight = $derived(
+    concentrationHighlight(session.client?.scene(selectedSceneId) ?? null, selectedMarkerIds)
+  );
+
   // Aiming ends when the scene changes, another tool takes over, or the caster is deleted
   $effect(() => {
     void selectedSceneId;
@@ -2648,10 +2654,10 @@
     if (spells.aim) {
       if (event.key === 'Escape') {
         event.preventDefault();
-        spells.cancelAim();
+        spells.escape();
       } else if (event.key === 'Enter') {
         event.preventDefault();
-        spells.confirmTargets();
+        spells.confirmAim();
       }
       return;
     }
@@ -3005,6 +3011,7 @@
             {selectedLightIds}
             {distanceMode}
             spellCasts={session.presence?.activeCasts}
+            {spellHighlight}
             onMarkerVisibilityToggle={toggleMarkerVisibility}
             dropTargetMarkerId={artworkDropTargetId}
             {activeTurnMarkerId}
@@ -3039,6 +3046,7 @@
               onAoeTemplateDeleted: removeAoeTemplate,
               onAoeTemplateMenu,
               onSpellAimed: spells.onSpellAimed,
+              onSpellAimPlaced: spells.onSpellAimPlaced,
               onSpellTargeted: spells.onSpellTargeted,
               onSpellAreaTargets: spells.onSpellAreaTargets,
               onSpellAimCancelled: () => spells.cancelAim(),
@@ -3153,11 +3161,11 @@
             onCancel={() => (conditionForm = null)}
           />
         {/if}
-        {#if spells.targetPrompt}
+        {#if spells.aimPrompt}
           <SpellAimBar
-            prompt={spells.targetPrompt}
+            prompt={spells.aimPrompt}
             castLabel={spells.pickedCount ? 'Cast (Enter)' : null}
-            onCast={() => spells.confirmTargets()}
+            onCast={() => spells.confirmAim()}
             onCancel={() => spells.cancelAim()}
           />
         {/if}

@@ -4,6 +4,7 @@ import type {
   AoeTemplateLayerExports,
   AoeTemplateLayerProps,
   SpellAimed,
+  SpellAimPlaced,
   SpellAreaTargets,
   SpellTargeted
 } from '../AoeTemplateLayer/types';
@@ -65,8 +66,14 @@ export interface Callbacks {
   onAoeTemplateDeleted?: (id: string) => void;
   /** A shape was right-clicked (mouse) or held down (touch); `position` is in client pixels */
   onAoeTemplateMenu?: (id: string, position: { x: number; y: number }, trigger: 'contextmenu' | 'longpress') => void;
-  /** A spell set in the AoE tool's `spell` was aimed and placed */
+  /** A spell set in the AoE tool's `spell` was cast: its placed area was clicked or tapped inside */
   onSpellAimed?: (aimed: SpellAimed) => void;
+  /**
+   * An area spell was placed (the first click), moved, or went back to following the pointer (null).
+   * The consumer keeps the last placement so Enter can cast it, and un-places it on Escape
+   * through `StageExports.aoeTemplates.unplaceSpellAim`
+   */
+  onSpellAimPlaced?: (placed: SpellAimPlaced) => void;
   /** A token was picked for a spell aimed in `target` mode; the aim stays until the consumer ends it */
   onSpellTargeted?: (targeted: SpellTargeted) => void;
   /**
@@ -93,6 +100,16 @@ export interface StageInteractionProps {
   distanceMode?: boolean;
   /** Transient spell animations to play; the consumer prunes them after `durationMs` */
   spellCasts?: SpellCast[];
+  /**
+   * A focused concentration: its areas and token effects (by template id) glow and pulse, and the tokens listed
+   * (its summons and the caster) are outlined, the caster's seal brightened
+   */
+  spellHighlight?: SpellHighlight;
+}
+
+export interface SpellHighlight {
+  templateIds: string[];
+  markerIds: string[];
 }
 
 export enum StageMode {

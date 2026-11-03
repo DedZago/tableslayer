@@ -17,6 +17,7 @@ import {
   spellAimDraft,
   spellAimPlacement,
   spellRangeRadiusPx,
+  templateCardAnchor,
   templateExpiryFade,
   templateFadeMs,
   templateIntersectsRect,
@@ -162,11 +163,48 @@ describe('getTemplateOutline', () => {
 });
 
 describe('spell area labels', () => {
-  it('never carries dimensions for a spell area, even while sizing it', () => {
+  it('shows only the name of a spell aim draft, never its dimensions', () => {
     const spell = makeTemplate({ size: 20, label: 'Fireball', spellId: 'fireball' });
     expect(formatTemplateLabel(spell)).toBe('Fireball');
     expect(formatTemplateLabel(spell, true)).toBe('Fireball');
     expect(formatTemplateLabel(makeTemplate({ spellId: 'web' }), true)).toBe('');
+  });
+
+  it('gives a placed spell area no text at all, while a hand-drawn area keeps its name', () => {
+    expect(formatTemplateLabel(makeTemplate({ label: 'Moonbeam', spellId: 'moonbeam' }), false)).toBe('');
+    expect(formatTemplateLabel(makeTemplate({ label: 'Trap' }), false)).toBe('Trap');
+    expect(formatTemplateLabel(makeTemplate({ label: 'Trap', size: 10 }), true)).toBe('Trap · 10 ft radius');
+  });
+});
+
+describe('templateCardAnchor', () => {
+  const ftPerPx = 0.1;
+  const handleRadius = 5;
+
+  it('sits above a circle on screen, by the gap', () => {
+    const anchor = templateCardAnchor(makeTemplate({ size: 20 }), ftPerPx, 0, 10);
+    expect(anchor.x).toBeCloseTo(0);
+    expect(anchor.y).toBeCloseTo(200 + 10);
+  });
+
+  it('clears the end handle of a cone pointing up', () => {
+    const cone = makeTemplate({ shape: AoeShape.Cone, size: 30, angle: 90, position: { x: 50, y: 0 } });
+    const anchor = templateCardAnchor(cone, ftPerPx, 0, 2 * handleRadius, handleRadius);
+    expect(anchor.x).toBeCloseTo(50);
+    expect(anchor.y).toBeCloseTo(300 + handleRadius + 2 * handleRadius);
+  });
+
+  it('follows the screen up direction when the scene is rotated', () => {
+    const cone = makeTemplate({ shape: AoeShape.Cone, size: 30, angle: 90, position: { x: 50, y: 0 } });
+    // Turned half way, screen up is layer -y: the card goes past the apex and its origin handle
+    const anchor = templateCardAnchor(cone, ftPerPx, 180, 2 * handleRadius, handleRadius);
+    expect(anchor.x).toBeCloseTo(50);
+    expect(anchor.y).toBeCloseTo(-(handleRadius + 2 * handleRadius));
+    // A quarter turn: screen up is layer -x, so the card sits to the left of a square
+    const square = makeTemplate({ shape: AoeShape.Square, size: 20, position: { x: 0, y: 0 } });
+    const side = templateCardAnchor(square, ftPerPx, 90, 10);
+    expect(side.x).toBeCloseTo(-10);
+    expect(side.y).toBeCloseTo(0);
   });
 
   it('marks the aim draft with its spell', () => {

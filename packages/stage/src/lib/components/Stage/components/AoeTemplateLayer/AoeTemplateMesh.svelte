@@ -4,6 +4,7 @@
   import { getContext, onDestroy, untrack } from 'svelte';
   import type { AoeEffect, AoeTemplate } from './types';
   import type { PerformanceTier } from '../Stage/types';
+  import type { FramePacer } from '../../helpers/framePacing';
   import { SceneLayer, SceneLayerOrder } from '../Scene/types';
   import { mapClippingPlaneStore } from '../../helpers/clippingPlaneStore.svelte';
   import { getTemplateLocalBounds, templateExpiryFade, templateFadeMs, templateSeed } from '../../helpers/aoeTemplates';
@@ -24,13 +25,18 @@
     ftToPx: number;
     sharedTime: { value: number };
     isDraft?: boolean;
+    /** Part of a focused concentration: the fill eases into a brighter, pulsing look */
+    highlighted?: boolean;
     performanceTier: PerformanceTier;
   }
 
-  const { template, ftToPx, sharedTime, isDraft = false, performanceTier }: Props = $props();
+  const { template, ftToPx, sharedTime, isDraft = false, highlighted = false, performanceTier }: Props = $props();
+
+  const HIGHLIGHT_EASE_S = 0.2;
 
   const { renderer, camera, scene } = useThrelte();
   const stage = getContext<{ mainPassUsesComposer: boolean }>('stage');
+  const framePacer = getContext<FramePacer | undefined>('framePacer');
 
   const material = createAoeTemplateMaterial(
     untrack(() => template.effect),
@@ -96,6 +102,25 @@
       material.uniforms.uFade.value = templateExpiryFade(expiresAt, Date.now(), fadeMs);
     },
     { running: () => expiresAt != null }
+  );
+
+  // The ease is a short transient, so it runs at full rate; the pulse after it is the layer's ambient loop
+  let easing = $state(false);
+  $effect(() => {
+    void highlighted;
+    easing = true;
+  });
+  useTask(
+    (delta) => {
+      const uniform = material.uniforms.uHighlight;
+      const target = highlighted ? 1 : 0;
+      const step = delta / HIGHLIGHT_EASE_S;
+      uniform.value =
+        target > uniform.value ? Math.min(target, uniform.value + step) : Math.max(target, uniform.value - step);
+      if (uniform.value === target) easing = false;
+      else framePacer?.markActive();
+    },
+    { running: () => easing }
   );
 
   $effect(() => {

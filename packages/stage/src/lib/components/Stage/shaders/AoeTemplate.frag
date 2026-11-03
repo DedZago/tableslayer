@@ -9,6 +9,8 @@ uniform float uSeed;
 uniform float uSpeed;
 uniform float uOpacity;
 uniform float uFade;
+// 0..1, eased by the mesh: a focused concentration lifts the fill and pulses a rim along the edge
+uniform float uHighlight;
 uniform float uSize;
 uniform float uWidth;
 uniform float uFeather;
@@ -448,5 +450,15 @@ void main() {
   float rim = 1.0 - smoothstep(0.0, aa * 1.5, abs(d) - 0.12);
   col.rgb = mix(col.rgb, uColor, rim * 0.5);
   col.a = max(col.a, rim * 0.7 * inside + rim * 0.4);
-  gl_FragColor = vec4(col.rgb, clamp(col.a, 0.0, 1.0) * uOpacity * uFade);
+  float opacity = uOpacity;
+  if (uHighlight > 0.0) {
+    float pulse = 0.5 + 0.5 * sin(uTime * 3.0);
+    float edge = 1.0 - smoothstep(0.0, 2.0, abs(d));
+    col.rgb = mix(col.rgb, col.rgb * 1.3 + uColor * 0.12, uHighlight);
+    col.rgb = mix(col.rgb, mix(uColor, vec3(1.0), 0.35), edge * uHighlight * (0.35 + 0.4 * pulse));
+    col.a = mix(col.a, col.a * 1.35 + 0.08 * inside, uHighlight);
+    col.a = max(col.a, edge * uHighlight * (0.45 + 0.35 * pulse) * max(inside, 0.4));
+    opacity = mix(uOpacity, max(uOpacity, 0.85), uHighlight * 0.6);
+  }
+  gl_FragColor = vec4(col.rgb, clamp(col.a, 0.0, 1.0) * opacity * uFade);
 }

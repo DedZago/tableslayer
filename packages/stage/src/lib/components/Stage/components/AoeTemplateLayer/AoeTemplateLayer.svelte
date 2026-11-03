@@ -31,8 +31,10 @@
     templateFadeMs,
     templateIntersectsRect,
     withAnchoredPosition,
+    type SpellAimPlacement,
     type TemplatePoint
   } from '../../helpers/aoeTemplates';
+  import { isPlacedAreaDrag, placedAreaRelease } from '../../helpers/spellAim';
   import type { Marker } from '../MarkerLayer/types';
   import {
     AoeEffect,
@@ -86,6 +88,7 @@
     spellTargetMarkerId: string | null;
     spellPickedMarkerIds: string[];
     spellEligibleMarkerIds: string[];
+    spellHighlight: { templateIds: string[]; markerIds: string[] };
   }>('stage');
   const framePacer = getContext<FramePacer | undefined>('framePacer');
   const MARKER_CLAIM_WINDOW_MS = 100;
@@ -96,6 +99,7 @@
     onAoeTemplatesSelected,
     onAoeTemplateMenu,
     onSpellAimed,
+    onSpellAimPlaced,
     onSpellAreaTargets,
     onSpellTargeted,
     onSpellAimCancelled
@@ -110,9 +114,6 @@
   // A fingertip covers far more than a mouse pointer, so touch grabs handles from further away
   const TOUCH_GRAB_SCALE = 2;
   const SPELL_DRAFT_ID = 'spell-aim-draft';
-  // A press on a placed spell area becomes a drag only after this far, like a token press
-  const AREA_DRAG_SLOP_MOUSE_PX = 3;
-  const AREA_DRAG_SLOP_TOUCH_PX = 8;
   const NO_MARKER_IDS: string[] = [];
 
   type Interaction =
@@ -136,7 +137,7 @@
   // Animated areas loop at the ambient rate; one that is fading out needs every frame to look smooth
   useTask((delta) => {
     sharedTime.value += delta;
-    if (animatedTemplateCount > 0) framePacer?.markAmbient();
+    if (animatedTemplateCount > 0 || hasHighlight || castCue) framePacer?.markAmbient();
     if (expiryWindows.length === 0) return;
     const nowMs = Date.now();
     if (expiryWindows.some(({ fadeStartMs, expiresAt }) => nowMs >= fadeStartMs && nowMs < expiresAt)) {
@@ -158,8 +159,13 @@
   const spellId = $derived(spell?.spellId);
   const targeting = $derived(spell?.mode === 'target');
   const areaPicking = $derived(spell?.mode === 'area-targets');
-  // Once placed, an area-target aim draws the consumer's placement; until then it follows the pointer
-  const placedArea = $derived(areaPicking ? (spell?.placement ?? null) : null);
+  // An area spell takes two clicks: the first places it, a click inside it casts
+  const twoClick = $derived(!!spell && !targeting && !areaPicking);
+  let placedAim = $state<SpellAimPlacement | null>(null);
+  let lastPressWasTouch = $state(false);
+  // Once placed, an area-target aim draws the consumer's placement and a two-click aim its own; until then it follows the pointer
+  const placedArea = $derived(areaPicking ? (spell?.placement ?? null) : twoClick ? placedAim : null);
+  const castCue = $derived(twoClick && placedAim ? (lastPressWasTouch ? 'Tap to cast' : 'Click to cast') : null);
   let spellAim = $state<{ start: TemplatePoint | null; pointer: TemplatePoint | null }>({ start: null, pointer: null });
   let areaPress: {
     grab: TemplatePoint;
@@ -202,7 +208,9 @@
 
   // The visible tokens inside the placed area; recomputed only when the area, a token or the viewer changes
   const insideIds = $derived(
-    placedArea && spellDraft ? markersInSpellArea(spellDraft, markers, { cellPx, ftPerPx, mode }) : NO_MARKER_IDS
+    areaPicking && placedArea && spellDraft
+      ? markersInSpellArea(spellDraft, markers, { cellPx, ftPerPx, mode })
+      : NO_MARKER_IDS
   );
 
   const pickedMarkerIds = $derived(targeting || areaPicking ? (spell?.pickedMarkerIds ?? []) : []);
@@ -302,9 +310,22 @@
     drawnTemplates.filter((template) => template.effect !== AoeEffect.None || template.expiresAt != null).length
   );
 
+  // Keyed on the ids, so a consumer rebuilding the same highlight changes nothing
+  const highlightKey = $derived(stage.spellHighlight?.templateIds.join('|') ?? '');
+  const highlightedIds = $derived(new Set(highlightKey ? highlightKey.split('|') : []));
+  const hasHighlight = $derived(drawnTemplates.some((template) => highlightedIds.has(template.id)));
   $effect(() => {
     if (!isActive) untrack(() => endInteraction());
   });
+
+  // Reported to the consumer so Enter can cast the placed area and Esc can un-place it
+  const setPlacedAim = (placement: SpellAimPlacement | null) => {
+    const wasPlaced = placedAim !== null;
+    placedAim = placement;
+    if (!placement && !wasPlaced) return;
+    const id = untrack(() => spellId);
+    onSpellAimPlaced?.(placement && id ? { spellId: id, position: placement.position, angle: placement.angle } : null);
+  };
 
   // A different spell, or leaving the layer, drops the aim so it can't carry over
   $effect(() => {
@@ -313,6 +334,7 @@
       spellAim = { start: null, pointer: null };
       areaPress = null;
       lastAreaReport = null;
+      setPlacedAim(null);
     });
   });
 
@@ -504,18 +526,34 @@
     onSpellTargeted?.({ spellId: spell.spellId, markerId: targetedMarkerId });
   };
 
+  // The click that used to cast now places the area; a second click inside it casts
   const completeSpellAim = () => {
     if (!spell || !spellPlacement) return;
     if (areaPicking && spellDraft) {
       const markerIds = markersInSpellArea(spellDraft, markers, { cellPx, ftPerPx, mode });
       reportAreaTargets({ spellId: spell.spellId, placement: spellPlacement, markerIds });
     } else {
-      onSpellAimed?.({ spellId: spell.spellId, position: spellPlacement.position, angle: spellPlacement.angle });
+      setPlacedAim({ position: { ...spellPlacement.position }, angle: spellPlacement.angle });
     }
     spellAim = { start: null, pointer: null };
   };
 
-  // A press on the placed area is a tap on a token inside it (toggle) until it travels, then it drags the area
+  // Point aim keeps where the area was grabbed and snaps like placement; direction aim re-aims about its origin
+  const movedPlacement = (
+    aimed: SpellAimSettings,
+    placed: SpellAimPlacement,
+    pointer: TemplatePoint,
+    e: MouseEvent | TouchEvent | null
+  ) =>
+    spellAimPlacement(aimed, {
+      pointer: aimed.aim === 'point' ? snapPoint(pointer, e instanceof MouseEvent && e.altKey) : pointer,
+      start: placed.position,
+      ftPerPx,
+      cellPx,
+      snapAngle: props.tool.snapAngle
+    });
+
+  // A press on a placed area is a click (a token toggle for an area-target aim, a cast or move for a two-click one) until it travels, then it drags the area
   const pressPlacedArea = (
     aimed: SpellAimSettings,
     placed: NonNullable<typeof placedArea>,
@@ -529,11 +567,11 @@
       from: point,
       isTouch,
       crossed: false,
-      tapId: under && insideIds.includes(under) ? under : null
+      tapId: areaPicking && under && insideIds.includes(under) ? under : null
     };
   };
 
-  // Point aim keeps where the area was grabbed and snaps like placement; direction aim re-aims about its origin
+  // Past the drag slop a press moves the placed area, and an area-target aim reports who is inside it now
   const dragPlacedArea = (
     aimed: SpellAimSettings,
     placed: NonNullable<typeof placedArea>,
@@ -546,20 +584,14 @@
       areaPress = null;
       return;
     }
-    const slop = press.isTouch ? AREA_DRAG_SLOP_TOUCH_PX : AREA_DRAG_SLOP_MOUSE_PX;
-    if (!press.crossed && Math.hypot(point.x - press.from.x, point.y - press.from.y) < slop) return;
+    if (!press.crossed && !isPlacedAreaDrag(press.from, point, press.isTouch)) return;
     press.crossed = true;
-    const pointer =
-      aimed.aim === 'point'
-        ? snapPoint({ x: point.x - press.grab.x, y: point.y - press.grab.y }, e instanceof MouseEvent && e.altKey)
-        : point;
-    const placement = spellAimPlacement(aimed, {
-      pointer,
-      start: placed.position,
-      ftPerPx,
-      cellPx,
-      snapAngle: props.tool.snapAngle
-    });
+    const grabbed = aimed.aim === 'point' ? { x: point.x - press.grab.x, y: point.y - press.grab.y } : point;
+    const placement = movedPlacement(aimed, placed, grabbed, e);
+    if (!areaPicking) {
+      setPlacedAim(placement);
+      return;
+    }
     const moved = spellAimDraft(aimed, placement, {
       id: SPELL_DRAFT_ID,
       opacity: props.tool.opacity,
@@ -572,15 +604,26 @@
     });
   };
 
-  const releasePlacedArea = (aimed: SpellAimSettings, coords: THREE.Vector2 | null) => {
+  const releasePlacedArea = (aimed: SpellAimSettings, coords: THREE.Vector2 | null, e: MouseEvent | TouchEvent) => {
     const press = areaPress;
     areaPress = null;
-    if (coords && press && !press.crossed && press.tapId) {
-      onSpellTargeted?.({ spellId: aimed.spellId, markerId: press.tapId });
+    if (!coords || !press) return;
+    if (areaPicking) {
+      if (!press.crossed && press.tapId) onSpellTargeted?.({ spellId: aimed.spellId, markerId: press.tapId });
+      return;
+    }
+    const placed = placedAim;
+    if (!placed || !spellDraft) return;
+    const action = placedAreaRelease(spellDraft, press.from, { dragged: press.crossed, ftPerPx });
+    if (action === 'cast') {
+      setPlacedAim(null);
+      onSpellAimed?.({ spellId: aimed.spellId, position: placed.position, angle: placed.angle });
+    } else if (action === 'move') {
+      setPlacedAim(movedPlacement(aimed, placed, press.from, e));
     }
   };
 
-  // Touch commits on release (press, drag to aim, lift); a mouse press commits, unless it only fixed the start
+  // Touch places on release (press, drag to aim, lift); a mouse press places, unless it only fixed the start
   const pressSpell = (aimed: SpellAimSettings, point: TemplatePoint, isTouch: boolean) => {
     if (aimed.mode === 'target') {
       spellAim = { start: null, pointer: point };
@@ -596,7 +639,9 @@
     if (spell) {
       if (!(e instanceof MouseEvent) || (e as PointerEvent).pointerType === 'touch') return;
       e.preventDefault();
-      onSpellAimCancelled?.();
+      // A placed area goes back to following the pointer first; a second right-click cancels
+      if (twoClick && placedAim) unplaceSpellAim();
+      else onSpellAimCancelled?.();
       return;
     }
     if (!coords || !(e instanceof MouseEvent)) return;
@@ -615,6 +660,7 @@
     if (isTouchEvent(e) && e.touches.length !== 1) return;
 
     if (spell) {
+      lastPressWasTouch = isTouchEvent(e);
       if (placedArea) pressPlacedArea(spell, placedArea, toLayerPoint(coords), isTouchEvent(e));
       else pressSpell(spell, aimedPoint(spell, coords, e), isTouchEvent(e));
       return;
@@ -739,8 +785,11 @@
 
   const onMouseUp = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
     if (spell) {
-      if (placedArea || areaPress) releasePlacedArea(spell, coords);
-      if (placedArea || !isTouchEvent(e)) return;
+      if (placedArea || areaPress) {
+        releasePlacedArea(spell, coords, e);
+        return;
+      }
+      if (!isTouchEvent(e)) return;
       if (!coords) spellAim = { start: null, pointer: null };
       else if (targeting) completeSpellTarget();
       else completeSpellAim();
@@ -793,6 +842,15 @@
     if (hasDraft()) interaction = { kind: 'idle' };
     spellAim = { start: null, pointer: null };
     areaPress = null;
+    setPlacedAim(null);
+  };
+
+  /** Sends a placed, not yet cast, area back to following the pointer; false when nothing was placed */
+  export const unplaceSpellAim = () => {
+    if (!placedAim) return false;
+    areaPress = null;
+    setPlacedAim(null);
+    return true;
   };
 
   // Leaving the tool drops any half-drawn shape so it can't follow later gestures
@@ -834,7 +892,8 @@
     {template}
     {ftToPx}
     {sharedTime}
-    isDraft={draft?.id === template.id}
+    isDraft={draft?.id === template.id && !castCue}
+    highlighted={highlightedIds.has(template.id)}
     performanceTier={stage.performanceTier}
   />
 {/each}
@@ -850,8 +909,10 @@
       {sceneRotation}
       {mapRotation}
       isSelected={hasHandles(template.id)}
-      isDraft={draft?.id === template.id}
+      isDraft={draft?.id === template.id && !castCue}
       showLabel={props.showLabels}
+      cue={draft?.id === template.id ? castCue : null}
+      isHighlighted={highlightedIds.has(template.id)}
     />
   {/if}
 {/each}

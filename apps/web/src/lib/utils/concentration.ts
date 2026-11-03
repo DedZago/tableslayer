@@ -52,3 +52,56 @@ export const remapConcentration = (
   };
   return remapped.templateIds.length === 0 && remapped.markerIds.length === 0 ? null : remapped;
 };
+
+/** What a focused concentration lights up on the stage */
+export interface ConcentrationHighlight {
+  templateIds: string[];
+  markerIds: string[];
+}
+
+export const NO_CONCENTRATION_HIGHLIGHT: ConcentrationHighlight = { templateIds: [], markerIds: [] };
+
+type HighlightSnapshot = {
+  markers: ReadonlyArray<{ id: string; concentration?: MarkerConcentration | null }>;
+  aoeTemplates: ReadonlyArray<{ id: string }>;
+};
+
+/**
+ * Everything the active concentrations of `casterIds` hold: their areas and token effects that still exist, their
+ * summons, and the casters themselves (for the seal). Casters that are not concentrating add nothing.
+ */
+export const concentrationHighlight = (
+  snapshot: HighlightSnapshot | null | undefined,
+  casterIds: readonly string[]
+): ConcentrationHighlight => {
+  if (!snapshot || casterIds.length === 0) return NO_CONCENTRATION_HIGHLIGHT;
+  const existing = {
+    templateIds: new Set(snapshot.aoeTemplates.map((row) => row.id)),
+    markerIds: new Set(snapshot.markers.map((row) => row.id))
+  };
+  const templateIds = new Set<string>();
+  const markerIds = new Set<string>();
+  for (const casterId of casterIds) {
+    const caster = snapshot.markers.find((marker) => marker.id === casterId);
+    const live = liveConcentration(caster?.concentration, existing);
+    if (!live) continue;
+    live.templateIds.forEach((id) => templateIds.add(id));
+    live.markerIds.forEach((id) => markerIds.add(id));
+    markerIds.add(casterId);
+  }
+  if (markerIds.size === 0) return NO_CONCENTRATION_HIGHLIGHT;
+  return { templateIds: [...templateIds], markerIds: [...markerIds] };
+};
+
+/**
+ * The TV's focus after a tap: a concentrating token tapped becomes the focus, tapping the focused token again,
+ * any other token, or empty map clears it
+ */
+export const nextConcentrationFocus = (
+  focusedId: string | null,
+  tappedId: string | null,
+  isConcentrating: (markerId: string) => boolean
+): string | null => {
+  if (!tappedId || tappedId === focusedId) return null;
+  return isConcentrating(tappedId) ? tappedId : null;
+};

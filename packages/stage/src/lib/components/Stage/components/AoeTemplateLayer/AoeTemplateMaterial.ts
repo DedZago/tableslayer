@@ -62,6 +62,7 @@ export const createAoeTemplateMaterial = (
       uSpeed: { value: 1 },
       uOpacity: { value: 1 },
       uFade: { value: 1 },
+      uHighlight: { value: 0 },
       uSize: { value: 0 },
       uWidth: { value: 0 },
       uFeather: { value: TEMPLATE_FEATHER_FT },

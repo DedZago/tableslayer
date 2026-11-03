@@ -244,14 +244,54 @@ export const rotateTemplateAngle = (shape: AoeShape, angleDeg: number, deltaDeg:
       )
     : normalizeAngle(angleDeg + deltaDeg);
 
-export const formatTemplateLabel = (template: AoeTemplate, includeDimensions = true): string => {
+/**
+ * The plain label of an area. A hand-drawn area shows its name, plus its dimensions while it is the draft.
+ * A spell area never shows dimensions, and shows its name only while it is the aim draft.
+ */
+export const formatTemplateLabel = (template: AoeTemplate, isDraft = true): string => {
   const label = template.label?.trim();
-  if (!includeDimensions || template.spellId) return label ?? '';
+  if (template.spellId) return isDraft ? (label ?? '') : '';
+  if (!isDraft) return label ?? '';
   const dimensions =
     template.shape === AoeShape.Line
       ? `${template.size} × ${template.width} ft line`
       : `${template.size} ft ${SHAPE_NOUNS[template.shape]}`;
   return label ? `${label} · ${dimensions}` : dimensions;
+};
+
+/**
+ * Where a card or tag beside an area sits, in layer px: the midpoint of the card's bottom edge, `gapPx` above the
+ * area's top on screen, and above its handle discs (`handleRadiusPx` around the origin and end) so it never covers
+ * them. `screenRotationDeg` is the rotation that makes text upright (scene rotation minus map rotation): the
+ * card's "up" is +y turned by it.
+ */
+export const templateCardAnchor = (
+  template: AoeTemplate,
+  ftPerPx: number,
+  screenRotationDeg: number,
+  gapPx: number,
+  handleRadiusPx = 0
+): TemplatePoint => {
+  const rad = toRadians(screenRotationDeg);
+  const up = { x: -Math.sin(rad), y: Math.cos(rad) };
+  const right = { x: Math.cos(rad), y: Math.sin(rad) };
+  let top = -Infinity;
+  let minRight = Infinity;
+  let maxRight = -Infinity;
+  for (const local of getTemplateOutline(template)) {
+    const point = templateLocalToLayer(template, local, ftPerPx);
+    top = Math.max(top, point.x * up.x + point.y * up.y);
+    const across = point.x * right.x + point.y * right.y;
+    minRight = Math.min(minRight, across);
+    maxRight = Math.max(maxRight, across);
+  }
+  if (handleRadiusPx > 0) {
+    const { origin, end } = getTemplateHandlePoints(template, ftPerPx);
+    for (const handle of [origin, end]) top = Math.max(top, handle.x * up.x + handle.y * up.y + handleRadiusPx);
+  }
+  const across = (minRight + maxRight) / 2;
+  const height = top + gapPx;
+  return { x: right.x * across + up.x * height, y: right.y * across + up.y * height };
 };
 
 /** Stable pseudo-random value in [0, 1) derived from a template id (FNV-1a) */

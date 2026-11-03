@@ -66,6 +66,12 @@ export interface SpellArea {
   width?: number;
 }
 
+/** Feet an area grows by for each slot level above the spell's own */
+export interface SpellUpcast {
+  sizePerSlot?: number;
+  widthPerSlot?: number;
+}
+
 export interface SpellSummonVariant {
   id: string;
   label: string;
@@ -125,6 +131,8 @@ export interface SpellPreset {
   areaPick?: 'choose' | 'saves';
   /** Template fill opacity, default SPELL_TEMPLATE_OPACITY of the casting app */
   templateOpacity?: number;
+  /** An area that grows when the spell is cast with a higher slot (Fog cloud's radius) */
+  upcast?: SpellUpcast;
 }
 
 export interface SpellDefinition {
@@ -499,11 +507,14 @@ const definitions: SpellDefinition[] = [
     category: 'zone-obscure',
     rulesets: BOTH,
     preset: {
-      base: zone(1, circle(20), AoeEffect.FogCloud, 120, '20 ft sphere · Heavily obscured', {
-        durationMs: 1800,
-        variant: 5,
-        palette: ['#d4d8de', '#ffffff']
-      })
+      base: {
+        ...zone(1, circle(20), AoeEffect.FogCloud, 120, '20 ft sphere · Heavily obscured', {
+          durationMs: 1800,
+          variant: 5,
+          palette: ['#d4d8de', '#ffffff']
+        }),
+        upcast: { sizePerSlot: 20 }
+      }
     }
   },
   {
@@ -585,7 +596,8 @@ const definitions: SpellDefinition[] = [
       base: zone(2, cube(5), AoeEffect.CloudOfDaggers, 60, '5 ft cube · 4d4 slashing', {
         durationMs: 1500,
         palette: ['#cbd5e1', '#ffffff']
-      })
+      }),
+      'dnd5e-2024': { upcast: { sizePerSlot: 5 } }
     }
   },
   {
@@ -1262,6 +1274,29 @@ export const resolveSpell = (id: string, ruleset: Ruleset): ResolvedSpell | null
   const spell = SPELLS[id];
   if (!spell?.rulesets.includes(ruleset)) return null;
   return { ...spell, resolved: byRuleset(spell.preset, ruleset) };
+};
+
+/** The spell's area when cast with `slotLevel`: grown by its `upcast` per slot above its own level; unchanged otherwise */
+export const spellAreaAtSlot = (
+  preset: Pick<SpellPreset, 'area' | 'level' | 'upcast'>,
+  slotLevel: number | undefined
+): SpellArea | undefined => {
+  const { area, upcast, level } = preset;
+  const extraSlots = Math.max(0, (slotLevel ?? level) - level);
+  if (!area || !upcast || extraSlots === 0) return area;
+  return {
+    ...area,
+    size: area.size + (upcast.sizePerSlot ?? 0) * extraSlots,
+    ...(area.width !== undefined && { width: area.width + (upcast.widthPerSlot ?? 0) * extraSlots })
+  };
+};
+
+/** `resolveSpell` with the area sized for the slot it is cast with (the base level when omitted) */
+export const resolveSpellAtSlot = (id: string, ruleset: Ruleset, slotLevel?: number): ResolvedSpell | null => {
+  const spell = resolveSpell(id, ruleset);
+  if (!spell) return null;
+  const area = spellAreaAtSlot(spell.resolved, slotLevel);
+  return area === spell.resolved.area ? spell : { ...spell, resolved: { ...spell.resolved, area } };
 };
 
 /** A spell that only decorates tokens: no template shape of its own, or an area that is only placed to pick creatures */

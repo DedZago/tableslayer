@@ -343,12 +343,12 @@
 
   function onUndoKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && tools.spellAim) {
-      tools.cancelSpellAim();
+      tools.escapeSpellAim();
       return;
     }
     if (event.key === 'Enter' && tools.spellAim) {
       event.preventDefault();
-      tools.confirmSpellTargets();
+      tools.confirmSpellAim();
       return;
     }
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
@@ -576,6 +576,59 @@
     };
   });
 
+  // A plain tap with no tool or mode active focuses a concentrating token; the same token or empty map clears it.
+  // Detected here because the stage reports token presses (drags included) but never a tap on empty map
+  onMount(() => {
+    const element = stageElement;
+    const TAP_MS = 400;
+    const TAP_SLOP_PX = 10;
+    let press: { x: number; y: number; pointerId: number; at: number } | null = null;
+
+    const idle = () =>
+      tools.activeLayer === MapLayerType.None &&
+      !tools.menu &&
+      !tools.groupSelect &&
+      !tools.distanceMode &&
+      !tools.spellAim;
+    const down = (event: PointerEvent) => {
+      press = null;
+      if (!event.isPrimary || event.button !== 0 || !(event.target instanceof HTMLCanvasElement) || !idle()) return;
+      press = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, at: performance.now() };
+    };
+    const move = (event: PointerEvent) => {
+      if (!press) return;
+      if (!event.isPrimary || Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP_PX) press = null;
+    };
+    const up = (event: PointerEvent) => {
+      const tap = press;
+      press = null;
+      if (!tap || !stage || event.pointerId !== tap.pointerId || performance.now() - tap.at > TAP_MS || !idle()) return;
+      const point = { x: tap.x, y: tap.y };
+      const markerId = stage.markers.hitTest(point);
+      if (markerId) return tools.tapForFocus(markerId);
+      // A tap on a spell area selects it and keeps the focus; only empty map clears it
+      if (!pressHitsItem(point)) tools.tapForFocus(null);
+    };
+    const reset = () => (press = null);
+
+    element?.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', reset, true);
+    return () => {
+      element?.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', reset, true);
+    };
+  });
+
+  // The focus is local and follows the scene shown
+  $effect(() => {
+    void session.activeSceneId;
+    return () => untrack(() => (tools.focusedMarkerId = null));
+  });
+
   // The menu and the draw tool close with the scene they were opened on, on pause, and when the menu's token or shape is deleted
   $effect(() => {
     void session.activeSceneId;
@@ -738,6 +791,7 @@
     {activeTurnMarkerId}
     distanceMode={tools.distanceMode}
     spellCasts={session.presence?.activeCasts}
+    spellHighlight={tools.spellHighlight}
     selectedMarkerIds={tools.groupSelect || tools.distanceMode ? tools.selectedMarkerIds : undefined}
     receivedMeasurement={latestMeasurement
       ? {
@@ -784,6 +838,7 @@
       onAoeTemplateDeleted: tools.onAoeTemplateDeleted,
       onAoeTemplateMenu: tools.onAoeTemplateMenu,
       onSpellAimed: tools.onSpellAimed,
+      onSpellAimPlaced: tools.onSpellAimPlaced,
       onSpellTargeted: tools.onSpellTargeted,
       onSpellAreaTargets: tools.onSpellAreaTargets,
       onSpellAimCancelled: () => tools.cancelSpellAim()
@@ -824,7 +879,7 @@
   <SpellAimBar
     prompt={tools.spellAimPrompt}
     castLabel={tools.spellCastLabel}
-    onCast={() => tools.confirmSpellTargets()}
+    onCast={() => tools.confirmSpellAim()}
     onCancel={() => tools.cancelSpellAim()}
     size="lg"
   />

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Color, Folder, List, Slider, type ListOptions } from 'svelte-tweakpane-ui';
+  import { Button, Checkbox, Color, Folder, List, Slider, type ListOptions } from 'svelte-tweakpane-ui';
   import {
     DEFAULT_RULESET,
     MarkerShape,
@@ -19,8 +19,15 @@
   let {
     props = $bindable(),
     stage,
-    onCast
-  } = $props<{ props: StageProps; stage?: StageExports; onCast: (cast: SpellCast) => void }>();
+    onCast,
+    highlight = $bindable(false)
+  } = $props<{
+    props: StageProps;
+    stage?: StageExports;
+    onCast: (cast: SpellCast) => void;
+    /** Lights every area, token effect and token like a focused concentration (`spellHighlight`) */
+    highlight?: boolean;
+  }>();
 
   const spellOptions: ListOptions<string> = Object.keys(SPELLS)
     .filter((id) => resolveSpell(id, DEFAULT_RULESET))
@@ -142,4 +149,5 @@
   <Button title="Add to first token" on:click={addTokenEffect} />
   <Button title="Toggle concentration ring" on:click={toggleConcentration} />
   <Button title="Clear effects" on:click={() => (props.tokenEffects = [])} />
+  <Checkbox bind:value={highlight} label="Concentration focus" />
 </Folder>

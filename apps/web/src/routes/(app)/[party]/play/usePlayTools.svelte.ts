@@ -9,6 +9,12 @@ import {
   type GroupedRows,
   type GroupMember
 } from '$lib/utils/assetGroups';
+import {
+  concentrationHighlight,
+  isConcentrationActive,
+  nextConcentrationFocus,
+  type ConcentrationHighlight
+} from '$lib/utils/concentration';
 import { devError, devLog } from '$lib/utils/debug';
 import { readRecentSpells, withRecentSpell, writeRecentSpells, type RecentSpell } from '$lib/utils/recentSpells';
 import {
@@ -20,6 +26,7 @@ import {
   NO_AIM_PICKS,
   placeAimArea,
   removeSpellRows,
+  sceneRowIds,
   selfPlacement,
   spellAimProgress,
   spellAimPrompt,
@@ -43,8 +50,8 @@ import {
   MapLayerType,
   MeasurementType,
   resolveCondition,
-  resolveSpell,
   resolveSpellAnyRuleset,
+  resolveSpellAtSlot,
   StageMode,
   type AnnotationLayerData,
   type AoeTemplate,
@@ -53,6 +60,7 @@ import {
   type MarkerCondition,
   type RadialMenuItemProps,
   type SpellAimed,
+  type SpellAimPlaced,
   type SpellAreaTargets,
   type SpellTargeted,
   type StageExports
@@ -124,7 +132,11 @@ export class PlayTools {
   notice = $state<string | null>(null);
 
   /** The spell being aimed: the AoE layer is active with its preset locked until a tap places it */
-  spellAim = $state<({ spellId: string; variantId?: string; casterId?: string } & SpellAimPicks) | null>(null);
+  spellAim = $state<
+    ({ spellId: string; variantId?: string; slotLevel?: number; casterId?: string } & SpellAimPicks) | null
+  >(null);
+  /** A concentrating token tapped on this screen: what its concentration holds is highlighted (local only) */
+  focusedMarkerId = $state<string | null>(null);
   /** Spells cast lately on this device, offered first in the spell ring */
   recentSpells = $state<RecentSpell[]>(readRecentSpells());
 
@@ -521,9 +533,15 @@ export class PlayTools {
     };
   }
 
+  /** The aimed spell as its slot casts it (an upcast area is larger) */
+  #aimedSpell() {
+    const aim = this.spellAim;
+    return aim ? resolveSpellAtSlot(aim.spellId, this.#options.session.ruleset, aim.slotLevel) : null;
+  }
+
   #spellAimSettings() {
     const aim = this.spellAim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const spell = this.#aimedSpell();
     return spell && aim
       ? buildSpellAim(spell, aim.variantId, this.#casterRow(aim.casterId), spellAimProgress(spell, aim))
       : null;
@@ -538,17 +556,27 @@ export class PlayTools {
   /** What to do next while a spell is aimed ("Tap where to cast Fireball") */
   get spellAimPrompt(): string | null {
     const aim = this.spellAim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const spell = this.#aimedSpell();
     const settings = this.#spellAimSettings();
     return spell && aim && settings
-      ? spellAimPrompt(spell.name, settings, { picked: this.#pickedCount(), inside: aim.inside.length })
+      ? spellAimPrompt(spell.name, settings, {
+          picked: this.#pickedCount(),
+          inside: aim.inside.length,
+          placed: this.#isAimPlaced()
+        })
       : null;
   }
 
   #pickedCount() {
     const aim = this.spellAim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    const spell = this.#aimedSpell();
     return aim && spell ? spellPickedMarkerIds(spell, aim).length : 0;
+  }
+
+  /** An area spell placed by its first tap, waiting for the tap inside it that casts */
+  #isAimPlaced() {
+    const mode = this.#spellAimSettings()?.mode;
+    return !!this.spellAim?.placement && mode !== 'target' && mode !== 'area-targets';
   }
 
   /** Target or area-pick aim with at least one token picked: the label of the button that casts it */
@@ -578,8 +606,8 @@ export class PlayTools {
     if (cast.length > 0 || token.length > 0) this.#options.getStage()?.spells.prewarm(cast, token);
   };
 
-  #startSpell({ spellId, variantId }: RecentSpell) {
-    const spell = resolveSpell(spellId, this.#options.session.ruleset);
+  #startSpell({ spellId, variantId, slotLevel }: RecentSpell) {
+    const spell = resolveSpellAtSlot(spellId, this.#options.session.ruleset, slotLevel);
     if (!spell) return;
     const markerIds = this.#menuIds('markers');
     const caster = markerIds.length === 1 ? this.#casterRow(markerIds[0]) : undefined;
@@ -588,11 +616,11 @@ export class PlayTools {
       return;
     }
     if (!buildSpellAim(spell, variantId, caster)) {
-      if (caster) this.#cast({ spellId, variantId, placement: selfPlacement(caster), caster });
+      if (caster) this.#cast({ spellId, variantId, slotLevel, placement: selfPlacement(caster), caster });
       return;
     }
     this.drawBrush = null;
-    this.spellAim = { spellId, variantId, casterId: caster?.id, ...NO_AIM_PICKS };
+    this.spellAim = { spellId, variantId, slotLevel, casterId: caster?.id, ...NO_AIM_PICKS };
     this.activeLayer = MapLayerType.AoeTemplate;
   }
 
@@ -610,10 +638,14 @@ export class PlayTools {
     this.spellAim = placeAimArea(aim, { placement, markerIds });
   };
 
-  /** Casts the targeted spell once on every picked token that still exists */
-  confirmSpellTargets() {
+  /** Enter or Cast: a placed area spell casts where it sits; a targeted spell once on every picked token that still exists */
+  confirmSpellAim() {
     const aim = this.spellAim;
-    const spell = aim && resolveSpell(aim.spellId, this.#options.session.ruleset);
+    if (aim?.placement && this.#isAimPlaced()) {
+      this.onSpellAimed({ spellId: aim.spellId, ...aim.placement });
+      return;
+    }
+    const spell = this.#aimedSpell();
     const targets = aim && spell ? this.#markerRows(spellPickedMarkerIds(spell, aim)) : [];
     if (!aim || targets.length === 0) return;
     this.cancelSpellAim();
@@ -643,10 +675,42 @@ export class PlayTools {
     this.#cast({
       spellId,
       variantId: aim.variantId,
+      slotLevel: aim.slotLevel,
       placement: { position, angle },
       caster: this.#casterRow(aim.casterId)
     });
   };
+
+  /** Stage callback: an area spell was placed, moved, or un-placed; Enter casts the last placement */
+  onSpellAimPlaced = (placed: SpellAimPlaced) => {
+    const aim = this.spellAim;
+    if (!aim || (placed && aim.spellId !== placed.spellId)) return;
+    this.spellAim = { ...aim, placement: placed && { position: placed.position, angle: placed.angle } };
+  };
+
+  /** Escape: a placed area goes back to following the pointer first, then the aim is cancelled */
+  escapeSpellAim() {
+    if (this.#isAimPlaced() && this.#options.getStage()?.aoeTemplates.unplaceSpellAim()) return;
+    this.cancelSpellAim();
+  }
+
+  /**
+   * A plain tap on the map with no tool or mode active (the page detects it, so drags and long presses never count):
+   * a concentrating token takes the focus, the focused token again or empty map clears it
+   */
+  tapForFocus(markerId: string | null) {
+    const snapshot = this.#options.session.activeScene;
+    const existing = sceneRowIds(snapshot);
+    this.focusedMarkerId = nextConcentrationFocus(this.focusedMarkerId, markerId, (id) =>
+      isConcentrationActive(snapshot?.markers.find((marker) => marker.id === id)?.concentration, existing)
+    );
+  }
+
+  /** What the focused token's concentration holds; empty once the token or its concentration is gone */
+  get spellHighlight(): ConcentrationHighlight {
+    const focused = this.focusedMarkerId;
+    return concentrationHighlight(this.#options.session.activeScene, focused ? [focused] : []);
+  }
 
   #cast(request: SpellCastRequest) {
     const { client, activeSceneId, presence, ruleset } = this.#options.session;

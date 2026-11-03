@@ -41,6 +41,7 @@
     spellTargetMarkerId?: string | null;
     spellPickedMarkerIds?: string[];
     spellEligibleMarkerIds?: string[];
+    spellHighlight?: { templateIds: string[]; markerIds: string[] };
   }>('stage');
   const {
     onMarkerAdded,
@@ -680,6 +681,7 @@
         isHovered={hoveredMarker?.id === marker.id ||
           stage.spellTargetMarkerId === marker.id ||
           !!stage.spellEligibleMarkerIds?.includes(marker.id) ||
+          (!marker.concentrating && !!stage.spellHighlight?.markerIds.includes(marker.id)) ||
           (stage.dropTargetMarkerId ?? props.marker.dropTargetId) === marker.id}
         isActiveTurn={marker.id === stage.activeTurnMarkerId}
         sceneRotation={props.scene.rotation}

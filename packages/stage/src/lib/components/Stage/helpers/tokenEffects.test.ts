@@ -6,6 +6,7 @@ import type { TokenEffectKind } from './spells';
 import {
   effectStartOnClock,
   groupPlacedByKind,
+  isTokenEffectHighlighted,
   isTokenFxOverMarkers,
   LOW_TIER_EFFECT_FPS,
   MAX_TOKEN_EFFECTS_PER_KIND,
@@ -35,6 +36,35 @@ const effect = (overrides: Partial<TokenEffect> = {}): TokenEffect => ({
   color: '#aab4c8',
   startedAt: 0,
   ...overrides
+});
+
+describe('highlight', () => {
+  const highlight = { templateIds: new Set(['bless-row']), markerIds: new Set(['cleric']) };
+
+  it('lights an effect by its row id and a concentration seal by its caster', () => {
+    expect(isTokenEffectHighlighted(effect({ id: 'bless-row', fx: 'motes' }), highlight)).toBe(true);
+    expect(isTokenEffectHighlighted(effect({ id: 'other', fx: 'motes' }), highlight)).toBe(false);
+    expect(
+      isTokenEffectHighlighted(
+        effect({ id: 'concentration:cleric', fx: 'concentration', markerId: 'cleric' }),
+        highlight
+      )
+    ).toBe(true);
+    // A token in the highlight lights only its seal, not every effect it carries
+    expect(isTokenEffectHighlighted(effect({ id: 'shimmer', fx: 'shimmer', markerId: 'cleric' }), highlight)).toBe(
+      false
+    );
+    expect(isTokenEffectHighlighted(effect({ id: 'bless-row' }), undefined)).toBe(false);
+  });
+
+  it('marks placed effects and changes the signature, so the buffers are rewritten', () => {
+    const effects = [effect({ id: 'bless-row', fx: 'motes' })];
+    const plain = placeTokenEffects(effects, [marker('m1')], placement);
+    const lit = placeTokenEffects(effects, [marker('m1')], { ...placement, highlight });
+    expect(plain[0].highlighted).toBe(false);
+    expect(lit[0].highlighted).toBe(true);
+    expect(placedEffectsSignature(lit)).not.toBe(placedEffectsSignature(plain));
+  });
 });
 
 describe('TOKEN_FX_INDEX', () => {

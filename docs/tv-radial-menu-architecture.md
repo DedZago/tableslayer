@@ -123,37 +123,52 @@ scene switch and on pause. Design and decisions: `spec/tv-drawing.md`.
 
 "Cast spell" is the same ring on the TV and in the editor, built by `spellMenuItem` (`utils/spellMenus.ts`, pure and
 unit-tested): Recent (up to eight, stored per device in `localStorage` by `utils/recentSpells.ts`, left out until
-something was cast) plus one ring per category, then the spells, then a variant ring for summons (owl, cat…). A leaf
-has no hint, so the hub shows only the spell's name (players know its area and save); it is tinted by the spell's
-palette, and its preset comes from the game session's ruleset (`resolveSpell`). Leaf ids are
-`spell:<id>` or `spell:<id>:<variant>`, parsed by `parseSpellItemId`. Auras that follow the caster (Spirit guardians)
-are `disabled` without one, and the hub explains how to get one. The menu builders only take plain state
-(`SpellMenuState`): `generalMenu` offers it with no caster, `tokenMenu` offers it with the single pressed token as the
-caster.
+something was cast), then a **level ring**: Cantrips (`spell-slot:0`) and one item per slot level, I up to the
+highest level in the ruleset's catalog (`spell-slot:<n>`; past seven slot items the highest are grouped under one
+"Level VI–IX" item, `slotLevelItems`). A slot ring lists every spell of level ≤ the slot (cantrips only for
+Cantrips), by level then name (`spellsAtSlot`): directly when they fit in 8 options, otherwise through the category
+rings that hold some of them (`spell-category:<id>@<slot>`, the "Targeted" group as `spell-group:target@<slot>`),
+then a variant ring for summons (owl, cat…). A leaf names only the spell (players know its area and save), plus the
+hint "At level III" when the slot is above the spell's own level; it is tinted by the spell's palette, and its preset
+comes from the game session's ruleset (`resolveSpell`). Leaf ids are `spell:<id>`, `spell:<id>:<variant>`, with
+`@<slot>` appended when upcast, parsed by `parseSpellItemId` (an id without a slot casts at the base level). The slot
+travels with the pick: the aim state, `RecentSpell.slotLevel` (Recent casts again at the stored slot) and
+`SpellCastRequest.slotLevel`. Spells whose area grows with the slot (`SpellPreset.upcast`, Fog cloud and the 2024
+Cloud of daggers) are resolved with `resolveSpellAtSlot` / `spellAreaAtSlot`, so the aim draft, the cast animation
+and the saved template all use the larger area. Auras that follow the caster (Spirit guardians) are `disabled`
+without one, and the hub explains how to get one. The menu builders only take plain state (`SpellMenuState`):
+`generalMenu` offers it with no caster, `tokenMenu` offers it with the single pressed token as the caster.
 
 ```
 leaf ──► tools.selectMenuItem ──► #startSpell ──► self spell? (caster-centred circle) ──► castSpell at once
                                               └─► aim: tools.spellAim + activeLayer = AoE, tool.spell = preset
-stage AoE layer (aiming) ──► onSpellAimed({ spellId, position, angle }) ──► tools.onSpellAimed ──► castSpell
+stage AoE layer: first tap places ──► onSpellAimPlaced(placement) ──► tools.spellAim.placement (Esc / Enter use it)
+                 tap inside ──► onSpellAimed({ spellId, position, angle }) ──► tools.onSpellAimed ──► castSpell
 castSpell ──► presence.castSpell (animation on every screen) ──► template row now, summon (and its anchored area)
               at durationMs * 0.5, each one undo step
 ```
 
 - **Aiming.** The AoE layer is activated with `AoeToolSettings.spell` (`stageAoeTool`) so the preset shape and size
-  are locked; `buildSpellAim` decides `point` vs `direction` and whether the origin is the caster's edge. A banner
-  shows "Tap where to cast Fireball" with a Cancel button. Aiming ends on Escape, Cancel, the AoE toolbar button,
-  another tool taking the layer, a scene switch, a pause, or when the caster is deleted on the GM screen.
+  are locked; `buildSpellAim` decides `point` vs `direction` and whether the origin is the caster's edge. Every spell
+  that completes through `onSpellAimed` takes **two taps**: the first places the area (the bar: "Tap where to place
+  Fireball"), then the area can be dragged, a tap outside moves (or re-aims) it, and a tap inside casts it. A placed
+  area draws at full strength with a pulsing outline and a "Tap to cast" / "Click to cast" tag beside it, and the bar
+  reads "Tap inside Fireball to cast · drag to move". The stage keeps the placement and reports it through
+  `onSpellAimPlaced`; Enter casts the last placement (`confirmSpellAim`), Escape (`escapeSpellAim`) first un-places it
+  through `stage.aoeTemplates.unplaceSpellAim()` and cancels on a second press (right-click does the same on the stage).
+  Aiming ends on Cancel, the AoE toolbar button, another tool taking the layer, a scene switch, a pause, or when the
+  caster is deleted on the GM screen.
 - **Warm-up.** `RadialMenu` reports opened rings through `onSubmenuOpen`; `spellFxToPrewarm` maps the ring to just the
-  cast archetypes and token effect kinds of its spells (a category, Recent, one summon; the root and the "Targeted"
-  group link nothing) for `stage.spells.prewarm(cast, token)`. The spell and token effect layers are loaded lazily by
-  the stage the first time they are needed.
-- **Targeted spells.** The "Targeted" item opens four rings (holds and charms, curses and marks, blessings and wards, enhancements) so the spell ring
-  stays within 8 items. A targeted spell aims in `target` mode (`buildSpellAim`, `mode: 'target'`): the stage outlines
-  the reachable token under the finger and `onSpellTargeted` casts at that token (`tools.onSpellTargeted`); Bless and
-  Bane stay aimed until three tokens are picked, and all picks share one concentration. The notice banner's Cancel (the
-  hub), Escape and right-click end the aim. Touch spells (Light, Protection from evil and good) use target mode with a
-  5 ft range; self effects (Blur, Mirror image) cast at once on the caster. Picks are no longer capped: tap tokens to
-  toggle them, then Enter or the bar's Cast applies the spell to all of them.
+  cast archetypes and token effect kinds of its spells (a slot ring that lists spells directly, a category ring at its
+  slot, Recent, one summon; the root, a crowded slot ring and the "Targeted" group link nothing) for
+  `stage.spells.prewarm(cast, token)`. The spell and token effect layers are loaded lazily by the stage the first time
+  they are needed.
+- **Targeted spells.** The "Targeted" item opens up to four rings (holds and charms, curses and marks, blessings and
+  wards, enhancements), filtered to the slot. A targeted spell aims in `target` mode (`buildSpellAim`,
+  `mode: 'target'`): the stage outlines the reachable token under the finger and `onSpellTargeted` toggles it in the
+  picks (`tools.onSpellTargeted`); all picks share one concentration. Picks are not capped: Enter or the bar's Cast
+  applies the spell to all of them. Escape, Cancel and right-click end the aim. Touch spells (Light, Protection from
+  evil and good) use target mode with a 5 ft range; self effects (Blur, Mirror image) cast at once on the caster.
 - **Area-pick spells** (Slow, Calm emotions, Mass cure wounds, Hypnotic pattern, Faerie fire, Fear, Sleep; preset
   `areaPick: 'choose' | 'saves'`) aim in `area-targets` mode. The bar first says "Tap where to place Slow" (a cone from
   the caster, Fear, needs a caster and is aimed by angle); once placed the area can be dragged, a tap on a creature
@@ -163,9 +178,20 @@ castSpell ──► presence.castSpell (animation on every screen) ──► tem
 - **Concentration.** The token menu shows "End concentration" while the single pressed token concentrates
   (`concentratingSpellName`); it calls `endConcentration`. Casting a new concentration spell ends the caster's previous
   one and shows a notice. The ring itself is drawn by the stage's token effect layer, not the token canvas.
+- **Concentration focus.** On the TV a plain tap (no tool, mode, menu or aim; not a drag or a long press) on a
+  concentrating token focuses it (`tools.focusedMarkerId`, local only): everything its concentration holds lights up
+  through the `<Stage spellHighlight>` interaction prop, built by `concentrationHighlight(snapshot, [focused])` in
+  `utils/concentration.ts` (its areas and token effects by row id, its summons, and the caster for its seal). Tapping
+  it again, a token that is not concentrating, or empty map clears it (`nextConcentrationFocus`); a tap on a spell area
+  keeps it. The stage reports token presses (drags included) but never a tap on empty map, so the play page detects
+  the tap itself with a pointer listener (400 ms, 10 px). The highlight is derived, so it disappears when the token or
+  its concentration is gone; a scene switch clears the focus. The editor passes the same helper with its token
+  selection, so selecting a caster (or several) highlights what they concentrate on.
 - **The GM.** The editor opens the same ring (without the "Cast spell" level) from a "Spells" toolbar button, at the
   button, or with the S key, at the last cursor position (`useEditorSpells.svelte.ts`); the caster is the single
-  selected token and templates use the AoE tool's visibility. Right-click is not used there.
+  selected token and templates use the AoE tool's visibility. The `SpellAimBar` shows the prompt for every aim
+  ("Click where to place Fireball", "Click inside Fireball to cast · drag to move"); Escape and Enter behave as on the
+  TV (`escape`, `confirmAim`). Right-click is not used there.
 - **Summon art.** Summoned tokens are ordinary markers with `imageLocation: '/spell-tokens/<icon>.svg'` and the
   spell's palette as ring colour; see `loadTokenImage` for SVG decoding.
 

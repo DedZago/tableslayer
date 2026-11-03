@@ -2,6 +2,8 @@ export interface RecentSpell {
   spellId: string;
   /** Summons: the chosen variant */
   variantId?: string;
+  /** The slot it was cast with, when above the spell's own level */
+  slotLevel?: number;
 }
 
 export const RECENT_SPELLS_KEY = 'tableslayer:recentSpells';
@@ -11,9 +13,10 @@ const isRecentSpell = (value: unknown): value is RecentSpell =>
   typeof value === 'object' &&
   value !== null &&
   typeof (value as RecentSpell).spellId === 'string' &&
-  ((value as RecentSpell).variantId === undefined || typeof (value as RecentSpell).variantId === 'string');
+  ((value as RecentSpell).variantId === undefined || typeof (value as RecentSpell).variantId === 'string') &&
+  ((value as RecentSpell).slotLevel === undefined || Number.isInteger((value as RecentSpell).slotLevel));
 
-/** The spell moves to the front; casting the same spell and variant again never duplicates it */
+/** The spell moves to the front; casting the same spell and variant again (at any slot) replaces it */
 export const withRecentSpell = (recent: readonly RecentSpell[], spell: RecentSpell): RecentSpell[] =>
   [spell, ...recent.filter((entry) => entry.spellId !== spell.spellId || entry.variantId !== spell.variantId)].slice(
     0,

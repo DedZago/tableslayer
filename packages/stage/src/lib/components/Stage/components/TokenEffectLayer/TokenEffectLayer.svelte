@@ -6,6 +6,7 @@
   import type { DisplayProps, PerformanceTier, StageMode } from '../Stage/types';
   import type { GridLayerProps } from '../GridLayer/types';
   import { mapClippingPlaneStore } from '../../helpers/clippingPlaneStore.svelte';
+  import type { FramePacer } from '../../helpers/framePacing';
   import { getGridCellSize } from '../../helpers/grid';
   import type { TokenEffectKind } from '../../helpers/spells';
   import { groupPlacedByKind, placeTokenEffects, tokenEffectClock } from '../../helpers/tokenEffects';
@@ -31,7 +32,12 @@
   const { effects, markers, mode, tokensVisible, grid, display }: Props = $props();
 
   const { renderer, camera, scene } = useThrelte();
-  const stage = getContext<{ performanceTier: PerformanceTier; mainPassUsesComposer: boolean }>('stage');
+  const stage = getContext<{
+    performanceTier: PerformanceTier;
+    mainPassUsesComposer: boolean;
+    spellHighlight?: { templateIds: string[]; markerIds: string[] };
+  }>('stage');
+  const framePacer = getContext<FramePacer | undefined>('framePacer');
 
   const epochMs = Date.now();
   const time = { value: 0 };
@@ -48,13 +54,27 @@
 
   const cellPx = $derived(getGridCellSize(grid, display));
   const ftToPx = $derived(cellPx / (grid.worldGridSize || 5));
-  const placed = $derived(placeTokenEffects(effects, markers, { cellPx, ftToPx, mode, tokensVisible }));
+  // Keyed on the ids, so a consumer rebuilding the same highlight changes nothing
+  const highlightKey = $derived(
+    `${stage.spellHighlight?.templateIds.join('|') ?? ''}#${stage.spellHighlight?.markerIds.join('|') ?? ''}`
+  );
+  const highlight = $derived.by(() => {
+    const [templateIds, markerIds] = highlightKey.split('#');
+    return {
+      templateIds: new Set(templateIds ? templateIds.split('|') : []),
+      markerIds: new Set(markerIds ? markerIds.split('|') : [])
+    };
+  });
+  const placed = $derived(placeTokenEffects(effects, markers, { cellPx, ftToPx, mode, tokensVisible, highlight }));
+  const hasHighlight = $derived(placed.some((item) => item.highlighted));
   const groups = $derived(groupPlacedByKind(placed));
   const kinds = $derived([...groups.keys()]);
 
-  // Ambient loops never wake the frame pacer: they animate at whatever rate the stage already renders
+  // Ambient loops never wake the frame pacer: they animate at whatever rate the stage already renders.
+  // A focused concentration pulses, so it holds the stage at the ambient rate while it lasts
   useTask(
     () => {
+      if (hasHighlight) framePacer?.markAmbient();
       time.value = tokenEffectClock((Date.now() - epochMs) / 1000, stage.performanceTier === 'low', reducedMotion);
     },
     { running: () => placed.length > 0 }

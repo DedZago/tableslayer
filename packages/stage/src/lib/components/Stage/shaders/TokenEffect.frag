@@ -18,6 +18,8 @@ varying vec3 vWorldPosition;
 varying vec4 vTint;
 varying vec4 vInfo;
 varying float vPx;
+// 1 while the effect belongs to a focused concentration (the quad is then drawn 1.1x larger)
+varying float vHighlight;
 
 const float TAU = 6.2831853;
 const float PI = 3.1415927;
@@ -909,6 +911,12 @@ void main() {
   #elif TOKEN_FX == 23
   col = fxSlumber(q, t, C, L, seed);
   #endif
+
+  if (vHighlight > 0.5) {
+    float pulse = 0.5 + 0.5 * sin(uTime * 2.4);
+    col.rgb *= 1.35 + 0.3 * pulse;
+    col.a = min(1.0, col.a * (1.1 + 0.15 * pulse));
+  }
 
   vec2 edge = abs(vUv - 0.5) * 2.0;
   col *= (1.0 - smoothstep(0.88, 1.0, max(edge.x, edge.y))) * enter;

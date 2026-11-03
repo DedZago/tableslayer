@@ -43,6 +43,18 @@
   let selectedLight: Light | undefined = $state();
   let selectedAoeId: string | null = $state(null);
   let spellCasts: SpellCast[] = $state([]);
+  let spellFocus = $state(false);
+  const spellHighlight = $derived(
+    spellFocus
+      ? {
+          templateIds: [
+            ...(stageProps.aoeTemplates?.templates ?? []).map((template) => template.id),
+            ...(stageProps.tokenEffects ?? []).map((effect) => effect.id)
+          ],
+          markerIds: stageProps.marker.markers.map((marker) => marker.id)
+        }
+      : undefined
+  );
 
   const onSpellCast = (cast: SpellCast) => {
     spellCasts = [...pruneSpellCasts(spellCasts, performance.now()), cast];
@@ -362,6 +374,7 @@
     bind:this={stage}
     props={stageProps}
     {spellCasts}
+    {spellHighlight}
     callbacks={{
       onAnnotationUpdate,
       onFogUpdate,
@@ -432,7 +445,7 @@
   <MeasurementControls bind:props={stageProps} />
   <PostProcessingControls bind:props={stageProps} />
   <SceneControls bind:props={stageProps} {stage} />
-  <SpellControls bind:props={stageProps} {stage} onCast={onSpellCast} />
+  <SpellControls bind:props={stageProps} {stage} onCast={onSpellCast} bind:highlight={spellFocus} />
   <WeatherControls bind:props={stageProps} />
 
   <Folder title="Debug" expanded={false}>

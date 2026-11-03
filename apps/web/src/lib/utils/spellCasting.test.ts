@@ -100,7 +100,7 @@ describe('buildSpellAim', () => {
 
 describe('spellAimPrompt', () => {
   it('asks for a tap for a point and a drag for a direction', () => {
-    expect(spellAimPrompt('Fireball', buildSpellAim(spellFor('fireball'))!)).toBe('Tap where to cast Fireball');
+    expect(spellAimPrompt('Fireball', buildSpellAim(spellFor('fireball'))!)).toBe('Tap where to place Fireball');
     expect(spellAimPrompt('Burning hands', buildSpellAim(spellFor('burning-hands'))!)).toBe(
       'Drag to aim Burning hands'
     );
@@ -108,13 +108,21 @@ describe('spellAimPrompt', () => {
 
   it('asks for clicks with a mouse', () => {
     const fireball = buildSpellAim(spellFor('fireball'))!;
-    expect(spellAimPrompt('Fireball', fireball, { mouse: true })).toBe('Click where to cast Fireball');
+    expect(spellAimPrompt('Fireball', fireball, { mouse: true })).toBe('Click where to place Fireball');
     const fromCaster = buildSpellAim(spellFor('burning-hands'), undefined, caster)!;
     expect(spellAimPrompt('Burning hands', fromCaster, { mouse: true })).toBe('Click to aim Burning hands');
     const free = buildSpellAim(spellFor('burning-hands'))!;
     expect(spellAimPrompt('Burning hands', free, { mouse: true })).toBe(
       'Click to start Burning hands, then click to aim it'
     );
+  });
+
+  it('asks for a click or tap inside a placed area to cast it', () => {
+    const fireball = buildSpellAim(spellFor('fireball'))!;
+    expect(spellAimPrompt('Fireball', fireball, { mouse: true, placed: true })).toBe(
+      'Click inside Fireball to cast · drag to move'
+    );
+    expect(spellAimPrompt('Fireball', fireball, { placed: true })).toBe('Tap inside Fireball to cast · drag to move');
   });
 });
 
@@ -279,6 +287,32 @@ const harness = () => {
 };
 
 describe('castSpell', () => {
+  it('casts an upcast area at the slot size and remembers the slot', () => {
+    const { context, upsertAoeTemplate, castOnPresence } = harness();
+    const recent = castSpell(context, { spellId: 'fog-cloud', slotLevel: 3, placement, caster });
+    expect(recent).toEqual({ spellId: 'fog-cloud', slotLevel: 3 });
+    expect(upsertAoeTemplate).toHaveBeenCalledWith('scene-1', expect.objectContaining({ size: 60 }));
+    expect(castOnPresence).toHaveBeenCalledWith(
+      expect.objectContaining({ area: expect.objectContaining({ size: 60 }) })
+    );
+  });
+
+  it('casts at base level without a slot, or with one at or below the spell level', () => {
+    const { context, upsertAoeTemplate } = harness();
+    expect(castSpell(context, { spellId: 'fog-cloud', placement })).toEqual({ spellId: 'fog-cloud' });
+    expect(castSpell(context, { spellId: 'fog-cloud', slotLevel: 1, placement })).toEqual({ spellId: 'fog-cloud' });
+    upsertAoeTemplate.mock.calls.forEach(([, row]) => expect(row.size).toBe(20));
+  });
+
+  it('remembers the slot of a spell whose area does not grow', () => {
+    const { context, upsertAoeTemplate } = harness();
+    expect(castSpell(context, { spellId: 'fireball', slotLevel: 5, placement })).toEqual({
+      spellId: 'fireball',
+      slotLevel: 5
+    });
+    expect(upsertAoeTemplate).toHaveBeenCalledWith('scene-1', expect.objectContaining({ size: 20 }));
+  });
+
   it('plays a blast on the scene and writes its template at once, with the GM-chosen visibility', () => {
     const { context, upsertAoeTemplate, castOnPresence, stopCapturing, upsertMarker } = harness();
     const recent = castSpell(context, { spellId: 'fireball', placement, caster });

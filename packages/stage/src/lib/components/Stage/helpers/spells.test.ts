@@ -8,9 +8,11 @@ import {
   isEffectOnlyPreset,
   resolveSpell,
   resolveSpellAnyRuleset,
+  resolveSpellAtSlot,
   resolveSummonSize,
   SPELL_CATEGORIES,
   SPELL_CATEGORY_GROUPS,
+  spellAreaAtSlot,
   spellFxKinds,
   SPELLS,
   spellsInCategory,
@@ -319,6 +321,51 @@ describe('resolveSpell', () => {
     expect(resolveSpell('fireball', 'dnd5e-2024')!.resolved.lingers).toBe(false);
     expect(resolveSpell('web', 'dnd5e-2024')!.resolved.lingers).toBe(true);
     expect(resolveSpell('spirit-guardians', 'dnd5e-2024')!.resolved.lingers).toBe(true);
+  });
+});
+
+describe('upcast areas', () => {
+  it('grows Fog cloud by 20 ft of radius per slot above 1st in both rulesets', () => {
+    for (const ruleset of RULESETS) {
+      expect(resolveSpellAtSlot('fog-cloud', ruleset, 3)!.resolved.area).toEqual({ shape: AoeShape.Circle, size: 60 });
+      expect(resolveSpellAtSlot('fog-cloud', ruleset, 1)!.resolved.area!.size).toBe(20);
+      expect(resolveSpellAtSlot('fog-cloud', ruleset)!.resolved.area!.size).toBe(20);
+    }
+  });
+
+  it('grows the 2024 Cloud of daggers cube by 5 ft per slot above 2nd, but not the 2014 one', () => {
+    expect(resolveSpellAtSlot('cloud-of-daggers', 'dnd5e-2024', 4)!.resolved.area!.size).toBe(15);
+    expect(resolveSpellAtSlot('cloud-of-daggers', 'dnd5e-2014', 4)!.resolved.area!.size).toBe(5);
+  });
+
+  it('leaves areas that do not grow, and slots at or below the spell level, unchanged', () => {
+    const fireball = resolveSpell('fireball', 'dnd5e-2024')!;
+    expect(resolveSpellAtSlot('fireball', 'dnd5e-2024', 9)).toEqual(fireball);
+    expect(
+      spellAreaAtSlot({ level: 3, area: { shape: AoeShape.Circle, size: 20 }, upcast: { sizePerSlot: 10 } }, 2)
+    ).toEqual({
+      shape: AoeShape.Circle,
+      size: 20
+    });
+    expect(spellAreaAtSlot({ level: 1, upcast: { sizePerSlot: 10 } }, 5)).toBeUndefined();
+  });
+
+  it('widens a line by its width step', () => {
+    expect(
+      spellAreaAtSlot(
+        { level: 2, area: { shape: AoeShape.Line, size: 60, width: 5 }, upcast: { sizePerSlot: 10, widthPerSlot: 5 } },
+        4
+      )
+    ).toEqual({ shape: AoeShape.Line, size: 80, width: 15 });
+  });
+
+  it('only lists upcast areas on spells that have an area', () => {
+    for (const ruleset of RULESETS) {
+      Object.keys(SPELLS).forEach((id) => {
+        const spell = resolveSpell(id, ruleset);
+        if (spell?.resolved.upcast) expect(spell.resolved.area).toBeDefined();
+      });
+    }
   });
 });
 

@@ -27,6 +27,7 @@
     spellAimPlacement,
     spellAimPointer,
     spellRangeRadiusPx,
+    formatTemplateLabel,
     templateContainsPoint,
     templateFadeMs,
     templateIntersectsRect,
@@ -121,6 +122,8 @@
     /** `tapStack` is the shapes under the press, topmost first; while `crossed` is false it may still be a tap */
     | { kind: 'dragging'; draft: AoeTemplate; tapStack: string[]; crossed: boolean }
     | { kind: 'aiming'; draft: AoeTemplate }
+    /** A press on the waiting shape: a click inside places it, a drag moves it (`body`) or resizes it (`end`) */
+    | { kind: 'pendingPress'; part: 'body' | 'end'; from: TemplatePoint; grab: TemplatePoint; crossed: boolean }
     | { kind: 'moving'; id: string; grab: TemplatePoint; starts: Record<string, TemplatePoint> }
     | { kind: 'resizing'; id: string };
 
@@ -129,15 +132,18 @@
   let edit: { patches: Record<string, Partial<AoeTemplate>> } | null = $state(null);
   let lastEmitAt = 0;
   let longPress: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
-  /** The shape just drawn keeps its handles until a press lands elsewhere, so it can be resized right away */
-  let justDrawnId = $state<string | null>(null);
+  /**
+   * A drawn shape waits here until a click inside it places it, so it can still be moved and resized first.
+   * Its look follows the tool, so changing the effect, colour or shape restyles it before it is placed.
+   */
+  let pending = $state<AoeTemplate | null>(null);
 
   // Shared time for every fill; each template's uTime is this same object
   const sharedTime = { value: 0 };
   // Animated areas loop at the ambient rate; one that is fading out needs every frame to look smooth
   useTask((delta) => {
     sharedTime.value += delta;
-    if (animatedTemplateCount > 0 || hasHighlight || castCue) framePacer?.markAmbient();
+    if (animatedTemplateCount > 0 || hasHighlight || draftCue) framePacer?.markAmbient();
     if (expiryWindows.length === 0) return;
     const nowMs = Date.now();
     if (expiryWindows.some(({ fadeStartMs, expiresAt }) => nowMs >= fadeStartMs && nowMs < expiresAt)) {
@@ -149,8 +155,9 @@
   const ftToPx = $derived(cellPx / (grid.worldGridSize || 5));
   const ftPerPx = $derived(1 / ftToPx);
   const handleRadius = $derived(0.35 * cellPx);
+  // Until it travels, a press may still be a tap (select a shape, or move the waiting one there)
   const isPendingTap = $derived(
-    interaction.kind === 'dragging' && interaction.tapStack.length > 0 && !interaction.crossed
+    interaction.kind === 'dragging' && (interaction.tapStack.length > 0 || !!pending) && !interaction.crossed
   );
 
   // Spell aiming replaces free drawing while the tool carries a spell
@@ -263,13 +270,33 @@
     };
   });
 
-  const draft = $derived(
-    spellDraft ??
-      ((interaction.kind === 'dragging' || interaction.kind === 'aiming') && !isPendingTap ? interaction.draft : null)
+  const pendingDraft = $derived(
+    pending
+      ? {
+          ...pending,
+          shape: props.tool.shape,
+          width: props.tool.lineWidth,
+          effect: props.tool.effect,
+          color: props.tool.color,
+          opacity: props.tool.opacity,
+          visibility: props.tool.visibility
+        }
+      : null
   );
+  // A new stroke replaces the waiting shape on screen once it is clearly a drag
+  const strokeDraft = $derived(
+    (interaction.kind === 'dragging' || interaction.kind === 'aiming') && !isPendingTap ? interaction.draft : null
+  );
+  const draft = $derived(spellDraft ?? strokeDraft ?? pendingDraft);
+  const pendingCue = $derived(
+    pendingDraft && draft === pendingDraft
+      ? `${formatTemplateLabel(pendingDraft)} · ${lastPressWasTouch ? 'Tap' : 'Click'} inside to place`
+      : null
+  );
+  const draftCue = $derived(spellDraft ? castCue : pendingCue);
   const selectedIds = $derived(props.selectedIds ?? (props.selectedId ? [props.selectedId] : []));
   const selectedSet = $derived(new Set(selectedIds));
-  const hasHandles = (id: string) => selectedSet.has(id) || id === justDrawnId;
+  const hasHandles = (id: string) => selectedSet.has(id) || id === pending?.id;
 
   let nowMs = $state(Date.now());
   const hasExpiringTemplates = $derived(props.templates.some((template) => template.expiresAt != null));
@@ -334,6 +361,7 @@
       spellAim = { start: null, pointer: null };
       areaPress = null;
       lastAreaReport = null;
+      pending = null;
       setPlacedAim(null);
     });
   });
@@ -426,10 +454,27 @@
     interaction = { kind: 'idle' };
   };
 
-  const commitDraft = (template: AoeTemplate) => {
-    onAoeTemplateAdded?.(template);
-    justDrawnId = template.id;
+  // Drawing ends with the shape waiting, not placed
+  const holdDraft = (template: AoeTemplate) => {
+    pending = template;
     interaction = { kind: 'idle' };
+  };
+
+  const placePending = () => {
+    const template = pendingDraft;
+    pending = null;
+    interaction = { kind: 'idle' };
+    if (template) onAoeTemplateAdded?.(template);
+  };
+
+  // The end handle resizes and turns the waiting shape; its origin handle or its inside moves it
+  const pendingPartAt = (point: TemplatePoint, isTouch: boolean) => {
+    if (!pendingDraft) return null;
+    const radius = isTouch ? handleRadius * TOUCH_GRAB_SCALE : handleRadius;
+    const { origin, end } = getTemplateHandlePoints(pendingDraft, ftPerPx);
+    if (isNear(point, end, radius)) return 'end' as const;
+    if (isNear(point, origin, radius) || templateContainsPoint(pendingDraft, point, ftPerPx)) return 'body' as const;
+    return null;
   };
 
   // Dragging a selected shape's origin carries the whole selection along with it
@@ -645,6 +690,13 @@
       return;
     }
     if (!coords || !(e instanceof MouseEvent)) return;
+    // A right-click first throws away the shape still waiting to be placed
+    if (pending && (e as PointerEvent).pointerType !== 'touch') {
+      e.preventDefault();
+      pending = null;
+      interaction = { kind: 'idle' };
+      return;
+    }
     const id = findTemplatesAt(toLayerPoint(coords))[0]?.id;
     if (!id) return;
     e.preventDefault();
@@ -673,7 +725,6 @@
 
     const isTouch = isTouchEvent(e);
     const handle = findHandle(point, isTouch);
-    if (!handle) justDrawnId = null;
 
     if (!isActive) {
       if (handle) {
@@ -699,21 +750,30 @@
       return;
     }
 
+    lastPressWasTouch = isTouch;
     if (interaction.kind === 'aiming') {
-      commitDraft(updateDraft(interaction.draft, point, disableSnap));
+      holdDraft(updateDraft(interaction.draft, point, disableSnap));
       return;
     }
     if (interaction.kind !== 'idle') return;
+
+    const part = pending ? pendingPartAt(point, isTouch) : null;
+    if (pending && part) {
+      const grab = { x: point.x - pending.position.x, y: point.y - pending.position.y };
+      interaction = { kind: 'pendingPress', part, from: point, grab, crossed: false };
+      return;
+    }
 
     if (handle) {
       startGrab(handle, point);
       return;
     }
 
-    // Starts a new shape even on top of existing ones; a short tap instead selects the shape under it
-    const stack = findTemplatesAt(point).map((template) => template.id);
+    // Starts a new shape even on top of existing ones; a short tap instead selects the shape under it,
+    // or moves the waiting shape there
+    const stack = pending ? [] : findTemplatesAt(point).map((template) => template.id);
     startDraft(point, disableSnap, stack);
-    if (isTouchEvent(e)) armLongPress(e, stack);
+    if (isTouchEvent(e) && stack.length > 0) armLongPress(e, stack);
   };
 
   const onMouseMove = (e: MouseEvent | TouchEvent, coords: THREE.Vector2 | null) => {
@@ -732,7 +792,8 @@
     }
 
     // The button was released outside the canvas, where no mouseup reaches us
-    const isEditing = interaction.kind === 'moving' || interaction.kind === 'resizing';
+    const isEditing =
+      interaction.kind === 'moving' || interaction.kind === 'resizing' || interaction.kind === 'pendingPress';
     if (isEditing && e instanceof MouseEvent && (e.buttons & 1) === 0) {
       endInteraction();
       return;
@@ -751,6 +812,17 @@
       case 'aiming':
         interaction = { ...interaction, draft: updateDraft(interaction.draft, point, disableSnap) };
         break;
+      case 'pendingPress': {
+        if (!pending || !pendingDraft) break;
+        if (!interaction.crossed && !isPlacedAreaDrag(interaction.from, point, isTouchEvent(e))) break;
+        interaction = { ...interaction, crossed: true };
+        const { grab } = interaction;
+        pending =
+          interaction.part === 'end'
+            ? updateDraft(pendingDraft, point, disableSnap)
+            : { ...pending, position: snapPoint({ x: point.x - grab.x, y: point.y - grab.y }, disableSnap) };
+        break;
+      }
       case 'moving': {
         const { id, grab, starts } = interaction;
         const anchor = snapPoint({ x: point.x - grab.x, y: point.y - grab.y }, disableSnap);
@@ -801,6 +873,13 @@
       if (interaction.kind !== 'aiming') endInteraction();
       return;
     }
+    if (interaction.kind === 'pendingPress') {
+      const { part, from, crossed } = interaction;
+      const clickedInside = part === 'body' || (!!pendingDraft && templateContainsPoint(pendingDraft, from, ftPerPx));
+      if (!crossed && clickedInside) placePending();
+      else interaction = { kind: 'idle' };
+      return;
+    }
     const point = toLayerPoint(coords);
     const disableSnap = e instanceof MouseEvent && e.altKey;
 
@@ -813,7 +892,11 @@
           interaction = { kind: 'idle' };
           cycleSelection(tapStack);
         } else if (movedPx >= cellPx) {
-          commitDraft(current);
+          holdDraft(current);
+        } else if (pending) {
+          // A click outside the waiting shape moves it there
+          pending = { ...pending, position: current.position };
+          interaction = { kind: 'idle' };
         } else if (isTouchEvent(e)) {
           // Touch has no hover to aim with, so a short tap would leave a stranded ghost shape
           interaction = { kind: 'idle' };
@@ -829,7 +912,8 @@
     }
   };
 
-  export const hasDraft = () => interaction.kind === 'dragging' || interaction.kind === 'aiming' || !!spellDraft;
+  export const hasDraft = () =>
+    interaction.kind === 'dragging' || interaction.kind === 'aiming' || !!pending || !!spellDraft;
 
   export const hitTest = (point: TemplatePoint) => findTemplatesAt(point)[0]?.id ?? null;
 
@@ -840,9 +924,17 @@
 
   export const cancelDraft = () => {
     if (hasDraft()) interaction = { kind: 'idle' };
+    pending = null;
     spellAim = { start: null, pointer: null };
     areaPress = null;
     setPlacedAim(null);
+  };
+
+  /** Places the drawn shape that is waiting for its click (Enter does the same); false when none is waiting */
+  export const placeDraft = () => {
+    if (!pending) return false;
+    placePending();
+    return true;
   };
 
   /** Sends a placed, not yet cast, area back to following the pointer; false when nothing was placed */
@@ -855,11 +947,7 @@
 
   // Leaving the tool drops any half-drawn shape so it can't follow later gestures
   $effect(() => {
-    if (!isActive)
-      untrack(() => {
-        cancelDraft();
-        justDrawnId = null;
-      });
+    if (!isActive) untrack(() => cancelDraft());
   });
 
   const inputIsActive = $derived(isActive || (selectable && (mode === StageMode.DM || !!props.playerSelectable)));
@@ -892,7 +980,7 @@
     {template}
     {ftToPx}
     {sharedTime}
-    isDraft={draft?.id === template.id && !castCue}
+    isDraft={draft?.id === template.id && !draftCue}
     highlighted={highlightedIds.has(template.id)}
     performanceTier={stage.performanceTier}
   />
@@ -909,9 +997,9 @@
       {sceneRotation}
       {mapRotation}
       isSelected={hasHandles(template.id)}
-      isDraft={draft?.id === template.id && !castCue}
+      isDraft={draft?.id === template.id && !draftCue}
       showLabel={props.showLabels}
-      cue={draft?.id === template.id ? castCue : null}
+      cue={draft?.id === template.id ? draftCue : null}
       isHighlighted={highlightedIds.has(template.id)}
     />
   {/if}

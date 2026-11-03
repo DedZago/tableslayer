@@ -191,7 +191,7 @@ const slotItem = (slotLevel: number, state: SpellMenuState): RadialMenuItemProps
     label: slotLevel === 0 ? 'Cantrips' : `Level ${romanLevel(slotLevel)}`,
     hint:
       slotLevel === 0 ? 'Spells that need no slot' : `Spells up to level ${romanLevel(slotLevel)}, cast with this slot`,
-    icon: IconWand,
+    ...(slotLevel === 0 ? { icon: IconWand } : { iconText: romanLevel(slotLevel) }),
     submenu:
       spells.length <= RING_LIMIT
         ? spells.map((spell) => spellItem(spell, state, slotLevel))
@@ -217,7 +217,7 @@ export const slotLevelItems = (levels: readonly number[], make: (level: number) 
     {
       id: `${SLOT_GROUP_PREFIX}${from}-${to}`,
       label: `Level ${romanLevel(from)}–${romanLevel(to)}`,
-      icon: IconWand,
+      iconText: `${romanLevel(from)}–${romanLevel(to)}`,
       submenu: grouped.map(make)
     }
   ];

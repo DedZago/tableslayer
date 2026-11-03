@@ -43,6 +43,8 @@
       <EffectPreview effectType={item.effectType} size="100%" />
     {:else if isSwatch}
       <span class="radialMenuItem__swatch" style:background={item.color}></span>
+    {:else if item.iconText}
+      <span class="radialMenuItem__iconText">{item.iconText}</span>
     {:else if item.icon}
       <item.icon size={28} stroke={2} />
     {/if}
@@ -117,6 +119,15 @@
     width: 100%;
     height: 100%;
     border-radius: 50%;
+  }
+
+  .radialMenuItem__iconText {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
   }
 
   .radialMenuItem__badge {

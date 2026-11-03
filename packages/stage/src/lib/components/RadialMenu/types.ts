@@ -8,6 +8,8 @@ export interface RadialMenuItemProps {
   /** One line shown in the hub while the option is pressed or hovered */
   hint?: string;
   icon?: IconComponent;
+  /** Short text drawn in place of an icon, e.g. a spell level "III" */
+  iconText?: string;
   /** Color-only button (a swatch), e.g. a drawing color */
   color?: string;
   /** AnnotationEffect enum value for an animated effect preview */
@@ -43,8 +45,8 @@ export interface RadialMenuProps {
   onSubmenuOpen?: (itemId: string) => void;
   onClose?: () => void;
   onReposition?: (position: { x: number; y: number }) => void;
-  /** Degrees the menu opens at; when undefined it opens facing the nearest screen edge */
+  /** Degrees the menu opens at; when undefined it opens upright (0) */
   rotation?: number;
-  /** Called with the rotation in [0, 360) when a twist ends, and when the nearest edge was used on open */
+  /** Called with the rotation in [0, 360) when a twist or wheel turn ends */
   onRotationChange?: (rotation: number) => void;
 }

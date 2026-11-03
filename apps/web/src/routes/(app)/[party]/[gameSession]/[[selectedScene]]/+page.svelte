@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { RadialMenuRotation } from '$lib/utils/radialMenuRotation.svelte';
   import { useAssetMutation, useTokenArtworkMutation } from '$lib/queries/assets';
   import {
     hasFileDrop,
@@ -1505,6 +1506,7 @@
   });
 
   // Right-click on empty map opens the TV's ring; tokens, shapes and fog rooms keep their own right-click
+  const radialMenuRotation = new RadialMenuRotation('tableslayer:editorRadialMenuRotation');
   let generalMenu = $state<{ x: number; y: number } | null>(null);
   const generalMenuItems = $derived(
     editorGeneralMenu({
@@ -2058,6 +2060,7 @@
   const aoeKeyCommands = {
     hasDraft: () => stage?.aoeTemplates?.hasDraft() ?? false,
     cancelDraft: () => stage?.aoeTemplates?.cancelDraft(),
+    placeDraft: () => stage?.aoeTemplates?.placeDraft() ?? false,
     deselect: () => selectAoeTemplate(null),
     deleteSelected: removeSelectedAoeTemplates,
     rotateSelected: (delta: number) => {
@@ -3109,6 +3112,8 @@
           backIcon={IconArrowBackUp}
           closeIcon={IconX}
           autoCloseMs={20000}
+          rotation={radialMenuRotation.value}
+          onRotationChange={radialMenuRotation.save}
           onItemSelect={(itemId) => spells.select(itemId)}
           onSubmenuOpen={spells.onSubmenuOpen}
           onClose={() => spells.close()}
@@ -3122,6 +3127,8 @@
           backIcon={IconArrowBackUp}
           closeIcon={IconX}
           autoCloseMs={20000}
+          rotation={radialMenuRotation.value}
+          onRotationChange={radialMenuRotation.save}
           onItemSelect={selectGeneralMenuItem}
           onSubmenuOpen={spells.onSubmenuOpen}
           onClose={() => (generalMenu = null)}
@@ -3137,6 +3144,8 @@
           backIcon={IconArrowBackUp}
           closeIcon={IconX}
           autoCloseMs={20000}
+          rotation={radialMenuRotation.value}
+          onRotationChange={radialMenuRotation.save}
           onItemSelect={selectTokenMenuItem}
           onSubmenuOpen={spells.onSubmenuOpen}
           onClose={() => (tokenPanel = null)}
@@ -3150,6 +3159,8 @@
           backIcon={IconArrowBackUp}
           closeIcon={IconX}
           autoCloseMs={20000}
+          rotation={radialMenuRotation.value}
+          onRotationChange={radialMenuRotation.save}
           onItemSelect={selectAoeMenuItem}
           onClose={() => (aoeMenu = null)}
           onReposition={(point) => (aoeMenu = aoeMenu && { ...aoeMenu, ...point })}

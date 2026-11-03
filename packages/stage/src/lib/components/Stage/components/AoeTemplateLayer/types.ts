@@ -165,6 +165,8 @@ export interface AoeTemplateLayerProps {
 export interface AoeTemplateLayerExports {
   cancelDraft(): void;
   hasDraft(): boolean;
+  /** Places the drawn shape still waiting for its click inside; false when none is waiting */
+  placeDraft(): boolean;
   /** Sends a placed, not yet cast, spell area back to following the pointer; false when none was placed */
   unplaceSpellAim(): boolean;
   /** Topmost visible template at a point in marker-space (layer-local px) */

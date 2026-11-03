@@ -5,7 +5,9 @@ export default defineConfig({
   plugins: [sveltekit()],
   server: {
     port: 5173,
-    strictPort: false
+    strictPort: false,
+    // Same as apps/web: serve the workspace packages' dist even after a rebuild
+    fs: { allow: ['../../packages'] }
   },
   preview: {
     port: 4173

@@ -53,6 +53,8 @@ function getRotatedPanAxis(key: ArrowKey, rotation: number): { axis: 'x' | 'y'; 
 export interface AoeKeyCommands {
   hasDraft: () => boolean;
   cancelDraft: () => void;
+  /** Places a drawn shape that is still waiting for its click; false when none is waiting */
+  placeDraft: () => boolean;
   deselect: () => void;
   deleteSelected: () => void;
   rotateSelected: (deltaDegrees: number) => void;
@@ -323,6 +325,7 @@ export function handleKeyCommands(
       break;
 
     case 'Enter':
+      if (activeLayer === MapLayerType.AoeTemplate && aoe?.placeDraft()) break;
       if (
         activeLayer === MapLayerType.FogOfWar &&
         fogOfWar.tool.type === ToolType.Polygon &&

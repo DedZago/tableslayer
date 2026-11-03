@@ -745,6 +745,7 @@
   export const aoeTemplates = {
     cancelDraft: () => aoeTemplateLayer?.cancelDraft(),
     hasDraft: () => aoeTemplateLayer?.hasDraft() ?? false,
+    placeDraft: () => aoeTemplateLayer?.placeDraft() ?? false,
     unplaceSpellAim: () => aoeTemplateLayer?.unplaceSpellAim() ?? false,
     hitTest: (point: { x: number; y: number }) => aoeTemplateLayer?.hitTest(point) ?? null,
     inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>

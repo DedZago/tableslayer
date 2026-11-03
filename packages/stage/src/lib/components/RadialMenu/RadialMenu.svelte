@@ -55,13 +55,6 @@
   const hubTitle = $derived(focused?.label ?? level.parent?.label ?? title ?? '');
   const hubHint = $derived(focused?.hint ?? (focused ? '' : (level.parent?.hint ?? subtitle ?? '')));
 
-  // Items face the nearest screen edge, where the person who opened the menu is sitting
-  const rotationFromEdge = (x: number, y: number, width: number, height: number): number => {
-    const distances = [height - y, width - x, y, x];
-    const nearest = distances.indexOf(Math.min(...distances));
-    return [0, 90, 180, 270][nearest];
-  };
-
   const itemAngle = (index: number, total: number) => -Math.PI / 2 + ((2 * Math.PI) / total) * index;
 
   const close = () => {
@@ -264,15 +257,13 @@
     };
   });
 
-  // Open at the remembered rotation, or toward the nearest edge the first time. Only opening sets it:
+  // Open at the remembered rotation, upright (the GM's north-up view) the first time. Only opening sets it:
   // a new position, a submenu or a stale `rotation` prop must not undo a turn made while open
   $effect(() => {
     if (!visible) return;
     untrack(() => {
       twisted = false;
-      const remembered = rotation;
-      menuRotation = remembered ?? rotationFromEdge(position.x, position.y, window.innerWidth, window.innerHeight);
-      if (remembered === undefined) onRotationChange?.(menuRotation);
+      menuRotation = rotation ?? 0;
     });
   });
 

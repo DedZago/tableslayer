@@ -84,6 +84,7 @@ describe('spellMenuItem', () => {
       'Level IV',
       'Level V'
     ]);
+    expect(item.submenu!.map((ring) => ring.iconText)).toEqual([undefined, 'I', 'II', 'III', 'IV', 'V']);
   });
 
   it('lists the cantrips directly', () => {
@@ -183,7 +184,7 @@ describe('slotLevelItems', () => {
   it('groups the highest levels under one item when they do not fit', () => {
     const items = slotLevelItems([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], make);
     expect(items).toHaveLength(7);
-    expect(items.at(-1)).toMatchObject({ id: 'spell-slots:6-9', label: 'Level VI–IX' });
+    expect(items.at(-1)).toMatchObject({ id: 'spell-slots:6-9', label: 'Level VI–IX', iconText: 'VI–IX' });
     expect(ids(items.at(-1)!.submenu)).toEqual(['slot-6', 'slot-7', 'slot-8', 'slot-9']);
   });
 });

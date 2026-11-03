@@ -229,6 +229,7 @@
   export const aoeTemplates = {
     cancelDraft: () => sceneRef?.aoeTemplates?.cancelDraft(),
     hasDraft: () => sceneRef?.aoeTemplates?.hasDraft() ?? false,
+    placeDraft: () => sceneRef?.aoeTemplates?.placeDraft() ?? false,
     unplaceSpellAim: () => sceneRef?.aoeTemplates?.unplaceSpellAim() ?? false,
     hitTest: (point: { x: number; y: number }) => sceneRef?.aoeTemplates?.hitTest(point) ?? null,
     inRectangle: (start: { x: number; y: number }, end: { x: number; y: number }) =>

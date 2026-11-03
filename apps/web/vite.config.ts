@@ -22,6 +22,9 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5174,
       strictPort: false,
+      // The workspace packages are served from their dist; without this, a rebuild can leave
+      // some of their files outside the allow list and the browser gets them with no MIME type
+      fs: { allow: ['../../packages'] },
       warmup: {
         clientFiles: [
           './src/routes/**/+page.svelte',

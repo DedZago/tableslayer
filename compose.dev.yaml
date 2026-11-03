@@ -35,6 +35,10 @@ services:
       STRIPE_API_KEY: ''
       GOOGLE_CLIENT_ID: ''
       TURNSTILE_SITE_KEY: ''
+      # Vite rejects Host headers that are hostnames it does not know; allow the configured one
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: ${LAN_HOST:-localhost}
+      # Bind mounts from a Windows drive under WSL deliver no file events; host.sh turns polling on there
+      CHOKIDAR_USEPOLLING: ${DEV_USE_POLLING:-false}
       TURBO_TELEMETRY_DISABLED: '1'
       DO_NOT_TRACK: '1'
     ports:

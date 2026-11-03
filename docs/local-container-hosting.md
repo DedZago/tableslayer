@@ -50,6 +50,15 @@ Open `http://192.168.1.50:5174` for the app and `http://192.168.1.50:5173` for U
 
 For an editor devcontainer, do the setup steps above first, stop any standalone development stack, then reopen the repository in its container. It uses the same Compose service and data folder. Command-line development does not depend on an editor extension. Workspace dependency caches live in named container volumes; campaign data lives in your selected directory. The development container runs as root inside the container; on rootful Docker generated files can need ownership adjustment on the host. Rootless Podman maps container root to your user. Bind mounts use `:z` for SELinux sharing.
 
+### Windows with WSL
+
+`make dev` works from a WSL 2 distro with Docker Desktop (WSL backend) or Docker Engine installed inside the distro. Open the app from the Windows browser at `http://localhost:5174` (docs on 5173, PartyKit on 1999).
+
+- Use `localhost` as the host during setup: `./containers/host.sh setup ~/TableSlayerData localhost`. In WSL's default NAT networking only `localhost` is forwarded from Windows, and the browser connects to PartyKit through `LAN_HOST`, so a LAN IP or the WSL address breaks realtime. For other LAN devices, set `networkingMode=mirrored` in `%UserProfile%\.wslconfig`, run `wsl --shutdown`, and use the Windows machine's LAN IP instead. `host.sh up` warns when `LAN_HOST` will not work.
+- Clone the repository and choose `DATA_ROOT` inside the WSL filesystem (for example `~/`), not under `/mnt/c`. On a Windows drive file events do not reach the container, so `host.sh` switches the watchers to slow polling, and SQLite locking is unreliable.
+- `.gitattributes` keeps LF line endings, so the shell scripts also run from a checkout made with Windows Git.
+- If a port fails to bind, Windows may have reserved it (`netsh interface ipv4 show excludedportrange protocol=tcp`); pick other ports with the variables in the next section.
+
 ### Running several development stacks in parallel
 
 The development stack uses a fixed Compose project name (`tableslayer-dev`) and host ports 5173, 5174 and 1999. To run a second checkout (for example a git worktree) beside it, give that checkout its own `.env` with a different project name, ports and data folder:

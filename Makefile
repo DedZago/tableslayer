@@ -1,4 +1,4 @@
-HOST := ./containers/host.sh
+HOST := bash ./containers/host.sh
 DATA_ROOT := $(shell sed -n 's/^DATA_ROOT=//p' .env 2>/dev/null | tr -d '"')
 LAN_HOST := $(shell sed -n 's/^LAN_HOST=//p' .env 2>/dev/null)
 DEV_APP_PORT := $(or $(shell sed -n 's/^DEV_APP_PORT=//p' .env 2>/dev/null),5174)

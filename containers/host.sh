@@ -3,6 +3,27 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 command=${1:-help}
 mode=${2:-development}
+is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+# WSL's default NAT networking forwards only localhost from Windows; the browser-facing URLs must use it
+warn_wsl_host() {
+  local lan_host=$1
+  is_wsl || return 0
+  [[ "$lan_host" != localhost && "$lan_host" != 127.0.0.1 ]] || return 0
+  [[ "$(wslinfo --networking-mode 2>/dev/null)" != mirrored ]] || return 0
+  printf 'WSL: LAN_HOST=%s is not reachable from the Windows browser in NAT networking mode.\n' "$lan_host" >&2
+  printf '     Set LAN_HOST=localhost in .env, or enable networkingMode=mirrored in %%UserProfile%%\\.wslconfig for LAN access.\n' >&2
+}
+check_wsl() {
+  is_wsl || return 0
+  warn_wsl_host "$(sed -n 's/^LAN_HOST=//p' .env)"
+  if [[ "$PWD" == /mnt/* ]]; then
+    echo 'WSL: the repository is on a Windows drive; hot reload falls back to slow polling. Clone it into the WSL filesystem (e.g. ~/) instead.' >&2
+    export DEV_USE_POLLING=true
+  fi
+  local data_root
+  data_root=$(sed -n 's/^DATA_ROOT=//p' .env | tr -d '"')
+  [[ "$data_root" != /mnt/* ]] || echo 'WSL: DATA_ROOT is on a Windows drive; SQLite locking is unreliable there. Use a WSL path (e.g. ~/TableSlayerData).' >&2
+}
 if [[ "$command" == setup ]]; then
   data_root=${2:?Usage: host.sh setup /absolute/data/path LAN_IP_OR_HOSTNAME}
   lan_host=${3:?Specify the Linux host LAN IP or hostname}
@@ -14,6 +35,7 @@ if [[ "$command" == setup ]]; then
   secret=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
   printf 'DATA_ROOT="%s"\nLAN_HOST=%s\nBIND_ADDRESS=0.0.0.0\nINTERNAL_API_TOKEN=%s\n' "$data_root" "$lan_host" "$secret" > .env
   echo 'Created .env and separate data directories. See docs/local-container-hosting.md for initialization.'
+  warn_wsl_host "$lan_host"
   exit
 fi
 [[ "$mode" == development || "$mode" == release ]] || { echo 'Mode must be development or release.' >&2; exit 1; }
@@ -27,6 +49,7 @@ fi
 compose=(docker compose --env-file .env -f "$compose_file")
 case "$command" in
   up)
+    check_wsl
     if [[ "$mode" == development ]]; then
       "${compose[@]}" up -d --build --wait --wait-timeout 900
     else

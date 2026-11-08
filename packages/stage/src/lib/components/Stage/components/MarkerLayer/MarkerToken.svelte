@@ -20,6 +20,14 @@
     TOKEN_CANVAS_SIZE,
     tokenQuadGeometry
   } from '../../helpers/tokenRasterCache';
+  import {
+    BLOOD_QUAD_SCALE,
+    bloodRimWidthFor,
+    bloodVariantFor,
+    canBleed,
+    createBloodMaterial,
+    getBloodPattern
+  } from '../../helpers/bloodOverlay';
 
   interface Props {
     marker: Marker;
@@ -99,6 +107,12 @@
   const imageScale = $derived(marker.imageScale);
   const imageUrl = $derived(marker.imageUrl);
   const isDead = $derived(marker.conditions?.some((c) => c.id === 'dead') ?? false);
+  const isBloodied = $derived(
+    !isDead &&
+      canBleed(shape) &&
+      (marker.conditions?.some((c) => c.id === 'bloodied' && !(c.dmOnly && stage.mode === StageMode.Player)) ?? false)
+  );
+  const bloodVariant = $derived(bloodVariantFor(marker.id));
   const highlightGeometry = $derived(getHighlightGeometry(shape));
 
   const baseMarkerSize = $derived(getGridCellSize(grid, display) * marker.size);
@@ -142,11 +156,18 @@
   // allocates immutable GPU storage on the first upload and cannot grow it afterwards
   let markerTexture: THREE.CanvasTexture<OffscreenCanvas> | null = null;
   const markerMaterial = new THREE.MeshBasicMaterial({ transparent: true });
+  const { material: bloodMaterial, setPattern: setBloodPattern } = createBloodMaterial();
   let tokenImage = $state.raw<ImageBitmap | null>(null);
   let activeRingRef = $state.raw<THREE.Mesh>();
 
   $effect(() => {
     markerMaterial.opacity = isDead ? opacity * DEAD_TOKEN_OPACITY : opacity;
+    bloodMaterial.opacity = opacity;
+  });
+
+  $effect(() => {
+    if (!isBloodied) return;
+    setBloodPattern(getBloodPattern({ shape, variant: bloodVariant, rimWidth: bloodRimWidthFor(strokeWidth) }));
   });
 
   $effect(() => {
@@ -318,6 +339,7 @@
   onDestroy(() => {
     markerTexture?.dispose();
     markerMaterial.dispose();
+    bloodMaterial.dispose();
   });
 </script>
 
@@ -354,6 +376,16 @@
     renderOrder={SceneLayerOrder.Marker + 1}
     layers={[SceneLayer.Main]}
   />
+
+  {#if isBloodied}
+    <T.Mesh
+      geometry={tokenQuadGeometry}
+      material={bloodMaterial}
+      scale={[BLOOD_QUAD_SCALE, BLOOD_QUAD_SCALE, 1]}
+      renderOrder={SceneLayerOrder.Marker + 0.2}
+      layers={[SceneLayer.Main]}
+    />
+  {/if}
 
   {#if isDead}
     <T.Mesh

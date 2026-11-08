@@ -15,12 +15,18 @@
 
   const { conditions, mode }: Props = $props();
 
+  // Sizes are in token units so the quad always leaves room for the outermost pip
   const CANVAS_SIZE = 512;
-  const BADGE_QUAD_SCALE = 1.3;
+  const BADGE_QUAD_SCALE = 1.5;
+  const PX_PER_TOKEN = CANVAS_SIZE / BADGE_QUAD_SCALE;
   const PIP_ARC_CENTER_DEG = -90;
   const PIP_ARC_SPAN_DEG = 120;
-  const PIP_RING_RADIUS = 0.47 * CANVAS_SIZE;
-  const PIP_RADIUS = 0.075 * CANVAS_SIZE;
+  const PIP_RING_RADIUS = 0.61 * PX_PER_TOKEN;
+  const PIP_RADIUS = 0.1 * PX_PER_TOKEN;
+  const PIP_FONT_SIZE = Math.round(0.095 * PX_PER_TOKEN);
+  const PIP_STROKE_WIDTH = 0.008 * PX_PER_TOKEN;
+  // Drawn on the token itself instead of as a pip
+  const OVERLAY_CONDITIONS = ['dead', 'bloodied'];
   const MAX_PIPS = 8;
   const OVERFLOW_PIP_COLOR = '#4b5563';
 
@@ -31,7 +37,7 @@
 
   const toPips = (list: MarkerCondition[]): Pip[] => {
     const pips = list
-      .filter((c) => c.id !== 'dead')
+      .filter((c) => !OVERLAY_CONDITIONS.includes(c.id))
       .map((c) => {
         const { abbr, color } = resolveCondition(c);
         return { text: c.id === 'exhaustion' && c.value ? String(c.value) : abbr, color };
@@ -59,7 +65,7 @@
     ctx.arc(x, y, PIP_RADIUS, 0, Math.PI * 2);
     ctx.fillStyle = pip.color;
     ctx.fill();
-    ctx.lineWidth = 3;
+    ctx.lineWidth = PIP_STROKE_WIDTH;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.stroke();
     ctx.fillStyle = '#ffffff';
@@ -69,7 +75,7 @@
   const drawBadges = (list: MarkerCondition[]) => {
     const pips = toPips(list);
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-    ctx.font = 'bold 38px system-ui';
+    ctx.font = `bold ${PIP_FONT_SIZE}px system-ui`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     pips.forEach((pip, index) => {

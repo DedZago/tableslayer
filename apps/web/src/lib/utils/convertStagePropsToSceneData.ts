@@ -1,4 +1,5 @@
-import type { StageProps } from '@tableslayer/stage';
+import type { AtmosphereSettings, StageProps } from '@tableslayer/stage';
+import { serializeAtmosphereSettings } from './atmosphereSettings';
 
 // Scene-settings field -> its source path in StageProps. The single source of
 // truth for full conversion and for the broadcaster's field-level filtering
@@ -43,6 +44,13 @@ const SETTINGS_FIELD_SOURCES: Record<string, string> = {
   weatherFov: 'weather.fov',
   weatherIntensity: 'weather.intensity',
   weatherOpacity: 'weather.opacity',
+  weatherLightingType: 'weather.lighting.type',
+  weatherLightingIntensity: 'weather.lighting.intensity',
+  weatherAmbienceType: 'weather.ambience.type',
+  weatherAmbienceIntensity: 'weather.ambience.intensity',
+  weatherWindAngle: 'weather.wind.angle',
+  weatherWindStrength: 'weather.wind.strength',
+  weatherSettings: 'weather.settings',
   mapRotation: 'map.rotation',
   mapOffsetX: 'map.offset.x',
   mapOffsetY: 'map.offset.y',
@@ -86,6 +94,14 @@ export const sceneSettingsFieldsForPropPaths = (propPaths: Iterable<string>): st
     .map(([field]) => field);
 };
 
+const UNIT_RANGE_FIELDS = [
+  'weatherIntensity',
+  'weatherOpacity',
+  'weatherLightingIntensity',
+  'weatherAmbienceIntensity',
+  'weatherWindStrength'
+] as const;
+
 export const convertPropsToSceneDetails = (
   stageProps: Partial<StageProps>,
   mapThumbLocation: string | null
@@ -106,6 +122,11 @@ export const convertPropsToSceneDetails = (
   // Fog rooms live in stage props as FogRoom[] but persist as a JSON string
   if (details.fogOfWarRooms !== undefined && typeof details.fogOfWarRooms !== 'string') {
     details.fogOfWarRooms = JSON.stringify(details.fogOfWarRooms);
+  }
+
+  // Atmosphere settings live in stage props as an object but persist as a JSON string
+  if (details.weatherSettings !== undefined && typeof details.weatherSettings !== 'string') {
+    details.weatherSettings = serializeAtmosphereSettings(details.weatherSettings as AtmosphereSettings | null);
   }
 
   // Ensure edgeOpacity and edgeScale are proper numbers
@@ -130,12 +151,12 @@ export const convertPropsToSceneDetails = (
     details.weatherFov = Number(details.weatherFov);
   }
 
-  if (details.weatherIntensity !== undefined) {
-    details.weatherIntensity = Number(details.weatherIntensity);
-  }
-
-  if (details.weatherOpacity !== undefined) {
-    details.weatherOpacity = Number(details.weatherOpacity);
+  // The scene table CHECKs these to 0..1; one value outside it would reject the whole scene save
+  for (const field of UNIT_RANGE_FIELDS) {
+    if (details[field] === undefined) continue;
+    const value = Number(details[field]);
+    if (Number.isFinite(value)) details[field] = Math.min(1, Math.max(0, value));
+    else delete details[field];
   }
 
   return details;

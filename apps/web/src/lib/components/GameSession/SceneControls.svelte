@@ -124,8 +124,8 @@
     {
       id: 'weather',
       icon: IconCloudSnow,
-      text: 'Weather',
-      tooltip: 'Add weather effects to the scene',
+      text: 'Atmosphere',
+      tooltip: 'Add weather, lighting and ambience to the scene',
       mapLayer: MapLayerType.None
     },
     {

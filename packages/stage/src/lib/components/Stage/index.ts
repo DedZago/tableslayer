@@ -23,6 +23,32 @@ export {
   type SpellAreaTargets,
   type SpellTargeted
 } from './components/AoeTemplateLayer/types';
+export {
+  MAX_ATMO_LIGHTS,
+  type AtmosphereBolt,
+  type AtmosphereController,
+  type AtmosphereUniforms
+} from './components/AtmosphereLayer/atmosphereController.svelte';
+export { AMBIENCE_PRESETS, LIGHTING_PRESETS, WEATHER_PRESETS } from './components/AtmosphereLayer/presets';
+export { DensityMode, atmoTimeNow, type AtmosphereSimParams } from './components/AtmosphereLayer/sim/types';
+export {
+  type AtmosphereEventKind,
+  type AtmospherePreset,
+  type AtmosphereSlot,
+  type AtmosphereSubLayerProps,
+  type ComposedAtmosphere,
+  type ComposedDensity,
+  type ComposedEvent,
+  type ComposedGround,
+  type ComposedLighting,
+  type ComposedParticleLayer,
+  type DensitySpec,
+  type EventSpec,
+  type GroundSpec,
+  type LightingSpec,
+  type ParticleLayerSpec,
+  type ParticleShape
+} from './components/AtmosphereLayer/types';
 export { DrawMode, RenderMode, ToolType, peekRLEDimensions } from './components/DrawingLayer/types';
 export { type EdgeOverlayProps } from './components/EdgeOverlayLayer/types';
 export { type FogLayerProps } from './components/FogLayer/types';
@@ -53,6 +79,7 @@ export { default as PerformanceDebugger } from './components/PerformanceDebugger
 export { default as PerformanceOverlay } from './components/PerformanceOverlay/PerformanceOverlay.svelte';
 export { default as PointerInputManager } from './components/PointerInputManager/PointerInputManager.svelte';
 export { SceneRotation, type PostProcessingProps, type SceneLayerProps } from './components/Scene/types';
+export type { PreRenderCallback, PreRenderRegistry } from './components/Scene/types';
 export {
   type CameraShake,
   type SpellCast,
@@ -74,7 +101,12 @@ export {
   SnowPreset
 } from './components/WeatherLayer/presets';
 export {
+  AmbienceType,
+  LightingType,
   WeatherType,
+  type AtmosphereSettings,
+  type AtmosphereSlotProps,
+  type AtmosphereWindProps,
   type DepthOfFieldConfig,
   type WeatherLayerPreset,
   type WeatherLayerProps
@@ -117,6 +149,34 @@ export {
   type TemplateBounds,
   type TemplatePoint
 } from './helpers/aoeTemplates';
+export {
+  composeAtmosphere,
+  hasAtmospherePreset,
+  isAtmosphereSlotActive,
+  type ComposeOptions
+} from './helpers/atmosphereCompose';
+export {
+  ATMOSPHERE_CATEGORIES,
+  ATMOSPHERE_EFFECTS,
+  QUICK_SCENES,
+  atmosphereEffectDefinition,
+  atmosphereEffectsInCategory,
+  type AtmosphereCategoryDefinition,
+  type AtmosphereEffectDefinition,
+  type AtmosphereParamDefinition,
+  type QuickScene
+} from './helpers/atmosphereEffects';
+export {
+  eventsInWindow,
+  flashEnvelope,
+  gustAt,
+  hash32,
+  hashSceneSeed,
+  type AtmosphereEvent,
+  type EventRateSpec,
+  type FlashSample
+} from './helpers/atmosphereEvents';
+export { createLightToMapUv, type AtmosphereLightUv } from './helpers/atmosphereLights';
 export { debugState, isDebugEnabled, setDebugEnabled } from './helpers/debugState.svelte';
 export { parseFogRooms, pointInPolygon, polygonArea, smallestRoomContaining, type FogRoom } from './helpers/fogRooms';
 export { getGridCellSize, snapToGrid } from './helpers/grid';

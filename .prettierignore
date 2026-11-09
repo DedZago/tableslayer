@@ -30,3 +30,6 @@ yarn.lock
 # Playwright test artifacts
 apps/web/tests/e2e/.auth/
 apps/web/tests/e2e/test-results.json
+
+# Rust build output
+**/target

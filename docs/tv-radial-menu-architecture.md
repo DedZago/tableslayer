@@ -192,6 +192,12 @@ castSpell ──► presence.castSpell (animation on every screen) ──► tem
   selected token and templates use the AoE tool's visibility. The `SpellAimBar` shows the prompt for every aim
   ("Click where to place Fireball", "Click inside Fireball to cast · drag to move"); Escape and Enter behave as on the
   TV (`escape`, `confirmAim`). Right-click is not used there.
+- **GM atmosphere ring.** The editor's general menu (`editorGeneralMenu`) also offers `Atmosphere` (`utils/atmosphereMenus.ts`,
+  not on the TV ring): Weather / Lighting / Ambience each open category rings of at most eight effects plus `Off` and an
+  `Intensity` ring (Lower / Higher, `keepOpen`); `Quick scenes` opens two rings of five scenes; `Clear all` mutes every
+  slot. Item ids are prefixed `gm-atmo:` and parsed by `parseAtmosphereMenuId`; `selectGeneralMenuItem` applies them
+  through `utils/atmosphereActions.ts` (the same writers as the Atmosphere panel), which queue only the prop paths that
+  changed, so the active states come back through the doc like any other edit.
 - **Summon art.** Summoned tokens are ordinary markers with `imageLocation: '/spell-tokens/<icon>.svg'` and the
   spell's palette as ring colour; see `loadTokenImage` for SVG decoding.
 

@@ -51,6 +51,16 @@ export interface SceneSettings {
   weatherIntensity: number;
   weatherOpacity: number;
   weatherType: number;
+  // Atmosphere slots (optional: rows hydrated before these fields existed lack them)
+  weatherLightingType?: number;
+  weatherLightingIntensity?: number;
+  weatherAmbienceType?: number;
+  weatherAmbienceIntensity?: number;
+  /** Degrees in map space, 0 = toward the map right */
+  weatherWindAngle?: number;
+  weatherWindStrength?: number;
+  /** JSON-encoded AtmosphereSettings */
+  weatherSettings?: string | null;
   fogEnabled: boolean;
   fogColor: string;
   fogOpacity: number;

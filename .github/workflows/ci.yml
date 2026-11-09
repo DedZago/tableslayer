@@ -37,6 +37,34 @@ jobs:
       - name: Svelte check
         run: pnpm check
 
+  wasm-fresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/shared
+      - name: Rust unit tests
+        working-directory: packages/stage/sim
+        run: cargo test
+      - name: Rebuild weather_sim.wasm
+        run: pnpm --filter @tableslayer/stage build:sim
+      - name: Verify the committed wasm is up to date
+        run: git diff --exit-code -- packages/stage/src/lib/components/Stage/components/AtmosphereLayer/sim/weather_sim.wasm
+
+  saved-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/shared
+      - name: Migrations match schema.ts
+        working-directory: apps/web
+        run: pnpm run check:migrations
+      # The saved-data tests import @tableslayer/stage, which resolves to its built dist
+      - name: Build workspace packages
+        run: pnpm --filter @tableslayer/ui package && pnpm --filter @tableslayer/stage build
+      - name: Old saved data still migrates, loads and saves
+        working-directory: apps/web
+        run: pnpm exec vitest run src/lib/compat
+
   changeset-check:
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +120,7 @@ jobs:
     if: github.event.pull_request.draft == false
     name: 'Turso'
     runs-on: ubuntu-latest
-    needs: [format-check, lint, tsc, changeset-check]
+    needs: [format-check, lint, tsc, wasm-fresh, saved-data, changeset-check]
     outputs:
       turso_db_url: ${{ steps.set-db-url.outputs.turso_db_url }}
     steps:

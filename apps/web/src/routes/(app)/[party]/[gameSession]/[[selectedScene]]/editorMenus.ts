@@ -1,3 +1,4 @@
+import { atmosphereMenuItem, type AtmosphereMenuState } from '$lib/utils/atmosphereMenus';
 import { spellMenuItem, type SpellMenuState } from '$lib/utils/spellMenus';
 import {
   IconArrowBackUp,
@@ -38,13 +39,15 @@ export interface EditorMenuState {
   canUndo: boolean;
   canRedo: boolean;
   spells: SpellMenuState;
+  atmosphere: AtmosphereMenuState;
 }
 
 /** The ring a right-click on empty map opens: the TV's tools that apply to the GM's editor */
-export const editorGeneralMenu = ({ canUndo, canRedo, spells }: EditorMenuState): RadialMenuItemProps[] => [
+export const editorGeneralMenu = ({ canUndo, canRedo, spells, atmosphere }: EditorMenuState): RadialMenuItemProps[] => [
   measureItem,
   aoeShapesItem,
   spellMenuItem(spells),
+  atmosphereMenuItem(atmosphere),
   {
     id: MENU_ID.undo,
     label: 'Undo',

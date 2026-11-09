@@ -24,7 +24,8 @@ export enum SceneLayerOrder {
   Background = 0,
   Map = 10,
   Fog = 20,
-  Weather = 30,
+  AmbienceGround = 21, // Ground fog, smoke and tentacle shadows sit above the map and under everything else
+  Weather = 30, // Legacy custom particle weather (WeatherType.Custom)
   EffectAnnotation = 35, // Effect annotations render under fog of war
   AoeTemplate = 35.5, // Spell area fills render above painted effects and below tokens
   Light = 36, // Lights render under markers and fog of war
@@ -32,6 +33,9 @@ export enum SceneLayerOrder {
   TokenEffectUnder = 36.8, // Glows, orbits and hazes sit just under the token
   Marker = 37, // Markers render above effect annotations but below fog of war
   TokenEffectOver = 37.3, // Chains, sigils, charms, rifts, wards and the concentration seal wrap over the token but under badges and rings
+  AtmosphereDarkness = 37.8, // Multiplies the map and tokens by the scene lighting; placed lights cut through
+  AirWeather = 38.5, // Airborne weather draws over tokens and under fog of war
+  Lightning = 38.6, // Bolts render above airborne weather and under fog of war
   FogOfWar = 40,
   Grid = 50,
   EdgeOverlay = 70,
@@ -40,6 +44,16 @@ export enum SceneLayerOrder {
   Measurement = 90,
   TvViewport = 95, // DM-only TV viewport rectangle; dims everything outside the playfield
   Cursor = 100
+}
+
+export type PreRenderCallback = () => void;
+
+/**
+ * Context 'preRender'. Callbacks run in Scene's render task only on frames that will be presented
+ * (after the frame pacer said yes), before the first pass, so offscreen targets never redraw on skipped frames.
+ */
+export interface PreRenderRegistry {
+  register: (callback: PreRenderCallback) => () => void;
 }
 
 export interface SceneLayerProps {

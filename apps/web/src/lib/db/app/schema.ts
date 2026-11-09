@@ -423,6 +423,13 @@ export const sceneTable = sqliteTable(
     weatherIntensity: real('weather_intensity').notNull().default(1),
     weatherOpacity: real('weather_opacity').notNull().default(1.0),
     weatherType: integer('weather_type').notNull().default(0),
+    weatherLightingType: integer('weather_lighting_type').notNull().default(0),
+    weatherLightingIntensity: real('weather_lighting_intensity').notNull().default(1),
+    weatherAmbienceType: integer('weather_ambience_type').notNull().default(0),
+    weatherAmbienceIntensity: real('weather_ambience_intensity').notNull().default(1),
+    weatherWindAngle: real('weather_wind_angle').notNull().default(45),
+    weatherWindStrength: real('weather_wind_strength').notNull().default(0.35),
+    weatherSettings: text('weather_settings'), // JSON-encoded AtmosphereSettings (flash safety, accumulation, params)
     fogEnabled: integer('fog_enabled', { mode: 'boolean' }).notNull().default(false),
     fogColor: text('fog_color').notNull().default('#a0a0a0'),
     fogOpacity: real('fog_opacity').notNull().default(0.8),
@@ -467,6 +474,18 @@ export const sceneTable = sqliteTable(
     check('protected_grid_opacity', sql`${table.gridOpacity} >= 0 AND ${table.gridOpacity} <= 1`),
     check('protected_weather_intensity', sql`${table.weatherIntensity} >= 0 AND ${table.weatherIntensity} <= 1`),
     check('protected_weather_opacity', sql`${table.weatherOpacity} >= 0 AND ${table.weatherOpacity} <= 1`),
+    check(
+      'protected_weather_lighting_intensity',
+      sql`${table.weatherLightingIntensity} >= 0 AND ${table.weatherLightingIntensity} <= 1`
+    ),
+    check(
+      'protected_weather_ambience_intensity',
+      sql`${table.weatherAmbienceIntensity} >= 0 AND ${table.weatherAmbienceIntensity} <= 1`
+    ),
+    check(
+      'protected_weather_wind_strength',
+      sql`${table.weatherWindStrength} >= 0 AND ${table.weatherWindStrength} <= 1`
+    ),
     check('protected_fog_opacity', sql`${table.fogOpacity} >= 0 AND ${table.fogOpacity} <= 1`),
     check('protected_edge_opacity', sql`${table.edgeOpacity} >= 0 AND ${table.edgeOpacity} <= 1`),
     check('protected_edge_fade_start', sql`${table.edgeFadeStart} >= 0 AND ${table.edgeFadeStart} <= 1`),

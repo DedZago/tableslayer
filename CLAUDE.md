@@ -32,6 +32,15 @@ These rules ensure maintainability, safety, and developer velocity.
 - **D-4 (DO NOT)** run `pnpm run push` or any direct database commands. Always ask the user to run these commands
 - **D-5 (IMPORTANT)** Timestamps in this database use `integer({ mode: 'timestamp' })` which stores **Unix timestamps in SECONDS** (not milliseconds). When user provides a timestamp from the database, use `date -d @<timestamp>` to convert it to a readable date. Do not attempt manual conversion as you frequently make errors with this.
 
+### 3.1 — Saved-data compatibility
+
+Scenes, tokens and sessions saved by older versions must keep loading and saving. CI enforces this in the `saved-data` job.
+
+- **D-6 (MUST)** New columns are nullable or have a default; never add a `NOT NULL` column without one. Persisted enum or effect ids are append-only: never renumber or reuse a value.
+- **D-7 (MUST)** Code that reads saved data (DB rows, Y.js doc fields, JSON columns) tolerates fields that older data lacks or holds in an older shape: use `??` defaults and parse JSON defensively.
+- **D-8 (MUST)** A schema change ships with its generated migration (`pnpm --filter web run check:migrations` fails otherwise). Review the generated SQL: when it rebuilds a table (`__new_<table>`), drizzle-kit can copy the newly added columns from the old table, which does not have them yet; remove those columns from the `INSERT ... SELECT`.
+- **D-9 (MUST)** Before a change alters what is saved, add a fixture of the current shape to `apps/web/src/lib/compat/fixtures/` named after the latest migration (copy the newest one and adjust it). `savedData.test.ts` migrates every fixture to the current schema, loads it through the server snapshot and a live doc, and saves an old live session back. A value may only change if the fixture lists it in `allowedChanges` with the reason.
+
 ### 4 - Tooling gates
 
 - **G-1** `pnpm run check` passes

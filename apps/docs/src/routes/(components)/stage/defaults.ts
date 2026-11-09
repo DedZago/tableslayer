@@ -1,9 +1,11 @@
 import {
+  AmbienceType,
   AOE_EFFECT_DEFAULT_COLORS,
   AoeEffect,
   AoeShape,
   DrawMode,
   GridType,
+  LightingType,
   MapLayerType,
   MeasurementType,
   RainPreset,
@@ -230,6 +232,13 @@ export const StageDefaultProps: StageProps = {
   },
   weather: {
     type: WeatherType.Rain,
-    custom: { ...RainPreset }
+    intensity: 1,
+    opacity: 1,
+    custom: { ...RainPreset },
+    lighting: { type: LightingType.None, intensity: 1 },
+    ambience: { type: AmbienceType.None, intensity: 1 },
+    wind: { angle: 45, strength: 0.35 },
+    seed: 1,
+    settings: { v: 1 }
   }
 };

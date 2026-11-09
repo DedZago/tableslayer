@@ -39,6 +39,8 @@ services:
       __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: ${LAN_HOST:-localhost}
       # Bind mounts from a Windows drive under WSL deliver no file events; host.sh turns polling on there
       CHOKIDAR_USEPOLLING: ${DEV_USE_POLLING:-false}
+      # Keep cargo output off the bind mount (slow on WSL/Windows drives, and never visible to the host)
+      CARGO_TARGET_DIR: /cargo-target
       TURBO_TELEMETRY_DISABLED: '1'
       DO_NOT_TRACK: '1'
     ports:
@@ -52,6 +54,8 @@ services:
       - dev_docs_modules:/workspace/apps/docs/node_modules
       - dev_ui_modules:/workspace/packages/ui/node_modules
       - dev_stage_modules:/workspace/packages/stage/node_modules
+      - dev_cargo_registry:/usr/local/cargo/registry
+      - dev_cargo_target:/cargo-target
       - ${DATA_ROOT:?Set an absolute DATA_ROOT}/development:/data:z
 volumes:
   dev_modules:
@@ -59,3 +63,5 @@ volumes:
   dev_docs_modules:
   dev_ui_modules:
   dev_stage_modules:
+  dev_cargo_registry:
+  dev_cargo_target:

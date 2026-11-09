@@ -1,12 +1,21 @@
 <script lang="ts">
   import * as THREE from 'three';
-  import { T } from '@threlte/core';
+  import { T, useThrelte } from '@threlte/core';
   import { MapLayerType } from './types';
   import type { Size } from '../../types';
   import FogOfWarLayer from '../FogOfWarLayer/FogOfWarLayer.svelte';
   import type { FogOfWarExports } from '../FogOfWarLayer/types';
   import type { Callbacks, StageProps } from '../Stage/types';
-  import { getContext } from 'svelte';
+  import { getContext, onDestroy, untrack } from 'svelte';
+  import { GridMode } from '../GridLayer/types';
+  import type { AtmosphereController } from '../AtmosphereLayer/atmosphereController.svelte';
+  import {
+    applyGroundValues,
+    createGroundUniforms,
+    getGroundCellFraction,
+    getGroundSignature
+  } from '../AtmosphereLayer/ground/groundPatch';
+  import { createGroundProgramSwitcher } from '../AtmosphereLayer/ground/groundProgram';
   import { SceneLayer, SceneLayerOrder } from '../Scene/types';
   import FogLayer from '../FogLayer/FogLayer.svelte';
   import { createDataSource, type IMapDataSource } from './dataSources';
@@ -26,6 +35,21 @@
   let dataSource: IMapDataSource | null = null;
   let mapImageMaterial = new THREE.MeshBasicMaterial();
   let fogOfWarLayer: FogOfWarExports;
+
+  const atmosphere = getContext<AtmosphereController | undefined>('atmosphere');
+  const stage = getContext<{ mainPassUsesComposer: boolean }>('stage');
+  const { renderer, scene, camera } = useThrelte();
+  const groundUniforms = atmosphere ? createGroundUniforms(atmosphere) : null;
+  const groundSwitcher =
+    atmosphere && groundUniforms
+      ? createGroundProgramSwitcher({
+          renderer,
+          getScene: () => scene,
+          getCamera: () => camera.current,
+          material: mapImageMaterial,
+          uniforms: groundUniforms
+        })
+      : null;
 
   // The size of the map image
   let mapSize: Size | null = $state(null);
@@ -110,6 +134,43 @@
         console.error('Failed to load map:', reason);
       });
   });
+
+  const groundSignature = $derived.by(() => {
+    const signature = atmosphere ? getGroundSignature(atmosphere.composed) : '';
+    return signature && !stage.mainPassUsesComposer ? `${signature}|out:srgb` : signature;
+  });
+  const groundRendersToTarget = $derived(groundSignature !== '' && stage.mainPassUsesComposer);
+  const groundCellFraction = $derived(
+    mapSize
+      ? getGroundCellFraction({
+          isMapDefined: props.grid.gridMode === GridMode.MapDefined,
+          grid: props.grid,
+          mapSize,
+          display: props.display,
+          mapZoom: props.map.zoom
+        })
+      : 0.05
+  );
+
+  $effect(() => {
+    const signature = groundSignature;
+    const rendersToTarget = groundRendersToTarget;
+    void materialUpdateKey;
+    untrack(() => groundSwitcher?.request(signature, rendersToTarget));
+  });
+
+  $effect(() => {
+    if (!atmosphere || !groundUniforms) return;
+    const composed = atmosphere.composed;
+    untrack(() => applyGroundValues(groundUniforms, composed));
+  });
+
+  $effect(() => {
+    const cell = groundCellFraction;
+    if (groundUniforms) groundUniforms.uGroundCell.value = cell;
+  });
+
+  onDestroy(() => groundSwitcher?.dispose());
 
   function getUrlWithoutParams(url: string | null): string {
     if (!url) return '';

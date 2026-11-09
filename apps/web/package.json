@@ -24,6 +24,7 @@
     "test:unit": "vitest",
     "generate": "drizzle-kit generate --config ./src/lib/db/app/drizzle.config.app.ts",
     "migrate": "node scripts/migrate.js",
+    "check:migrations": "node scripts/check-migrations.mjs",
     "push": "drizzle-kit push --config ./src/lib/db/app/drizzle.config.app.ts",
     "drop": "drizzle-kit drop --config ./src/lib/db/app/drizzle.config.app.ts",
     "pull": "drizzle-kit pull --config ./src/lib/db/app/drizzle.config.app.ts",

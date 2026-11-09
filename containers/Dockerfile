@@ -8,7 +8,17 @@ COPY package.json ./
 RUN corepack enable && corepack prepare pnpm@9.11.0 --activate
 ENV HUSKY=0
 
+# Rust is only for rebuilding packages/stage/sim; the compiled weather_sim.wasm is committed,
+# so the build and release stages below never need it
 FROM base AS development
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+COPY packages/stage/sim/rust-toolchain.toml /tmp/rust-toolchain.toml
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' /tmp/rust-toolchain.toml) \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --no-modify-path --profile minimal --default-toolchain "$toolchain" -t wasm32-unknown-unknown \
+    && rm /tmp/rust-toolchain.toml
 COPY containers/dev.sh /usr/local/bin/tableslayer-dev
 CMD ["bash", "/usr/local/bin/tableslayer-dev"]
 

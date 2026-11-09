@@ -428,6 +428,13 @@
       "when": 1793604040837,
       "tag": "0060_faithful_wasp",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1794177314558,
+      "tag": "0061_typical_vapor",
+      "breakpoints": true
     }
   ]
 }

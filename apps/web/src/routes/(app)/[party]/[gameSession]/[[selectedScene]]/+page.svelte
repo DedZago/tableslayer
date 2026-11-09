@@ -110,8 +110,18 @@
     queuePropertyUpdate,
     relockMapZoom,
     setChecklistContext,
+    trackChecklistItem,
     unbindPropertyUpdates
   } from '$lib/utils';
+  import {
+    ATMOSPHERE_SLOTS,
+    applyQuickScene,
+    hasActiveAtmosphere,
+    nudgeSlotIntensity,
+    readSlot,
+    setSlotEffect
+  } from '$lib/utils/atmosphereActions';
+  import { parseAtmosphereMenuId, type AtmosphereMenuAction } from '$lib/utils/atmosphereMenus';
   import { getPreference, setPreference, type PaneConfig } from '$lib/utils/gameSessionPreferences';
   import { stagePerformance } from '$lib/stores';
   import { getLatestMeasurement } from '$lib/utils/measurements';
@@ -133,6 +143,7 @@
     resolveSpell,
     PerformanceDebugger,
     PointerInputManager,
+    QUICK_SCENES,
     RadialMenu,
     rotateTemplateAngle,
     Stage,
@@ -1512,7 +1523,12 @@
     editorGeneralMenu({
       canUndo: session.client?.canUndo ?? false,
       canRedo: session.client?.canRedo ?? false,
-      spells: spells.menuState
+      spells: spells.menuState,
+      atmosphere: {
+        weather: readSlot(stageProps, 'weather'),
+        lighting: readSlot(stageProps, 'lighting'),
+        ambience: readSlot(stageProps, 'ambience')
+      }
     })
   );
 
@@ -1536,9 +1552,26 @@
     trackChecklistItemLocal('measurement');
   };
 
+  const applyAtmosphereMenuAction = (action: AtmosphereMenuAction) => {
+    if (action.kind === 'effect') setSlotEffect(stageProps, action.slot, action.type);
+    else if (action.kind === 'off') setSlotEffect(stageProps, action.slot, 0);
+    else if (action.kind === 'intensity') nudgeSlotIntensity(stageProps, action.slot, action.delta);
+    else if (action.kind === 'clear') ATMOSPHERE_SLOTS.forEach((slot) => setSlotEffect(stageProps, slot, 0));
+    else {
+      const scene = QUICK_SCENES.find((candidate) => candidate.id === action.sceneId);
+      if (scene) applyQuickScene(stageProps, scene);
+    }
+    if (hasActiveAtmosphere(stageProps)) trackChecklistItem('weather');
+  };
+
   const selectGeneralMenuItem = (itemId: string) => {
     if (parseSpellItemId(itemId)) {
       spells.select(itemId);
+      return;
+    }
+    const atmosphereAction = parseAtmosphereMenuId(itemId);
+    if (atmosphereAction) {
+      applyAtmosphereMenuAction(atmosphereAction);
       return;
     }
     const valueOf = (prefix: string) => itemId.slice(prefix.length);

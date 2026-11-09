@@ -25,14 +25,17 @@ export default defineConfig(({ mode }) => {
       // The workspace packages are served from their dist; without this, a rebuild can leave
       // some of their files outside the allow list and the browser gets them with no MIME type
       fs: { allow: ['../../packages'] },
-      warmup: {
-        clientFiles: [
-          './src/routes/**/+page.svelte',
-          './src/routes/**/+layout.svelte',
-          './src/lib/components/**/*.svelte'
-        ],
-        ssrFiles: ['./src/routes/**/+page.svelte', './src/routes/**/+layout.svelte', './src/routes/**/+server.ts']
-      }
+      // Pre-transforming every route only helps the dev server; under vitest it adds minutes per run
+      warmup: process.env.VITEST
+        ? undefined
+        : {
+            clientFiles: [
+              './src/routes/**/+page.svelte',
+              './src/routes/**/+layout.svelte',
+              './src/lib/components/**/*.svelte'
+            ],
+            ssrFiles: ['./src/routes/**/+page.svelte', './src/routes/**/+layout.svelte', './src/routes/**/+server.ts']
+          }
     },
     optimizeDeps: {
       include: ['yjs', 'y-partykit/provider', 'chroma-js', '@tabler/icons-svelte'],

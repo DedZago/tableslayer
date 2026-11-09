@@ -1,20 +1,14 @@
 <script lang="ts">
   import * as THREE from 'three';
-  import { onMount, onDestroy, untrack } from 'svelte';
-  import { T, useTask, useThrelte, type Props as ThrelteProps } from '@threlte/core';
-  import { WeatherType, type WeatherLayerPreset } from './types';
+  import { getContext, onMount, onDestroy } from 'svelte';
+  import { T, useThrelte, type Props as ThrelteProps } from '@threlte/core';
+  import type { PreRenderRegistry } from '../Scene/types';
+  import type { WeatherLayerPreset } from './types';
   import ParticleSystem from '../ParticleSystem/ParticleSystem.svelte';
   import { PERFORMANCE_TIER_SETTINGS, type StageProps } from '../Stage/types';
   import { mapClippingPlaneStore } from '../../helpers/clippingPlaneStore.svelte';
 
-  import SnowPreset from './presets/SnowPreset';
   import RainPreset from './presets/RainPreset';
-  import LeavesPreset from './presets/LeavesPreset';
-  import AshPreset from './presets/AshPreset';
-  import DustStormPreset from './presets/DustStormPreset';
-  import EmbersPreset from './presets/EmbersPreset';
-  import BlizzardPreset from './presets/BlizzardPreset';
-  import FirefliesPreset from './presets/FirefliesPreset';
 
   interface Props extends ThrelteProps<typeof THREE.Mesh> {
     props: StageProps;
@@ -23,14 +17,27 @@
 
   const { props, size, ...meshProps }: Props = $props();
 
-  const { renderer, renderStage } = useThrelte();
+  const { renderer } = useThrelte();
+  const preRender = getContext<PreRenderRegistry | undefined>('preRender');
 
   // Lower tiers render particles at reduced resolution and count; the render
   // target is stretched over the full-size quad, which upscales softly
   const tierSettings = $derived(PERFORMANCE_TIER_SETTINGS[props.performanceTier ?? 'high']);
 
-  let weatherType: WeatherType | null = $state(null);
-  let weatherPreset: WeatherLayerPreset = $state(RainPreset);
+  // Legacy custom preset path (WeatherType.Custom). Keyed on the JSON of the preset and on the override
+  // values so a replaced props root never rebuilds the particle systems. Overrides honour 0.
+  const customKey = $derived(JSON.stringify($state.snapshot(props.weather.custom) ?? null));
+  const fovOverride = $derived(props.weather.fov);
+  const intensityOverride = $derived(props.weather.intensity);
+  const opacityOverride = $derived(props.weather.opacity);
+  const basePreset = $derived<WeatherLayerPreset>(customKey === 'null' ? RainPreset : JSON.parse(customKey));
+  const weatherPreset = $derived<WeatherLayerPreset>({
+    ...basePreset,
+    fov: fovOverride ?? basePreset.fov,
+    intensity: intensityOverride ?? basePreset.intensity,
+    opacity: opacityOverride ?? basePreset.opacity
+  });
+
   // Use $state.raw() for Three.js objects to prevent proxy interference with internal properties
   let mesh: THREE.Mesh = $state.raw(new THREE.Mesh());
   let particleScene = $state.raw(new THREE.Scene());
@@ -71,64 +78,6 @@
     quadMaterial.dispose();
   });
 
-  // If weather type changes, update the preset
-  $effect(() => {
-    if (props.weather.type === weatherType) {
-      return;
-    }
-
-    untrack(() => {
-      weatherType = props.weather.type;
-      switch (weatherType) {
-        case WeatherType.Snow:
-          weatherPreset = { ...SnowPreset };
-          break;
-        case WeatherType.Rain:
-          weatherPreset = { ...RainPreset };
-          break;
-        case WeatherType.Leaves:
-          weatherPreset = { ...LeavesPreset };
-          break;
-        case WeatherType.Custom:
-          weatherPreset = { ...(props.weather.custom || RainPreset) };
-          break;
-        case WeatherType.Ash:
-          weatherPreset = { ...AshPreset };
-          break;
-        case WeatherType.DustStorm:
-          weatherPreset = { ...DustStormPreset };
-          break;
-        case WeatherType.Embers:
-          weatherPreset = { ...EmbersPreset };
-          break;
-        case WeatherType.Blizzard:
-          weatherPreset = { ...BlizzardPreset };
-          break;
-        case WeatherType.Fireflies:
-          weatherPreset = { ...FirefliesPreset };
-          break;
-        default:
-          // Fallback to rain preset
-          weatherPreset = { ...RainPreset };
-      }
-    });
-  });
-
-  // Overrides for fov, intensity, and opacity set in the UI
-  $effect(() => {
-    if (props.weather.fov) {
-      weatherPreset.fov = props.weather.fov;
-    }
-
-    if (props.weather.intensity) {
-      weatherPreset.intensity = props.weather.intensity;
-    }
-
-    if (props.weather.opacity) {
-      weatherPreset.opacity = props.weather.opacity;
-    }
-  });
-
   // Update the camera and render target when size or tier changes
   $effect(() => {
     particleCamera.aspect = size.x / size.y;
@@ -140,21 +89,18 @@
     );
   });
 
-  // Render particle scene directly to render target (bypasses unnecessary EffectComposer overhead)
-  useTask(
-    () => {
-      if (props.weather.type === WeatherType.None) return;
-      if (!particleScene || !particleCamera || !size) return;
-
+  // Runs from Scene's pre-render registry, so the target is only redrawn on frames that are presented
+  $effect(() => {
+    if (!preRender) return;
+    return preRender.register(() => {
       particleScene.visible = true;
       renderer.setRenderTarget(renderTarget);
       renderer.clear();
       renderer.render(particleScene, particleCamera);
       renderer.setRenderTarget(null);
       particleScene.visible = false;
-    },
-    { stage: renderStage }
-  );
+    });
+  });
 </script>
 
 <!-- Remove the stencil mesh and keep only the particle scenes -->
@@ -174,7 +120,7 @@
   {/if}
 </T.Scene>
 
-<T.Mesh bind:ref={mesh} {...meshProps} visible={props.weather.type !== WeatherType.None}>
+<T.Mesh bind:ref={mesh} {...meshProps}>
   <T.MeshBasicMaterial is={quadMaterial} />
   <T.PlaneGeometry args={[size.x, size.y]} />
 </T.Mesh>

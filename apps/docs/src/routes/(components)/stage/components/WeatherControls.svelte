@@ -11,23 +11,65 @@
     EmbersPreset,
     BlizzardPreset,
     FirefliesPreset,
+    ATMOSPHERE_EFFECTS,
+    QUICK_SCENES,
+    atmosphereEffectDefinition,
+    type AtmosphereSlot,
+    type PerformanceTier,
     type StageProps
   } from '@tableslayer/stage';
   import { KernelSize } from 'postprocessing';
 
   let { props = $bindable() } = $props<{ props: StageProps }>();
 
-  const weatherTypeOptions: ListOptions<number> = {
-    None: WeatherType.None,
-    Rain: WeatherType.Rain,
-    Snow: WeatherType.Snow,
-    Leaves: WeatherType.Leaves,
-    Ash: WeatherType.Ash,
-    'Dust storm': WeatherType.DustStorm,
-    Embers: WeatherType.Embers,
-    Blizzard: WeatherType.Blizzard,
-    Fireflies: WeatherType.Fireflies,
-    Custom: WeatherType.Custom
+  const slotOptions = (slot: AtmosphereSlot, offLabel: string): ListOptions<number> => ({
+    [offLabel]: 0,
+    ...Object.fromEntries(ATMOSPHERE_EFFECTS[slot].map((effect) => [effect.label, effect.id]))
+  });
+
+  const weatherTypeOptions: ListOptions<number> = { ...slotOptions('weather', 'None'), Custom: WeatherType.Custom };
+  const lightingOptions = slotOptions('lighting', 'None (day)');
+  const ambienceOptions = slotOptions('ambience', 'None');
+
+  const tierOptions: ListOptions<PerformanceTier> = [
+    { text: 'High', value: 'high' },
+    { text: 'Medium', value: 'medium' },
+    { text: 'Low', value: 'low' }
+  ];
+
+  props.weather.lighting ??= { type: 0, intensity: 1 };
+  props.weather.ambience ??= { type: 0, intensity: 1 };
+  props.weather.wind ??= { angle: 45, strength: 0.35 };
+  props.weather.settings ??= { v: 1 };
+
+  const quickSceneOptions: ListOptions<string> = [
+    { text: 'Pick a scene', value: '' },
+    ...QUICK_SCENES.map((scene) => ({ text: scene.label, value: scene.id }))
+  ];
+  let quickScene = $state('');
+
+  const applyQuickScene = (id: string) => {
+    const scene = QUICK_SCENES.find((candidate) => candidate.id === id);
+    if (!scene) return;
+    props.weather.type = scene.weather;
+    props.weather.lighting = { type: scene.lighting, intensity: 1 };
+    props.weather.ambience = { type: scene.ambience, intensity: 1 };
+  };
+
+  const paramDefinitions = $derived(
+    [
+      atmosphereEffectDefinition('weather', props.weather.type),
+      atmosphereEffectDefinition('lighting', props.weather.lighting?.type ?? 0),
+      atmosphereEffectDefinition('ambience', props.weather.ambience?.type ?? 0)
+    ].flatMap((definition) => definition?.params ?? [])
+  );
+
+  const setParam = (key: string, value: number) => {
+    props.weather.settings = {
+      ...props.weather.settings,
+      v: 1,
+      params: { ...props.weather.settings?.params, [key]: value }
+    };
   };
 
   const particleTypeOptions: ListOptions<number> = {
@@ -39,8 +81,74 @@
   };
 </script>
 
-<Folder title="Weather" expanded={false}>
-  <List bind:value={props.weather.type} label="Type" options={weatherTypeOptions} />
+<Folder title="Atmosphere" expanded={true}>
+  <List
+    bind:value={quickScene}
+    label="Quick scene"
+    options={quickSceneOptions}
+    on:change={(e) => applyQuickScene(String(e.detail.value))}
+  />
+  <List bind:value={props.weather.type} label="Weather" options={weatherTypeOptions} />
+  <Slider bind:value={props.weather.intensity} label="Weather intensity" min={0} max={1} step={0.01} />
+  <List bind:value={props.weather.lighting!.type} label="Lighting" options={lightingOptions} />
+  <Slider bind:value={props.weather.lighting!.intensity} label="Lighting intensity" min={0} max={1} step={0.01} />
+  <List bind:value={props.weather.ambience!.type} label="Ambience" options={ambienceOptions} />
+  <Slider bind:value={props.weather.ambience!.intensity} label="Ambience intensity" min={0} max={1} step={0.01} />
+  <Folder title="Wind" expanded={true}>
+    <Slider bind:value={props.weather.wind!.angle} label="Angle" min={0} max={360} step={1} />
+    <Slider bind:value={props.weather.wind!.strength} label="Strength" min={0} max={1} step={0.01} />
+  </Folder>
+  <Folder title="Settings" expanded={false}>
+    <Slider
+      value={props.weather.settings?.flashBrightness ?? 0.6}
+      label="Flash brightness"
+      min={0}
+      max={1}
+      step={0.01}
+      on:change={(e) => (props.weather.settings = { ...props.weather.settings, v: 1, flashBrightness: e.detail.value })}
+    />
+    <Slider
+      value={props.weather.settings?.tokenDarkness ?? 0.6}
+      label="Token darkness"
+      min={0}
+      max={1}
+      step={0.01}
+      on:change={(e) => (props.weather.settings = { ...props.weather.settings, v: 1, tokenDarkness: e.detail.value })}
+    />
+    <List
+      value={props.weather.settings?.reduceFlashes ?? false}
+      label="Reduce flashes"
+      options={{ No: false, Yes: true }}
+      on:change={(e) => (props.weather.settings = { ...props.weather.settings, v: 1, reduceFlashes: e.detail.value })}
+    />
+    <List
+      value={props.weather.settings?.shake ?? false}
+      label="Screen shake"
+      options={{ No: false, Yes: true }}
+      on:change={(e) => (props.weather.settings = { ...props.weather.settings, v: 1, shake: e.detail.value })}
+    />
+    <List
+      value={props.weather.settings?.accumulation ?? true}
+      label="Accumulation"
+      options={{ Yes: true, No: false }}
+      on:change={(e) => (props.weather.settings = { ...props.weather.settings, v: 1, accumulation: e.detail.value })}
+    />
+  </Folder>
+  {#if paramDefinitions.length > 0}
+    <Folder title="Effect params" expanded={true}>
+      {#each paramDefinitions as definition (definition.key)}
+        <Slider
+          value={props.weather.settings?.params?.[definition.key] ?? definition.default}
+          label={definition.label}
+          min={definition.min}
+          max={definition.max}
+          step={definition.step}
+          on:change={(e) => setParam(definition.key, e.detail.value)}
+        />
+      {/each}
+    </Folder>
+  {/if}
+  <List bind:value={props.performanceTier} label="Performance tier" options={tierOptions} />
 
   <Button
     title="Customize"

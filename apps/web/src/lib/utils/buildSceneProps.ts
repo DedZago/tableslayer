@@ -3,6 +3,7 @@ import { base64ToUint8 } from '$lib/realtime/binary';
 import type { AoeTemplateRow } from '$lib/realtime/types';
 import type { Thumb } from '$lib/server';
 import { generateGradientColors } from '$lib/utils';
+import { DEFAULT_WIND_ANGLE, DEFAULT_WIND_STRENGTH, parseAtmosphereSettings } from '$lib/utils/atmosphereSettings';
 import { liveConcentration } from '$lib/utils/concentration';
 import {
   DEFAULT_MAP,
@@ -24,6 +25,7 @@ import {
   getDefaultEffectProps,
   GridMode,
   GridType,
+  hashSceneSeed,
   isEffectOnlyPreset,
   type Light,
   LightPulse,
@@ -453,7 +455,21 @@ export const buildSceneProps = (
       opacity: activeScene.weatherOpacity,
       intensity: activeScene.weatherIntensity,
       fov: activeScene.weatherFov,
-      custom: { ...RainPreset }
+      custom: { ...RainPreset },
+      lighting: {
+        type: activeScene.weatherLightingType ?? 0,
+        intensity: activeScene.weatherLightingIntensity ?? 1
+      },
+      ambience: {
+        type: activeScene.weatherAmbienceType ?? 0,
+        intensity: activeScene.weatherAmbienceIntensity ?? 1
+      },
+      wind: {
+        angle: activeScene.weatherWindAngle ?? DEFAULT_WIND_ANGLE,
+        strength: activeScene.weatherWindStrength ?? DEFAULT_WIND_STRENGTH
+      },
+      seed: hashSceneSeed(activeScene.id),
+      settings: parseAtmosphereSettings(activeScene.weatherSettings)
     }
   };
 };

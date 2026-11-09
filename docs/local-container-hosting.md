@@ -50,6 +50,14 @@ Open `http://192.168.1.50:5174` for the app and `http://192.168.1.50:5173` for U
 
 For an editor devcontainer, do the setup steps above first, stop any standalone development stack, then reopen the repository in its container. It uses the same Compose service and data folder. Command-line development does not depend on an editor extension. Workspace dependency caches live in named container volumes; campaign data lives in your selected directory. The development container runs as root inside the container; on rootful Docker generated files can need ownership adjustment on the host. Rootless Podman maps container root to your user. Bind mounts use `:z` for SELinux sharing.
 
+### Rust toolchain and the weather simulation
+
+The atmosphere effects run a small Rust simulation compiled to WebAssembly (`packages/stage/sim`, output committed as `packages/stage/src/lib/components/Stage/components/AtmosphereLayer/sim/weather_sim.wasm`). Only the development image installs Rust (pinned by `packages/stage/sim/rust-toolchain.toml`, with the `wasm32-unknown-unknown` target, on amd64 and arm64). The release image and the Fly images use the committed binary and never need Rust.
+
+- `make dev` builds the `.wasm` when the crate is newer than the binary, then polls every few seconds and rebuilds after crate edits (polling works on WSL Windows drives where file events do not arrive). If `cargo` is missing the committed binary is used; a failed build keeps the previous binary and retries after the next edit.
+- Cargo output goes to the `dev_cargo_target` volume (`CARGO_TARGET_DIR=/cargo-target`) and the registry cache to `dev_cargo_registry`, so nothing is written to the bind mount.
+- To rebuild by hand run `pnpm --filter @tableslayer/stage build:sim` (inside the container or on a host with rustup), then commit the changed `.wasm`. Builds are reproducible: the same toolchain produces identical bytes, which the `wasm-fresh` CI job checks with `git diff --exit-code`. `cargo test` in `packages/stage/sim` runs the simulation unit tests.
+
 ### Windows with WSL
 
 `make dev` works from a WSL 2 distro with Docker Desktop (WSL backend) or Docker Engine installed inside the distro. Open the app from the Windows browser at `http://localhost:5174` (docs on 5173, PartyKit on 1999).

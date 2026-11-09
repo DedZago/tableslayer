@@ -13,3 +13,4 @@
 backups
 test-results
 coverage
+packages/stage/sim/target

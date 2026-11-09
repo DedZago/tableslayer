@@ -1,8 +1,9 @@
 import type { SelectLight, SelectMarker, SelectScene } from '$lib/db/app/schema';
 import type { AoeTemplateRow } from '$lib/realtime/types';
-import { GridMode, StageMode } from '@tableslayer/stage';
+import { GridMode, hashSceneSeed, StageMode } from '@tableslayer/stage';
 import { describe, expect, it } from 'vitest';
 import { buildSceneProps, withAutoConditions } from './buildSceneProps';
+import { convertPropsToSceneDetails, sceneSettingsFieldsForPropPaths } from './convertStagePropsToSceneData';
 
 const baseScene = {
   id: 'scene-1',
@@ -46,6 +47,13 @@ const baseScene = {
   weatherIntensity: 1,
   weatherOpacity: 1,
   weatherType: 0,
+  weatherLightingType: 0,
+  weatherLightingIntensity: 1,
+  weatherAmbienceType: 0,
+  weatherAmbienceIntensity: 1,
+  weatherWindAngle: 45,
+  weatherWindStrength: 0.35,
+  weatherSettings: null,
   fogEnabled: false,
   fogColor: '#a0a0a0',
   fogOpacity: 0.8,
@@ -398,5 +406,82 @@ describe('buildSceneProps spell effects', () => {
       hidden
     ]);
     expect(props.tokenEffects).toEqual([]);
+  });
+});
+
+describe('buildSceneProps atmosphere', () => {
+  it('builds the three slots, wind, seed and settings from the scene', () => {
+    const scene = {
+      ...baseScene,
+      id: 'scene-atmo',
+      weatherType: 11,
+      weatherLightingType: 3,
+      weatherLightingIntensity: 0,
+      weatherAmbienceType: 2,
+      weatherAmbienceIntensity: 0.5,
+      weatherWindAngle: 0,
+      weatherWindStrength: 0,
+      weatherSettings: JSON.stringify({ v: 1, reduceFlashes: true, params: { strikeRate: 0 } })
+    } as SelectScene;
+    const { weather } = buildSceneProps(scene, [], 'client');
+    expect(weather.type).toBe(11);
+    expect(weather.lighting).toEqual({ type: 3, intensity: 0 });
+    expect(weather.ambience).toEqual({ type: 2, intensity: 0.5 });
+    expect(weather.wind).toEqual({ angle: 0, strength: 0 });
+    expect(weather.seed).toBe(hashSceneSeed('scene-atmo'));
+    expect(weather.settings).toEqual({ v: 1, reduceFlashes: true, params: { strikeRate: 0 } });
+  });
+
+  it('falls back to defaults for rows saved before the atmosphere columns', () => {
+    const legacy = { ...baseScene } as Record<string, unknown>;
+    for (const key of Object.keys(legacy).filter((k) => /^weather(Lighting|Ambience|Wind|Settings)/.test(k))) {
+      delete legacy[key];
+    }
+    const { weather } = buildSceneProps(legacy as unknown as SelectScene, [], 'client');
+    expect(weather.lighting).toEqual({ type: 0, intensity: 1 });
+    expect(weather.ambience).toEqual({ type: 0, intensity: 1 });
+    expect(weather.wind).toEqual({ angle: 45, strength: 0.35 });
+    expect(weather.settings).toEqual({ v: 1 });
+  });
+
+  it('passes unknown effect ids through and survives corrupt settings JSON', () => {
+    const scene = { ...baseScene, weatherType: 77, weatherSettings: '{nope' } as SelectScene;
+    const { weather } = buildSceneProps(scene, [], 'client');
+    expect(weather.type).toBe(77);
+    expect(weather.settings).toEqual({ v: 1 });
+  });
+
+  it('round-trips settings through the scene field conversion', () => {
+    const props = buildSceneProps(
+      { ...baseScene, weatherSettings: JSON.stringify({ v: 1, shake: true, tokenDarkness: 0 }) } as SelectScene,
+      [],
+      'editor'
+    );
+    const details = convertPropsToSceneDetails(props, null);
+    expect(JSON.parse(details.weatherSettings as string)).toEqual({ v: 1, shake: true, tokenDarkness: 0 });
+    expect(details.weatherLightingIntensity).toBe(1);
+    expect(details.weatherWindStrength).toBe(0.35);
+  });
+
+  it('clamps the range-checked weather values so a scene save is never rejected', () => {
+    const props = buildSceneProps(baseScene, [], 'editor');
+    props.weather.lighting = { type: 1, intensity: 1.4 };
+    props.weather.ambience = { type: 1, intensity: -0.2 };
+    props.weather.wind = { angle: 90, strength: Number.NaN };
+    props.weather.opacity = 2;
+    const details = convertPropsToSceneDetails(props, null);
+    expect(details.weatherLightingIntensity).toBe(1);
+    expect(details.weatherAmbienceIntensity).toBe(0);
+    expect(details.weatherOpacity).toBe(1);
+    expect('weatherWindStrength' in details).toBe(false);
+  });
+
+  it('maps queued atmosphere prop paths to their scene fields', () => {
+    expect(sceneSettingsFieldsForPropPaths(['weather.lighting.type'])).toEqual(['weatherLightingType']);
+    expect(sceneSettingsFieldsForPropPaths(['weather.wind']).sort()).toEqual([
+      'weatherWindAngle',
+      'weatherWindStrength'
+    ]);
+    expect(sceneSettingsFieldsForPropPaths(['weather.settings.params'])).toEqual(['weatherSettings']);
   });
 });

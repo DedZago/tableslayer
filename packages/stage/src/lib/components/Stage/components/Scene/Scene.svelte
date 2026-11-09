@@ -32,9 +32,18 @@
   import { getActiveEffects, hasActivePostProcessing } from '../../helpers/postProcessing';
   import { snapToGrid, getGridCellSize as getGridCellSizeHelper } from '../../helpers/grid';
   import { AMBIENT_FRAME_RATE, createFramePacer, IDLE_FRAME_RATE } from '../../helpers/framePacing';
-  import { SceneLayer, SceneLayerOrder, SceneLoadingState } from './types';
+  import {
+    SceneLayer,
+    SceneLayerOrder,
+    SceneLoadingState,
+    type PreRenderCallback,
+    type PreRenderRegistry
+  } from './types';
   import type { AnnotationExports } from '../AnnotationLayer/types';
   import AnnotationLayer from '../AnnotationLayer/AnnotationLayer.svelte';
+  import AtmosphereLayer from '../AtmosphereLayer/AtmosphereLayer.svelte';
+  import { createAtmosphereController } from '../AtmosphereLayer/atmosphereController.svelte';
+  import { createComposedAtmosphere } from '../AtmosphereLayer/composedAtmosphere.svelte';
   import CursorLayer from '../CursorLayer/CursorLayer.svelte';
   import type { CursorData } from '../CursorLayer/types';
   import EdgeOverlayLayer from '../EdgeOverlayLayer/EdgeOverlayLayer.svelte';
@@ -55,6 +64,7 @@
   import type { MarkerLayerExports } from '../MarkerLayer/types';
   import TvViewportLayer from '../TvViewportLayer/TvViewportLayer.svelte';
   import WeatherLayer from '../WeatherLayer/WeatherLayer.svelte';
+  import { WeatherType } from '../WeatherLayer/types';
 
   interface Props {
     props: StageProps;
@@ -193,6 +203,37 @@
   // Written by SpellCastLayer while a blast lands; applied to the camera around the render passes below
   const cameraShake: CameraShake = { x: 0, y: 0 };
   setContext('cameraShake', cameraShake);
+
+  // Callbacks run in the render task after the frame pacer said yes, before pass 1
+  const preRenderCallbacks = new Set<PreRenderCallback>();
+  const preRenderRegistry: PreRenderRegistry = {
+    register: (callback) => {
+      preRenderCallbacks.add(callback);
+      return () => preRenderCallbacks.delete(callback);
+    }
+  };
+  setContext('preRender', preRenderRegistry);
+
+  const atmosphere = createAtmosphereController({
+    renderer,
+    tier: untrack(() => props.performanceTier ?? 'high'),
+    framePacer
+  });
+  setContext('atmosphere', atmosphere);
+  const atmosphereComposed = createComposedAtmosphere(
+    () => props.weather,
+    () => props.performanceTier,
+    () => props.mode
+  );
+  const atmosphereActive = $derived(atmosphereComposed.value.active);
+  const atmosphereScreenScale = $derived(props.scene.zoom * props.map.zoom);
+
+  $effect(() => {
+    const composed = atmosphereComposed.value;
+    untrack(() => atmosphere.update(composed));
+  });
+
+  useTask(() => atmosphere.tick(performance.now()));
   const activityEvents = ['pointerdown', 'pointermove', 'wheel', 'keydown'] as const;
   const markFrameActive = () => framePacer.markActive();
 
@@ -259,6 +300,7 @@
 
   onDestroy(() => {
     composer.dispose();
+    atmosphere.dispose();
   });
 
   // Cap pixel ratio for performance on weak GPUs (e.g., Mac Mini).
@@ -435,6 +477,8 @@
         }
       }
 
+      preRenderCallbacks.forEach((callback) => callback());
+
       renderer.clear();
 
       const shaken = cameraShake.x !== 0 || cameraShake.y !== 0;
@@ -574,6 +618,7 @@
     onSceneUpdate({ x: 0, y: 0 }, newZoom);
   }
 
+  // The thumbnail renders a temporary scene with only the map, so atmosphere layers never appear in it
   export async function generateThumbnail(quality: number = 0.5): Promise<Blob> {
     const texture = mapLayer.getCompositeMapTexture();
 
@@ -983,17 +1028,33 @@
       }}
     />
 
+    {#if mapSize && atmosphereActive}
+      <AtmosphereLayer
+        composed={atmosphereComposed.value}
+        {mapSize}
+        controller={atmosphere}
+        screenScale={atmosphereScreenScale}
+        lights={props.light.lights}
+        {isMapDefined}
+        map={props.map}
+        grid={props.grid}
+        display={props.display}
+      />
+    {/if}
+
     {#if isMapDefined}
       {@render anchoredLayers()}
     {/if}
   </T.Object3D>
 
-  <WeatherLayer
-    {props}
-    size={props.display.resolution}
-    layers={[SceneLayer.Main]}
-    renderOrder={SceneLayerOrder.Weather}
-  />
+  {#if props.weather.type === WeatherType.Custom}
+    <WeatherLayer
+      {props}
+      size={props.display.resolution}
+      layers={[SceneLayer.Main]}
+      renderOrder={SceneLayerOrder.Weather}
+    />
+  {/if}
 
   <EdgeOverlayLayer
     props={props.edgeOverlay}

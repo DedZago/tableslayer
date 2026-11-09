@@ -129,6 +129,12 @@ export type PerformanceTier = 'high' | 'medium' | 'low';
  * many of the four fog-of-war noise layers render, weatherResolutionScale
  * scales the particle render target, weatherParticleScale scales particle
  * counts, and forcePostProcessingOff bypasses the effect composer entirely.
+ *
+ * The atmo* knobs drive the atmosphere engine: atmoFieldSize and atmoAccumSize are the wind field and
+ * accumulation texture edges in texels, atmoSimHz the worker step rate, atmoDepthLayers the particle
+ * parallax layers, atmoRippleTaps the ripple cells sampled per axis (1 = single tap), atmoDensityScale
+ * the density render target scale relative to the air target, atmoNoiseOctaves the fbm octave cap and
+ * atmoHdrBolts whether lightning bolts render above 1.0 for bloom.
  */
 export const PERFORMANCE_TIER_SETTINGS: Record<
   PerformanceTier,
@@ -138,6 +144,14 @@ export const PERFORMANCE_TIER_SETTINGS: Record<
     weatherResolutionScale: number;
     weatherParticleScale: number;
     forcePostProcessingOff: boolean;
+    atmoFieldSize: number;
+    atmoAccumSize: number;
+    atmoSimHz: number;
+    atmoDepthLayers: 1 | 2 | 3;
+    atmoRippleTaps: 1 | 2 | 3;
+    atmoDensityScale: number;
+    atmoNoiseOctaves: 1 | 2 | 3;
+    atmoHdrBolts: boolean;
   }
 > = {
   high: {
@@ -145,21 +159,45 @@ export const PERFORMANCE_TIER_SETTINGS: Record<
     fogOctaveCap: Number.MAX_SAFE_INTEGER,
     weatherResolutionScale: 1,
     weatherParticleScale: 1,
-    forcePostProcessingOff: false
+    forcePostProcessingOff: false,
+    atmoFieldSize: 128,
+    atmoAccumSize: 128,
+    atmoSimHz: 30,
+    atmoDepthLayers: 3,
+    atmoRippleTaps: 3,
+    atmoDensityScale: 0.5,
+    atmoNoiseOctaves: 3,
+    atmoHdrBolts: true
   },
   medium: {
     fogLayerCount: 2,
     fogOctaveCap: 3,
     weatherResolutionScale: 0.5,
     weatherParticleScale: 0.5,
-    forcePostProcessingOff: false
+    forcePostProcessingOff: false,
+    atmoFieldSize: 96,
+    atmoAccumSize: 128,
+    atmoSimHz: 20,
+    atmoDepthLayers: 2,
+    atmoRippleTaps: 2,
+    atmoDensityScale: 0.5,
+    atmoNoiseOctaves: 2,
+    atmoHdrBolts: false
   },
   low: {
     fogLayerCount: 1,
     fogOctaveCap: 2,
     weatherResolutionScale: 0.5,
     weatherParticleScale: 0.25,
-    forcePostProcessingOff: true
+    forcePostProcessingOff: true,
+    atmoFieldSize: 64,
+    atmoAccumSize: 64,
+    atmoSimHz: 12,
+    atmoDepthLayers: 1,
+    atmoRippleTaps: 1,
+    atmoDensityScale: 0.5,
+    atmoNoiseOctaves: 1,
+    atmoHdrBolts: false
   }
 };
 
